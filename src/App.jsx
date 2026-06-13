@@ -17,6 +17,9 @@ import InstallationFormPage     from './pages/InstallationFormPage'
 import DocumentsPage            from './pages/DocumentsPage'
 import PlanningPage             from './pages/PlanningPage'
 import InterventionsPage        from './pages/InterventionsPage'
+import InterventionFichePage    from './pages/InterventionFichePage'
+import InterventionPrintPage    from './pages/InterventionPrintPage'
+import ProfilePage              from './pages/ProfilePage'
 import Sidebar        from './components/Sidebar'
 import TopBar         from './components/TopBar'
 
@@ -86,12 +89,15 @@ export default function App() {
                 <Route path="/devices/new"     element={<InstallationFormPage />} />
                 <Route path="/devices/:id"     element={<InstallationDetailPage />} />
                 <Route path="/devices/:id/edit" element={<InstallationFormPage />} />
-                <Route path="/interventions" element={<InterventionsPage />} />
+                <Route path="/interventions"     element={<InterventionsPage />} />
+                <Route path="/interventions/:id" element={<InterventionFichePage />} />
+                <Route path="/profil"            element={<ProfilePage />} />
                 <Route path="/planning"  element={<PlanningPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
                 <Route path="/settings"  element={<SettingsPage />} />
               </Route>
             </Route>
+            <Route path="/interventions/:id/print" element={<InterventionPrintPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </SidebarProvider>

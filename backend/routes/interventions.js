@@ -1,17 +1,24 @@
-const router = require('express').Router()
-const ctrl   = require('../controllers/interventionsController')
+const router  = require('express').Router()
+const ctrl    = require('../controllers/interventionsController')
 const { protect } = require('../middleware/auth')
+const uploadIv = require('../middleware/uploadIntervention')
 
 router.use(protect)
 
-// Must be before /:id to avoid conflict
 router.get('/search-installations', ctrl.searchInstallations)
 
-router.get('/',        ctrl.getAll)
-router.get('/:id',     ctrl.getOne)
-router.post('/',       ctrl.create)
-router.put('/:id',     ctrl.update)
+router.get('/',    ctrl.getAll)
+router.post('/',   ctrl.create)
+router.get('/:id', ctrl.getOne)
+router.put('/:id', ctrl.update)
+
 router.patch('/:id/rapport', ctrl.submitRapport)
-router.delete('/:id',  ctrl.remove)
+router.patch('/:id/fiche',   ctrl.saveFiche)
+router.patch('/:id/close',   ctrl.closeIntervention)
+
+router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
+router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)
+
+router.delete('/:id', ctrl.remove)
 
 module.exports = router

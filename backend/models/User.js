@@ -50,6 +50,8 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  avatar: { type: String, default: null },
+  phones: { type: [String], default: [] },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

@@ -11,6 +11,22 @@ const rapportSchema = new Schema({
   dateVisite:   Date,
 }, { _id: false })
 
+const ficheSchema = new Schema({
+  serialNumber:        { type: String, trim: true },
+  emplacement:         { type: String, trim: true },
+  signaletique:        { type: String, trim: true },
+  batteriePct:         { type: Number, min: 0, max: 100 },
+  batterieNote:        { type: String, trim: true },
+  electrodesPct:       { type: Number, min: 0, max: 100 },
+  electrodesNote:      { type: String, trim: true },
+  armoire:             { type: String, trim: true },
+  observation:         { type: String, trim: true },
+  photos:              { type: [String], default: [] },
+  dateReception:       Date,
+  visa:                { type: String, trim: true },
+  observationGenerale: { type: String, trim: true },
+}, { _id: false })
+
 const historySchema = new Schema({
   action:   { type: String },
   user:     { type: Schema.Types.ObjectId, ref: 'User' },
@@ -39,6 +55,7 @@ const interventionSchema = new Schema({
   completedDate: Date,
 
   rapport:  { type: rapportSchema, default: () => ({}) },
+  fiche:    { type: ficheSchema,   default: () => ({}) },
   history:  { type: [historySchema], default: [] },
   notes:    { type: String, trim: true },
   createdBy:{ type: Schema.Types.ObjectId, ref: 'User' },

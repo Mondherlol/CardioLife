@@ -22,13 +22,17 @@ export function AuthProvider({ children }) {
     setUser(userData)
   }
 
+  function updateUser(partial) {
+    setUser(prev => prev ? { ...prev, ...partial } : prev)
+  }
+
   function logout() {
     localStorage.removeItem('token')
     setUser(null)
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, storeLogin, logout }}>
+    <AuthContext.Provider value={{ user, loading, storeLogin, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   )

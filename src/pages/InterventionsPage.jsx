@@ -1,45 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  Wrench, Plus, Search, X, Eye, Trash2, CheckCircle2,
+  Wrench, Plus, Search, X, CheckCircle2,
   Clock, AlertCircle, Calendar, MapPin, Zap, User,
-  ChevronDown, ClipboardList, History,
+  ChevronDown, AlertTriangle, ArrowRight,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
-import {
-  getInterventions, createIntervention,
-  updateIntervention, submitRapport, deleteIntervention,
-} from '../api/interventions'
+import { getInterventions, createIntervention } from '../api/interventions'
 import { get } from '../api/http'
 
 /* ─── Constants ─────────────────────────────────────────────── */
-
-const ETAT_OPTS_STANDARD = [
-  { value: '',            label: '—' },
-  { value: 'conforme',    label: 'Conforme' },
-  { value: 'non_conforme',label: 'Non conforme' },
-  { value: 'remplace',    label: 'Remplacé' },
-]
-const ETAT_OPTS_BATTERIE = [
-  { value: '',            label: '—' },
-  { value: 'conforme',    label: 'Conforme' },
-  { value: 'non_conforme',label: 'Non conforme' },
-  { value: 'remplacee',   label: 'Remplacée' },
-]
-const ETAT_OPTS_ELECTRODES = [
-  { value: '',             label: '—' },
-  { value: 'conformes',    label: 'Conformes' },
-  { value: 'non_conformes',label: 'Non conformes' },
-  { value: 'remplacees',   label: 'Remplacées' },
-]
-
-const CHAMPS_RAPPORT = [
-  { key: 'dae',          label: 'DAE / Appareil',   opts: ETAT_OPTS_STANDARD },
-  { key: 'armoire',      label: 'Armoire',           opts: ETAT_OPTS_STANDARD },
-  { key: 'signaletique', label: 'Signalétique',      opts: ETAT_OPTS_STANDARD },
-  { key: 'batterie',     label: 'Batterie',          opts: ETAT_OPTS_BATTERIE },
-  { key: 'electrodes',   label: 'Électrodes',        opts: ETAT_OPTS_ELECTRODES },
-]
 
 const STATUS_META = {
   planifie:  { label: 'Planifié',   cls: 'iv-badge iv-badge--blue',   Icon: Clock        },
@@ -54,18 +25,6 @@ function fmt(d) {
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-function etatLabel(value) {
-  const all = [...ETAT_OPTS_STANDARD, ...ETAT_OPTS_BATTERIE, ...ETAT_OPTS_ELECTRODES]
-  return all.find(o => o.value === value)?.label || '—'
-}
-
-function etatCls(value) {
-  if (!value) return 'etat-badge etat-badge--empty'
-  if (value.includes('non_')) return 'etat-badge etat-badge--bad'
-  if (value.includes('remplac')) return 'etat-badge etat-badge--replaced'
-  return 'etat-badge etat-badge--ok'
-}
-
 /* ─── StatusBadge ────────────────────────────────────────────── */
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.planifie
@@ -75,190 +34,6 @@ function StatusBadge({ status }) {
       <Icon size={11} strokeWidth={2.5} />
       {meta.label}
     </span>
-  )
-}
-
-/* ─── Fiche Modal (remplir / consulter) ─────────────────────── */
-
-function FicheModal({ intervention, readOnly, onClose, onSubmit }) {
-  const snap = intervention.installationSnap || {}
-  const [rapport, setRapport] = useState({
-    dae:          intervention.rapport?.dae          || '',
-    armoire:      intervention.rapport?.armoire      || '',
-    signaletique: intervention.rapport?.signaletique || '',
-    batterie:     intervention.rapport?.batterie     || '',
-    electrodes:   intervention.rapport?.electrodes   || '',
-    observations: intervention.rapport?.observations || '',
-    dateVisite:   intervention.rapport?.dateVisite
-      ? new Date(intervention.rapport.dateVisite).toISOString().slice(0,10)
-      : new Date().toISOString().slice(0,10),
-  })
-  const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState('fiche')
-
-  function set(k, v) { setRapport(p => ({ ...p, [k]: v })) }
-
-  async function handleSubmit() {
-    setSaving(true)
-    try {
-      await onSubmit(intervention._id, rapport)
-      toast.success('Fiche soumise avec succès.')
-      onClose()
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--lg">
-        {/* Header */}
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">
-              <ClipboardList size={16} strokeWidth={2} />
-              Fiche d&apos;Intervention
-            </h2>
-            <p className="modal-subtitle">{intervention.clientName}</p>
-          </div>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-
-        {/* DAE info banner */}
-        <div className="fiche-dae-banner">
-          <div className="fiche-dae-row">
-            <span className="fiche-dae-item">
-              <Zap size={13} strokeWidth={2} />
-              <strong>{snap.deviceType || '—'}</strong>
-            </span>
-            <span className="fiche-dae-sep">·</span>
-            <span className="fiche-dae-item">
-              N° série : <strong>{snap.serialNumber || '—'}</strong>
-            </span>
-          </div>
-          <div className="fiche-dae-row">
-            <span className="fiche-dae-item">
-              <MapPin size={12} strokeWidth={2} />
-              {snap.address}{snap.location ? ` — ${snap.location}` : ''}
-            </span>
-          </div>
-        </div>
-
-        {/* Tabs (show history only in read-only/admin mode) */}
-        {readOnly && intervention.history?.length > 0 && (
-          <div className="fiche-tabs">
-            <button className={`fiche-tab${tab === 'fiche' ? ' fiche-tab--active' : ''}`}
-              onClick={() => setTab('fiche')}>
-              <ClipboardList size={13} /> Fiche
-            </button>
-            <button className={`fiche-tab${tab === 'history' ? ' fiche-tab--active' : ''}`}
-              onClick={() => setTab('history')}>
-              <History size={13} /> Historique
-            </button>
-          </div>
-        )}
-
-        <div className="modal-body">
-          {tab === 'history' ? (
-            <div className="iv-history">
-              {intervention.history.map((h, i) => (
-                <div key={i} className="iv-history-item">
-                  <div className="iv-history-dot" />
-                  <div>
-                    <div className="iv-history-action">{h.details || h.action}</div>
-                    <div className="iv-history-meta">
-                      {h.userName} · {fmt(h.date)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <>
-              {/* État des équipements */}
-              <div className="fiche-section">
-                <h3 className="fiche-section-title">État des équipements</h3>
-                <div className="fiche-grid">
-                  {CHAMPS_RAPPORT.map(({ key, label, opts }) => (
-                    <div key={key} className="fiche-field">
-                      <label className="fiche-label">{label}</label>
-                      {readOnly ? (
-                        <span className={etatCls(rapport[key])}>
-                          {etatLabel(rapport[key])}
-                        </span>
-                      ) : (
-                        <div className="fiche-select-wrap">
-                          <select
-                            className="fiche-select"
-                            value={rapport[key]}
-                            onChange={e => set(key, e.target.value)}
-                          >
-                            {opts.map(o => (
-                              <option key={o.value} value={o.value}>{o.label}</option>
-                            ))}
-                          </select>
-                          <ChevronDown size={13} className="fiche-select-chevron" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Date de visite */}
-              <div className="fiche-section">
-                <h3 className="fiche-section-title">Informations</h3>
-                <div className="fiche-field" style={{ maxWidth: 240 }}>
-                  <label className="fiche-label">Date de visite</label>
-                  {readOnly ? (
-                    <span className="fiche-value">{fmt(rapport.dateVisite)}</span>
-                  ) : (
-                    <input
-                      type="date"
-                      className="fiche-input"
-                      value={rapport.dateVisite}
-                      onChange={e => set('dateVisite', e.target.value)}
-                    />
-                  )}
-                </div>
-              </div>
-
-              {/* Observations */}
-              <div className="fiche-section">
-                <h3 className="fiche-section-title">Observations</h3>
-                {readOnly ? (
-                  <p className="fiche-observations">
-                    {rapport.observations || <em className="text-muted">Aucune observation.</em>}
-                  </p>
-                ) : (
-                  <textarea
-                    className="fiche-textarea"
-                    rows={4}
-                    placeholder="Remarques, anomalies constatées, pièces remplacées…"
-                    value={rapport.observations}
-                    onChange={e => set('observations', e.target.value)}
-                  />
-                )}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="modal-footer">
-          <button className="btn btn--ghost" onClick={onClose}>
-            {readOnly ? 'Fermer' : 'Annuler'}
-          </button>
-          {!readOnly && (
-            <button className="btn btn--primary" onClick={handleSubmit} disabled={saving}>
-              {saving && <span className="spinner spinner--sm" />}
-              <CheckCircle2 size={14} /> Soumettre la fiche
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -282,7 +57,6 @@ function CreateModal({ onClose, onCreated }) {
     notes:         '',
   })
 
-  // Load technicians + recent installations on mount
   useEffect(() => {
     get('/users?role=technicien&limit=100')
       .then(res => setTechniciens(res.data || res))
@@ -292,7 +66,6 @@ function CreateModal({ onClose, onCreated }) {
       .catch(() => {})
   }, [])
 
-  // Search installations when clientSearch changes
   useEffect(() => {
     if (!clientSearch.trim()) { setInstallations([]); return }
     const t = setTimeout(async () => {
@@ -307,7 +80,6 @@ function CreateModal({ onClose, onCreated }) {
     return () => clearTimeout(t)
   }, [clientSearch])
 
-  // Displayed list: search results when typing, recent when empty
   const displayedInst = clientSearch.trim() ? installations : recentInst
 
   function setF(k, v) { setForm(p => ({ ...p, [k]: v })) }
@@ -367,7 +139,6 @@ function CreateModal({ onClose, onCreated }) {
         </div>
 
         <div className="modal-body">
-          {/* DAE search */}
           <div className="form-field">
             <label className="form-label">Client / DAE *</label>
             <div className="iv-search-wrap">
@@ -420,7 +191,6 @@ function CreateModal({ onClose, onCreated }) {
             )}
           </div>
 
-          {/* Technicien */}
           <div className="form-field">
             <label className="form-label">Technicien assigné</label>
             <div className="fiche-select-wrap">
@@ -438,7 +208,6 @@ function CreateModal({ onClose, onCreated }) {
             </div>
           </div>
 
-          {/* Date */}
           <div className="form-field">
             <label className="form-label">Date planifiée *</label>
             <input
@@ -449,7 +218,6 @@ function CreateModal({ onClose, onCreated }) {
             />
           </div>
 
-          {/* Notes */}
           <div className="form-field">
             <label className="form-label">Notes</label>
             <textarea
@@ -474,45 +242,60 @@ function CreateModal({ onClose, onCreated }) {
   )
 }
 
-/* ─── Delete Confirm ─────────────────────────────────────────── */
+/* ─── Date grouping ──────────────────────────────────────────── */
+function groupInterventions(interventions) {
+  const now       = new Date(); now.setHours(0,0,0,0)
+  const tomorrow  = new Date(now); tomorrow.setDate(now.getDate() + 1)
+  const endWeek   = new Date(now); endWeek.setDate(now.getDate() + 7)
+  const endNxtWk  = new Date(now); endNxtWk.setDate(now.getDate() + 14)
 
-function DeleteModal({ intervention, onClose, onConfirm }) {
-  const [loading, setLoading] = useState(false)
-  async function handle() {
-    setLoading(true)
-    try { await onConfirm() } catch (err) { toast.error(err.message); setLoading(false) }
+  const groups = {
+    retard:    { key: 'retard',    label: 'En retard',            accent: 'red',    items: [] },
+    today:     { key: 'today',     label: "Aujourd'hui",          accent: 'orange', items: [] },
+    demain:    { key: 'demain',    label: 'Demain',               accent: 'amber',  items: [] },
+    semaine:   { key: 'semaine',   label: 'Cette semaine',        accent: 'blue',   items: [] },
+    prochaine: { key: 'prochaine', label: 'La semaine prochaine', accent: 'gray',   items: [] },
+    plus_tard: { key: 'plus_tard', label: 'Plus tard',            accent: 'gray',   items: [] },
+    termine:   { key: 'termine',   label: 'Terminées',            accent: 'green',  items: [] },
   }
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--sm">
-        <div className="modal-header">
-          <h2 className="modal-title">Supprimer l&apos;intervention</h2>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        <div className="modal-body">
-          <p>Supprimer l&apos;intervention pour <strong>{intervention.clientName}</strong> du {fmt(intervention.scheduledDate)} ?</p>
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
-          <button className="btn btn--danger" onClick={handle} disabled={loading}>
-            {loading && <span className="spinner spinner--sm" />} Supprimer
-          </button>
-        </div>
-      </div>
-    </div>
-  )
+
+  for (const iv of interventions) {
+    if (iv.status === 'termine') { groups.termine.items.push(iv); continue }
+    const d = iv.scheduledDate ? new Date(iv.scheduledDate) : null
+    if (!d) { groups.plus_tard.items.push(iv); continue }
+    const day = new Date(d); day.setHours(0,0,0,0)
+    if      (day < now)          groups.retard.items.push(iv)
+    else if (+day === +now)      groups.today.items.push(iv)
+    else if (+day === +tomorrow) groups.demain.items.push(iv)
+    else if (day < endWeek)      groups.semaine.items.push(iv)
+    else if (day < endNxtWk)     groups.prochaine.items.push(iv)
+    else                         groups.plus_tard.items.push(iv)
+  }
+
+  return Object.values(groups).filter(g => g.items.length > 0)
 }
 
 /* ─── Technician Card ────────────────────────────────────────── */
+function TechnicianCard({ intervention, onClick }) {
+  const snap   = intervention.installationSnap || {}
+  const status = intervention.status
+  const isDone = status === 'termine'
+  const isLate = status !== 'termine' && intervention.scheduledDate &&
+    new Date(intervention.scheduledDate) < new Date(new Date().setHours(0,0,0,0))
 
-function TechnicianCard({ intervention, onFill, onView }) {
-  const snap = intervention.installationSnap || {}
-  const isDone = intervention.status === 'termine'
   return (
-    <div className={`iv-card${isDone ? ' iv-card--done' : ''}`}>
+    <div
+      className={`iv-card iv-card--clickable${isDone ? ' iv-card--done' : ''}${isLate ? ' iv-card--late' : ''}`}
+      onClick={onClick}
+      role="button" tabIndex={0}
+      onKeyDown={e => e.key === 'Enter' && onClick()}
+    >
       <div className="iv-card-header">
         <div className="iv-card-client">{intervention.clientName || '—'}</div>
-        <StatusBadge status={intervention.status} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <StatusBadge status={intervention.status} />
+          <ArrowRight size={14} className="iv-card-arrow" />
+        </div>
       </div>
 
       <div className="iv-card-body">
@@ -531,7 +314,10 @@ function TechnicianCard({ intervention, onFill, onView }) {
         )}
         <div className="iv-card-row">
           <Calendar size={13} strokeWidth={1.8} />
-          <span>Planifié le {fmt(intervention.scheduledDate)}</span>
+          <span className={isLate ? 'iv-card-date--late' : ''}>
+            {isLate ? 'Prévu le ' : 'Planifié le '}{fmt(intervention.scheduledDate)}
+            {isLate && <AlertTriangle size={11} style={{ marginLeft: 4, color: 'var(--red-500)' }} />}
+          </span>
         </div>
         {isDone && intervention.completedDate && (
           <div className="iv-card-row iv-card-row--done">
@@ -543,28 +329,48 @@ function TechnicianCard({ intervention, onFill, onView }) {
           <p className="iv-card-notes">{intervention.notes}</p>
         )}
       </div>
+    </div>
+  )
+}
 
-      <div className="iv-card-footer">
-        {isDone ? (
-          <button className="btn btn--ghost btn--sm" onClick={() => onView(intervention)}>
-            <Eye size={13} /> Voir la fiche
-          </button>
-        ) : (
-          <button className="btn btn--primary btn--sm" onClick={() => onFill(intervention)}>
-            <ClipboardList size={13} /> Remplir la fiche
-          </button>
-        )}
-      </div>
+/* ─── Date section ───────────────────────────────────────────── */
+function DateSection({ group, onCardClick, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const count = group.items.length
+  const accentVar = `var(--${group.accent === 'gray' ? 'gray' : group.accent}-${group.accent === 'gray' ? '400' : '500'})`
+
+  return (
+    <div className="iv-date-section">
+      <button
+        className="iv-date-section-hdr"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="iv-date-section-dot" style={{ background: accentVar }} />
+        <span className="iv-date-section-label">{group.label}</span>
+        <span className="iv-date-section-count">{count}</span>
+        <ChevronDown size={14} className={`iv-date-section-chevron${open ? ' iv-date-section-chevron--open' : ''}`} />
+      </button>
+      {open && (
+        <div className="iv-cards-grid">
+          {group.items.map(iv => (
+            <TechnicianCard
+              key={iv._id}
+              intervention={iv}
+              onClick={() => onCardClick(iv._id)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
 /* ─── Admin Table Row ────────────────────────────────────────── */
 
-function AdminRow({ intervention, onView, onDelete, canManage }) {
+function AdminRow({ intervention, onClick }) {
   const snap = intervention.installationSnap || {}
   return (
-    <tr>
+    <tr onClick={onClick} style={{ cursor: 'pointer' }}>
       <td>
         <div className="inst-site-cell">
           <div className="inst-site-client">{intervention.clientName || '—'}</div>
@@ -602,18 +408,6 @@ function AdminRow({ intervention, onView, onDelete, canManage }) {
         }
       </td>
       <td><StatusBadge status={intervention.status} /></td>
-      <td>
-        <div className="sp-actions">
-          <button className="sp-action-btn" title="Voir la fiche" onClick={() => onView(intervention)}>
-            <Eye size={14} />
-          </button>
-          {canManage && (
-            <button className="sp-action-btn sp-action-btn--danger" title="Supprimer" onClick={() => onDelete(intervention)}>
-              <Trash2 size={14} />
-            </button>
-          )}
-        </div>
-      </td>
     </tr>
   )
 }
@@ -629,6 +423,7 @@ const STATUS_FILTERS = [
 
 export default function InterventionsPage() {
   const { user } = useAuth()
+  const navigate  = useNavigate()
   const isTech   = user?.role === 'technicien'
   const canManage = user?.role === 'superadmin' || user?.role === 'admin'
     || user?.permissions?.canManageInterventions
@@ -637,11 +432,7 @@ export default function InterventionsPage() {
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState('')
-
-  const [showCreate, setShowCreate]     = useState(false)
-  const [ficheTarget, setFicheTarget]   = useState(null)
-  const [ficheReadOnly, setReadOnly]    = useState(false)
-  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -657,7 +448,6 @@ export default function InterventionsPage() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  /* ── Filters ── */
   const filtered = useMemo(() => {
     let list = all
     if (statusFilter) list = list.filter(i => i.status === statusFilter)
@@ -674,7 +464,6 @@ export default function InterventionsPage() {
     return list
   }, [all, statusFilter, search])
 
-  /* ── Stats ── */
   const stats = useMemo(() => ({
     total:    all.length,
     planifie: all.filter(i => i.status === 'planifie').length,
@@ -682,29 +471,16 @@ export default function InterventionsPage() {
     termine:  all.filter(i => i.status === 'termine').length,
   }), [all])
 
-  function openFill(iv)  { setFicheTarget(iv); setReadOnly(false) }
-  function openView(iv)  { setFicheTarget(iv); setReadOnly(true)  }
+  const pendingCount = isTech ? all.filter(i => i.status !== 'termine').length : null
 
-  async function handleSubmitRapport(id, rapport) {
-    const updated = await submitRapport(id, { rapport })
-    setAll(prev => prev.map(i => i._id === id ? updated : i))
-  }
-
-  async function handleDelete() {
-    await deleteIntervention(deleteTarget._id)
-    setAll(prev => prev.filter(i => i._id !== deleteTarget._id))
-    toast.success('Intervention supprimée.')
-    setDeleteTarget(null)
-  }
+  const groupedSections = useMemo(() => {
+    if (!isTech) return []
+    return groupInterventions(filtered)
+  }, [isTech, filtered])
 
   function onCreated(created) {
     setAll(prev => [created, ...prev])
   }
-
-  /* ── Technician greeting ── */
-  const pendingCount = isTech
-    ? all.filter(i => i.status !== 'termine').length
-    : null
 
   return (
     <div className="page-content">
@@ -791,27 +567,29 @@ export default function InterventionsPage() {
       {loading ? (
         <div className="table-loading"><span className="spinner" /></div>
       ) : isTech ? (
-        /* ── Technician: card grid ── */
         filtered.length === 0 ? (
           <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
             {search || statusFilter
               ? 'Aucune intervention pour ces critères.'
               : 'Aucune intervention ne vous est assignée.'}
           </div>
+        ) : groupedSections.length === 0 ? (
+          <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
+            Aucune intervention pour ces critères.
+          </div>
         ) : (
-          <div className="iv-cards-grid">
-            {filtered.map(iv => (
-              <TechnicianCard
-                key={iv._id}
-                intervention={iv}
-                onFill={openFill}
-                onView={openView}
+          <div className="iv-dashboard">
+            {groupedSections.map(g => (
+              <DateSection
+                key={g.key}
+                group={g}
+                onCardClick={id => navigate(`/interventions/${id}`)}
+                defaultOpen={g.key !== 'termine' && g.key !== 'plus_tard'}
               />
             ))}
           </div>
         )
       ) : (
-        /* ── Admin: table ── */
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -822,7 +600,6 @@ export default function InterventionsPage() {
                 <th>Planifié</th>
                 <th>Réalisé</th>
                 <th>Statut</th>
-                <th style={{ width: 90 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -830,13 +607,11 @@ export default function InterventionsPage() {
                 <AdminRow
                   key={iv._id}
                   intervention={iv}
-                  onView={openView}
-                  onDelete={setDeleteTarget}
-                  canManage={canManage}
+                  onClick={() => navigate(`/interventions/${iv._id}`)}
                 />
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="table-empty">
+                <tr><td colSpan={6} className="table-empty">
                   {search || statusFilter
                     ? 'Aucun résultat pour ces critères.'
                     : 'Aucune intervention enregistrée.'}
@@ -847,26 +622,8 @@ export default function InterventionsPage() {
         </div>
       )}
 
-      {/* Modals */}
       {showCreate && (
         <CreateModal onClose={() => setShowCreate(false)} onCreated={onCreated} />
-      )}
-
-      {ficheTarget && (
-        <FicheModal
-          intervention={ficheTarget}
-          readOnly={ficheReadOnly}
-          onClose={() => setFicheTarget(null)}
-          onSubmit={handleSubmitRapport}
-        />
-      )}
-
-      {deleteTarget && (
-        <DeleteModal
-          intervention={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={handleDelete}
-        />
       )}
     </div>
   )

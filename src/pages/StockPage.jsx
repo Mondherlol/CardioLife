@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
@@ -30,7 +30,6 @@ const CATEGORIES = [
 
 const CAT_MAP = Object.fromEntries(CATEGORIES.map(c => [c.value, c]))
 
-
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
   return err.message || 'Une erreur est survenue.'
@@ -38,17 +37,17 @@ function formatApiError(err) {
 
 /* ─── Helpers visuels ─── */
 function getStockStatus(stock, threshold) {
-  if (stock === 0)           return 'out'
-  if (stock <= threshold)    return 'low'
+  if (stock === 0)        return 'out'
+  if (stock <= threshold) return 'low'
   return 'ok'
 }
 
 function getExpirationStatus(dateStr) {
   if (!dateStr) return null
-  const date  = new Date(dateStr)
-  const now   = new Date()
-  const days  = Math.ceil((date - now) / (1000 * 60 * 60 * 24))
-  if (days < 0)  return { level: 'expired', label: 'Expiré',     days }
+  const date = new Date(dateStr)
+  const now  = new Date()
+  const days = Math.ceil((date - now) / (1000 * 60 * 60 * 24))
+  if (days < 0)   return { level: 'expired', label: 'Expiré',    days }
   if (days <= 30) return { level: 'urgent',  label: `${days}j`,  days }
   if (days <= 90) return { level: 'soon',    label: `${days}j`,  days }
   return { level: 'ok', label: new Date(dateStr).toLocaleDateString('fr-FR', { month: '2-digit', year: 'numeric' }), days }
@@ -62,6 +61,12 @@ function formatDate(dateStr) {
 function formatPrice(val) {
   if (val == null || val === '') return '—'
   return `${Number(val).toLocaleString('fr-FR')} DT`
+}
+
+/* ─── Sort icon ─── */
+function SortIcon({ field, sortField, sortDir }) {
+  if (sortField !== field) return <span style={{ opacity: .25, fontSize: 10, marginLeft: 3 }}>⇅</span>
+  return <span style={{ fontSize: 10, marginLeft: 3, color: 'var(--orange-500)' }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
 }
 
 /* ─── Composant badge catégorie ─── */
@@ -83,10 +88,7 @@ function StockIndicator({ stock, threshold }) {
         <span className="stock-threshold-label">/ min {threshold}</span>
       </div>
       <div className="stock-mini-bar">
-        <div
-          className={`stock-mini-fill stock-mini-fill--${status}`}
-          style={{ width: `${pct}%` }}
-        />
+        <div className={`stock-mini-fill stock-mini-fill--${status}`} style={{ width: `${pct}%` }} />
       </div>
       {status === 'out' && <span className="stock-status-chip stock-status-chip--out">Épuisé</span>}
       {status === 'low' && <span className="stock-status-chip stock-status-chip--low">Stock faible</span>}
@@ -114,73 +116,126 @@ function ExpirationBadge({ date }) {
 
 /* ─── Modal ajustement de stock ─── */
 function StockAdjustModal({ product, onClose, onDone }) {
-  const [type,           setType]           = useState('entree')
-  const [quantity,       setQuantity]       = useState('')
-  const [reason,         setReason]         = useState('')
-  const [serialsText,    setSerialsText]    = useState('')  // one per line
-  const [lotNumber,      setLotNumber]      = useState('')
-  const [expirationDate, setExpirationDate] = useState('')
-  const [error,          setError]          = useState('')
-  const [loading,        setLoading]        = useState(false)
-  const [inStockSerials, setInStockSerials] = useState([])
+  const navigate = useNavigate()
+  const [type,            setType]            = useState('entree')
+  const [quantity,        setQuantity]        = useState('')
+  const [reason,          setReason]          = useState('')
+  // Entrée — serial textarea
+  const [serialsText,     setSerialsText]     = useState('')
+  const [lotNumber,       setLotNumber]       = useState('')
+  const [expirationDate,  setExpirationDate]  = useState('')
+  // Sortie — serial picker
+  const [selectedSerials, setSelectedSerials] = useState([])
+  const [serialSearch,    setSerialSearch]    = useState('')
+  // Sortie — lot picker
+  const [selectedLot,     setSelectedLot]     = useState('')
+
+  const [error,           setError]           = useState('')
+  const [loading,         setLoading]         = useState(false)
+  const [inStockSerials,  setInStockSerials]  = useState([])
+  const [inStockLots,     setInStockLots]     = useState([])
 
   useEffect(() => {
-    if (!product.requiresSerialNumber) return
+    if (!product.requiresSerialNumber && !product.requiresLotNumber) return
     getMovements(product._id)
       .then(raw => {
         const mvs = Array.isArray(raw) ? raw : (raw.data || [])
-        const entered = new Set()
-        const exited  = new Set()
-        mvs.forEach(mv => {
-          if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
-          if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
-        })
-        setInStockSerials([...entered].filter(sn => !exited.has(sn)))
+
+        if (product.requiresSerialNumber) {
+          const entered = new Set()
+          const exited  = new Set()
+          mvs.forEach(mv => {
+            if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
+            if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
+          })
+          setInStockSerials([...entered].filter(sn => !exited.has(sn)))
+        }
+
+        if (product.requiresLotNumber) {
+          const lotMap = {}
+          mvs.forEach(mv => {
+            if (mv.type === 'entree' && mv.lotNumber)
+              lotMap[mv.lotNumber] = (lotMap[mv.lotNumber] || 0) + (mv.quantity || 0)
+            if (mv.type === 'sortie' && mv.lotNumber)
+              lotMap[mv.lotNumber] = (lotMap[mv.lotNumber] || 0) - (mv.quantity || 0)
+          })
+          setInStockLots(
+            Object.entries(lotMap)
+              .filter(([, q]) => q > 0)
+              .map(([lot, q]) => ({ lot, qty: q }))
+          )
+        }
       })
       .catch(() => {})
-  }, [product._id, product.requiresSerialNumber])
+  }, [product._id, product.requiresSerialNumber, product.requiresLotNumber])
 
-  const qty      = Number(quantity) || 0
+  const isSortieSerial = type === 'sortie' && product.requiresSerialNumber
+  const needsSerialEntry = type === 'entree' && product.requiresSerialNumber
+  const needsLotEntry    = product.requiresLotNumber && type === 'entree'
+
+  const qty = isSortieSerial
+    ? selectedSerials.length
+    : Number(quantity) || 0
+
   const newStock = type === 'entree'
     ? product.stock + qty
-    : type === 'sortie'
-      ? product.stock - qty
-      : qty
-
-  const needsSerial = product.requiresSerialNumber && type !== 'ajustement'
-  const needsLot    = product.requiresLotNumber    && type === 'entree'
+    : product.stock - qty
 
   const serialLines = serialsText.split('\n').map(s => s.trim()).filter(Boolean)
-  const serialsOk   = !needsSerial || (qty > 0 && serialLines.length === qty)
+  const serialsOk   = !needsSerialEntry || (qty > 0 && serialLines.length === qty)
 
-  // Real-time conflict detection
-  const duplicatesInInput = needsSerial
+  const duplicatesInInput = needsSerialEntry
     ? serialLines.filter((sn, i) => serialLines.indexOf(sn) !== i)
     : []
-  const alreadyInStock = (needsSerial && type === 'entree')
+  const alreadyInStock = needsSerialEntry
     ? serialLines.filter(sn => inStockSerials.includes(sn))
     : []
+
+  const filteredAvailableSerials = inStockSerials
+    .filter(sn => !selectedSerials.includes(sn))
+    .filter(sn => !serialSearch || sn.toLowerCase().includes(serialSearch.toLowerCase()))
+
+  function addSerial(sn)    { setSelectedSerials(p => [...p, sn]) }
+  function removeSerial(sn) { setSelectedSerials(p => p.filter(s => s !== sn)) }
+
+  function switchType(t) {
+    setType(t)
+    setSelectedSerials([])
+    setSerialsText('')
+    setSerialSearch('')
+    setSelectedLot('')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (qty <= 0) { setError('La quantité doit être supérieure à 0.'); return }
-    if (needsSerial && serialLines.length !== qty) {
-      setError(`Vous devez saisir exactement ${qty} numéro${qty > 1 ? 's' : ''} de série.`); return
+    if (needsSerialEntry && serialLines.length !== qty) {
+      setError(`Saisissez exactement ${qty} numéro${qty > 1 ? 's' : ''} de série.`); return
     }
     if (duplicatesInInput.length > 0) {
-      setError(`Numéros de série en double dans la saisie : ${[...new Set(duplicatesInInput)].join(', ')}`); return
+      setError(`En double : ${[...new Set(duplicatesInInput)].join(', ')}`); return
     }
     if (alreadyInStock.length > 0) {
-      setError(`Ces numéros sont déjà en stock : ${alreadyInStock.join(', ')}`); return
+      setError(`Déjà en stock : ${alreadyInStock.join(', ')}`); return
+    }
+    if (type === 'sortie' && product.requiresLotNumber && !selectedLot) {
+      setError('Sélectionnez un lot.'); return
     }
     setError('')
     setLoading(true)
     try {
+      const finalSerials = isSortieSerial
+        ? selectedSerials
+        : needsSerialEntry ? serialLines : []
+      const finalLot = type === 'sortie' && product.requiresLotNumber
+        ? selectedLot
+        : needsLotEntry && lotNumber ? lotNumber : undefined
+
       await adjustStock(product._id, {
         type, quantity: qty, reason,
-        serialNumbers: needsSerial ? serialLines : [],
-        lotNumber:     needsLot && lotNumber ? lotNumber : undefined,
-        expirationDate: needsLot && expirationDate ? expirationDate : undefined,
+        serialNumbers: finalSerials,
+        lotNumber: finalLot || undefined,
+        expirationDate: needsLotEntry && expirationDate ? expirationDate : undefined,
       })
       toast.success('Stock mis à jour.')
       onDone()
@@ -198,14 +253,12 @@ function StockAdjustModal({ product, onClose, onDone }) {
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit} className="modal-body">
-          {/* Produit concerné */}
+          {/* Produit */}
           <div className="adjust-product-card">
             <Package size={16} color="var(--orange-500)" />
             <div>
               <div className="adjust-product-name">{product.name}</div>
-              {product.reference && (
-                <div className="adjust-product-ref">Réf. {product.reference}</div>
-              )}
+              {product.reference && <div className="adjust-product-ref">Réf. {product.reference}</div>}
             </div>
             <div className="adjust-current-stock">
               <span className="adjust-stock-num">{product.stock}</span>
@@ -213,19 +266,19 @@ function StockAdjustModal({ product, onClose, onDone }) {
             </div>
           </div>
 
-          {/* Type de mouvement */}
+          {/* Type */}
           <div className="form-group">
             <label className="form-label">Type de mouvement</label>
             <div className="adjust-type-row">
               {[
-                { value: 'entree',     icon: TrendingUp,        label: 'Entrée',     cls: 'entree' },
-                { value: 'sortie',     icon: TrendingDown,      label: 'Sortie',     cls: 'sortie' },
-                { value: 'ajustement', icon: SlidersHorizontal, label: 'Correction', cls: 'ajust'  },
+                { value: 'entree', icon: TrendingUp,   label: 'Entrée', cls: 'entree' },
+                { value: 'sortie', icon: TrendingDown,  label: 'Sortie', cls: 'sortie' },
               ].map(({ value, icon: Icon, label, cls }) => (
                 <button
                   key={value} type="button"
-                  onClick={() => setType(value)}
+                  onClick={() => switchType(value)}
                   className={`adjust-type-btn adjust-type-btn--${cls}${type === value ? ' adjust-type-btn--active' : ''}`}
+                  style={{ flex: 1 }}
                 >
                   <Icon size={15} /> {label}
                 </button>
@@ -233,23 +286,90 @@ function StockAdjustModal({ product, onClose, onDone }) {
             </div>
           </div>
 
-          {/* Quantité */}
-          <div className="form-group">
-            <label className="form-label">
-              {type === 'ajustement' ? 'Nouveau stock' : 'Quantité'}
-            </label>
-            <input
-              className="form-input form-input--plain"
-              type="number" min="1"
-              value={quantity}
-              onChange={e => setQuantity(e.target.value)}
-              placeholder={type === 'ajustement' ? 'Nouveau total…' : 'Quantité…'}
-              required autoFocus
-            />
-          </div>
+          {/* Quantité — masquée pour sortie+serial (auto-calculée) */}
+          {!isSortieSerial && (
+            <div className="form-group">
+              <label className="form-label">Quantité</label>
+              <input
+                className="form-input form-input--plain"
+                type="number" min="1"
+                value={quantity}
+                onChange={e => setQuantity(e.target.value)}
+                placeholder="Quantité…"
+                required autoFocus
+              />
+            </div>
+          )}
 
-          {/* Numéros de série */}
-          {needsSerial && (
+          {/* SORTIE + SERIAL : sélection depuis le stock */}
+          {isSortieSerial && (
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Numéros de série à retirer</span>
+                <span className={`adj-serial-count${selectedSerials.length > 0 ? ' adj-serial-count--ok' : ''}`}>
+                  {selectedSerials.length} sélectionné{selectedSerials.length !== 1 ? 's' : ''}
+                </span>
+              </label>
+
+              {selectedSerials.length > 0 && (
+                <div className="adj-selected-serials">
+                  {selectedSerials.map(sn => (
+                    <span key={sn} className="adj-selected-chip">
+                      {sn}
+                      <button type="button" className="adj-chip-remove" onClick={() => removeSerial(sn)}>
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {inStockSerials.length > 0 ? (
+                <>
+                  <div className="adj-serial-search-wrap">
+                    <Search size={13} className="adj-serial-search-icon" />
+                    <input
+                      className="form-input form-input--plain"
+                      style={{ paddingLeft: 30 }}
+                      placeholder="Rechercher un numéro de série…"
+                      value={serialSearch}
+                      onChange={e => setSerialSearch(e.target.value)}
+                    />
+                  </div>
+                  <div className="adj-serial-available">
+                    {filteredAvailableSerials.length === 0 ? (
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>
+                        {serialSearch ? 'Aucun résultat.' : 'Tous les numéros sont sélectionnés.'}
+                      </p>
+                    ) : (
+                      filteredAvailableSerials.slice(0, 60).map(sn => (
+                        <button key={sn} type="button" className="adj-available-chip" onClick={() => addSerial(sn)}>
+                          {sn}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={{ marginTop: 8, padding: '12px 14px', background: 'var(--gray-50)', borderRadius: 8, border: '1px dashed var(--gray-200)' }}>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                    Aucun numéro de série enregistré en stock pour ce produit.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    style={{ fontSize: 12, padding: '5px 12px', gap: 6 }}
+                    onClick={() => { onClose(); navigate(`/stock/${product._id}`) }}
+                  >
+                    <Hash size={12} /> Renseigner les numéros de série disponibles
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ENTRÉE + SERIAL : saisie textarea */}
+          {needsSerialEntry && (
             <div className="form-group">
               <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Numéros de série <span style={{ color: 'var(--red-500)' }}>*</span></span>
@@ -267,21 +387,19 @@ function StockAdjustModal({ product, onClose, onDone }) {
               <p className="adj-serial-hint">Un numéro par ligne — vous pouvez coller depuis un scanner</p>
               {duplicatesInInput.length > 0 && (
                 <div className="adj-serial-warn">
-                  <AlertTriangle size={12} />
-                  En double : {[...new Set(duplicatesInInput)].join(', ')}
+                  <AlertTriangle size={12} /> En double : {[...new Set(duplicatesInInput)].join(', ')}
                 </div>
               )}
               {alreadyInStock.length > 0 && (
                 <div className="adj-serial-warn">
-                  <AlertTriangle size={12} />
-                  Déjà en stock : {alreadyInStock.join(', ')}
+                  <AlertTriangle size={12} /> Déjà en stock : {alreadyInStock.join(', ')}
                 </div>
               )}
             </div>
           )}
 
-          {/* Lot & péremption */}
-          {needsLot && (
+          {/* LOT ENTRÉE */}
+          {needsLotEntry && (
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label">N° de lot <span style={{ color: 'var(--red-500)' }}>*</span></label>
@@ -294,6 +412,27 @@ function StockAdjustModal({ product, onClose, onDone }) {
                 <input className="form-input form-input--plain" type="date"
                   value={expirationDate} onChange={e => setExpirationDate(e.target.value)} />
               </div>
+            </div>
+          )}
+
+          {/* LOT SORTIE */}
+          {type === 'sortie' && product.requiresLotNumber && (
+            <div className="form-group">
+              <label className="form-label">Lot à sortir</label>
+              {inStockLots.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Aucun lot en stock.</p>
+              ) : (
+                <select
+                  className="form-input form-input--plain"
+                  value={selectedLot}
+                  onChange={e => setSelectedLot(e.target.value)}
+                >
+                  <option value="">— Sélectionner un lot —</option>
+                  {inStockLots.map(({ lot, qty: lq }) => (
+                    <option key={lot} value={lot}>{lot} ({lq} en stock)</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 
@@ -318,11 +457,7 @@ function StockAdjustModal({ product, onClose, onDone }) {
             />
           </div>
 
-          {error && (
-            <div className="login-error">
-              <AlertTriangle size={13} /> {error}
-            </div>
-          )}
+          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
 
           <div className="modal-footer">
             <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
@@ -683,8 +818,8 @@ function MovementsModal({ product, onClose }) {
                       </div>
                       <div className="mv-meta">
                         {(mv.createdBy?.fullName || mv.createdBy?.username) && (
-                        <span><User size={10} /> {mv.createdBy.fullName || mv.createdBy.username}</span>
-                      )}
+                          <span><User size={10} /> {mv.createdBy.fullName || mv.createdBy.username}</span>
+                        )}
                         <span>{formatDateTime(mv.createdAt)}</span>
                         {mv.previousStock != null && mv.newStock != null && (
                           <span className="mv-stocks">{mv.previousStock} → {mv.newStock}</span>
@@ -732,7 +867,11 @@ export default function StockPage() {
   const [mvLoading,        setMvLoading]        = useState(false)
   const [allBrands,        setAllBrands]        = useState([])
   const [allSuppliers,     setAllSuppliers]     = useState([])
-  const [statFilter,       setStatFilter]       = useState(null) // null | 'lowStock' | 'expiringSoon' | 'expired'
+  const [statFilter,       setStatFilter]       = useState(null)
+
+  // Tri colonnes
+  const [sortField, setSortField] = useState(null)
+  const [sortDir,   setSortDir]   = useState('asc')
 
   useLoadingBar(loading)
 
@@ -741,16 +880,42 @@ export default function StockPage() {
   const totalPages   = Math.ceil(total / LIMIT)
   const mvTotalPages = Math.ceil(mvTotal / LIMIT)
 
+  function toggleSort(field) {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortField(field); setSortDir('asc') }
+  }
+
+  const sortedProducts = useMemo(() => {
+    if (!sortField) return products
+    return [...products].sort((a, b) => {
+      let va, vb
+      if      (sortField === 'name')       { va = (a.name || '').toLowerCase();       vb = (b.name || '').toLowerCase() }
+      else if (sortField === 'category')   { va = a.category || '';                   vb = b.category || '' }
+      else if (sortField === 'stock')      { va = a.stock ?? 0;                       vb = b.stock ?? 0 }
+      else if (sortField === 'expiration') {
+        va = a.expirationDate ? new Date(a.expirationDate).getTime() : Infinity
+        vb = b.expirationDate ? new Date(b.expirationDate).getTime() : Infinity
+      }
+      else if (sortField === 'brand')        { va = (a.brand || '').toLowerCase();      vb = (b.brand || '').toLowerCase() }
+      else if (sortField === 'tracabilite') {
+        va = a.requiresSerialNumber ? 2 : a.requiresLotNumber ? 1 : 0
+        vb = b.requiresSerialNumber ? 2 : b.requiresLotNumber ? 1 : 0
+      }
+      else if (sortField === 'price')      { va = a.salePrice ?? -Infinity;           vb = b.salePrice ?? -Infinity }
+      else return 0
+      if (va < vb) return sortDir === 'asc' ? -1 : 1
+      if (va > vb) return sortDir === 'asc' ? 1 : -1
+      return 0
+    })
+  }, [products, sortField, sortDir])
+
   useEffect(() => {
     getBrands().then(setAllBrands).catch(() => {})
     getSuppliers().then(setAllSuppliers).catch(() => {})
   }, [])
 
   const fetchStats = useCallback(async () => {
-    try {
-      const s = await getProductStats()
-      setStats(s)
-    } catch (_) {}
+    try { setStats(await getProductStats()) } catch (_) {}
   }, [])
 
   const fetchProducts = useCallback(async () => {
@@ -758,10 +923,10 @@ export default function StockPage() {
     setError('')
     try {
       const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false' }
-      if (search)                   params.search       = search
-      if (category)                 params.category     = category
-      if (brandFilter)              params.brand        = brandFilter
-      if (supplierFilter)           params.supplier     = supplierFilter
+      if (search)                        params.search       = search
+      if (category)                      params.category     = category
+      if (brandFilter)                   params.brand        = brandFilter
+      if (supplierFilter)                params.supplier     = supplierFilter
       if (statFilter === 'lowStock')     params.lowStock     = 'true'
       if (statFilter === 'expiringSoon') params.expiringSoon = 'true'
       if (statFilter === 'expired')      params.expired      = 'true'
@@ -812,46 +977,17 @@ export default function StockPage() {
 
   /* ── Stats cards ── */
   const statCards = stats ? [
-    {
-      icon: Package,
-      label: 'Total produits',
-      value: stats.total,
-      sub: 'en catalogue',
-      color: 'var(--orange-500)',
-      bg: 'var(--orange-50)',
-      filter: null,
-    },
-    {
-      icon: AlertCircle,
-      label: 'Stock critique',
-      value: stats.lowStock,
-      sub: 'en dessous du seuil',
-      color: 'var(--amber-600)',
-      bg: 'var(--amber-50)',
-      alert: stats.lowStock > 0,
-      filter: 'lowStock',
-    },
-    {
-      icon: Clock,
-      label: 'Expirent bientôt',
-      value: stats.expiringSoon,
-      sub: 'dans les 60 prochains jours',
-      color: 'var(--blue-600)',
-      bg: 'var(--blue-50)',
-      alert: stats.expiringSoon > 0,
-      filter: 'expiringSoon',
-    },
-    {
-      icon: AlertTriangle,
-      label: 'Produits expirés',
-      value: stats.expired,
-      sub: 'à retirer du stock',
-      color: 'var(--red-600)',
-      bg: 'var(--red-50)',
-      alert: stats.expired > 0,
-      filter: 'expired',
-    },
+    { icon: Package,       label: 'Total produits',    value: stats.total,        sub: 'en catalogue',              color: 'var(--orange-500)', bg: 'var(--orange-50)', filter: null },
+    { icon: AlertCircle,   label: 'Stock critique',    value: stats.lowStock,     sub: 'en dessous du seuil',       color: 'var(--amber-600)',  bg: 'var(--amber-50)',  alert: stats.lowStock > 0,    filter: 'lowStock' },
+    { icon: Clock,         label: 'Expirent bientôt', value: stats.expiringSoon, sub: 'dans les 60 prochains jours', color: 'var(--blue-600)', bg: 'var(--blue-50)',   alert: stats.expiringSoon > 0, filter: 'expiringSoon' },
+    { icon: AlertTriangle, label: 'Produits expirés', value: stats.expired,      sub: 'à retirer du stock',         color: 'var(--red-600)',   bg: 'var(--red-50)',    alert: stats.expired > 0,     filter: 'expired' },
   ] : []
+
+  const thSort = (field, label, extraStyle = {}) => (
+    <th onClick={() => toggleSort(field)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...extraStyle }}>
+      {label}<SortIcon field={field} sortField={sortField} sortDir={sortDir} />
+    </th>
+  )
 
   return (
     <div className="page-content page-content--table-scroll">
@@ -900,7 +1036,7 @@ export default function StockPage() {
         ))}
       </div>
 
-      {/* ── Cartes de statistiques (tab actif seulement) ── */}
+      {/* ── Cartes de statistiques ── */}
       {tab === 'active' && stats && (
         <div className="stock-stats-grid">
           {statCards.map(card => {
@@ -933,7 +1069,7 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* ── Barre de recherche + filtre catégorie (onglets produits) ── */}
+      {/* ── Barre de recherche + filtres ── */}
       {!isMovements && (
         <div className="table-toolbar">
           <div className="search-wrap">
@@ -950,34 +1086,18 @@ export default function StockPage() {
               </button>
             )}
           </div>
-          <select
-            className="cat-filter-select"
-            value={category}
-            onChange={e => setCategory(e.target.value)}
-          >
+          <select className="cat-filter-select" value={category} onChange={e => setCategory(e.target.value)}>
             <option value="">Toutes catégories</option>
-            {CATEGORIES.map(c => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
+            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
-
           {allBrands.length > 0 && (
-            <select
-              className="cat-filter-select"
-              value={brandFilter}
-              onChange={e => setBrandFilter(e.target.value)}
-            >
+            <select className="cat-filter-select" value={brandFilter} onChange={e => setBrandFilter(e.target.value)}>
               <option value="">Toutes marques</option>
               {allBrands.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
           )}
-
           {allSuppliers.length > 0 && (
-            <select
-              className="cat-filter-select"
-              value={supplierFilter}
-              onChange={e => setSupplierFilter(e.target.value)}
-            >
+            <select className="cat-filter-select" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
               <option value="">Tous fournisseurs</option>
               {allSuppliers.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -1012,19 +1132,24 @@ export default function StockPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Produit</th>
-                  <th>Catégorie</th>
-                  <th>Marque / Modèle</th>
-                  <th>Stock</th>
-                  <th>Péremption</th>
-                  <th>Prix vente</th>
+                  {thSort('name',        'Produit',          { minWidth: 320 })}
+                  {thSort('category',   'Catégorie',        { width: 130 })}
+                  {thSort('brand',      'Marque / Modèle',  { width: 160 })}
+                  {thSort('tracabilite','Traçabilité',      { width: 110 })}
+                  {thSort('stock',      'Stock')}
+                  {thSort('expiration', 'Péremption')}
+                  {thSort('price',      'Prix vente')}
                   <th style={{ width: isArchived ? 100 : 140 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {products.map(p => (
+                {sortedProducts.map(p => (
                   <tr key={p._id} className={isArchived ? 'row--archived' : ''}>
-                    <td>
+                    {/* Cellule produit — toute la zone est cliquable */}
+                    <td
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/stock/${p._id}`)}
+                    >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         {p.images?.length > 0
                           ? <img src={productImageUrl(p.images[0])} alt="" className="product-list-thumb" />
@@ -1033,9 +1158,7 @@ export default function StockPage() {
                             </div>
                         }
                         <div>
-                          <div className="cell-primary cell-link" onClick={() => navigate(`/stock/${p._id}`)}>
-                            {p.name}
-                          </div>
+                          <div className="cell-primary">{p.name}</div>
                           {p.reference && <div className="cell-secondary">Réf. {p.reference}</div>}
                         </div>
                       </div>
@@ -1045,6 +1168,16 @@ export default function StockPage() {
                       {p.brand && <div className="cell-primary" style={{ fontSize: 13 }}>{p.brand}</div>}
                       {p.compatibleModel && <div className="cell-secondary">{p.compatibleModel}</div>}
                       {!p.brand && !p.compatibleModel && <span className="cell-muted">—</span>}
+                    </td>
+                    <td>
+                      {p.requiresSerialNumber || p.requiresLotNumber ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                          {p.requiresSerialNumber && <span className="track-badge">N° série</span>}
+                          {p.requiresLotNumber    && <span className="track-badge track-badge--lot">N° lot</span>}
+                        </div>
+                      ) : (
+                        <span className="cell-muted">—</span>
+                      )}
                     </td>
                     <td>
                       <div className="stock-cell-clickable" onClick={() => setViewingStockDetail(p)} title="Voir le détail du stock">
@@ -1103,7 +1236,7 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* ── Tableau mouvements de stocks (tous produits) ── */}
+      {/* ── Tableau mouvements (tous produits) ── */}
       {isMovements && (
         <div className="table-wrap">
           {mvLoading ? (
@@ -1140,10 +1273,7 @@ export default function StockPage() {
                       <td>
                         {prod ? (
                           <>
-                            <div
-                              className="cell-primary cell-link"
-                              onClick={() => navigate(`/stock/${prod._id || prod}`)}
-                            >
+                            <div className="cell-primary cell-link" onClick={e => { e.stopPropagation(); navigate(`/stock/${prod._id || prod}`) }}>
                               {prod.name || '—'}
                             </div>
                             {prod.reference && <div className="cell-secondary">Réf. {prod.reference}</div>}
@@ -1209,37 +1339,19 @@ export default function StockPage() {
         />
       )}
       {adjusting && (
-        <StockAdjustModal
-          product={adjusting}
-          onClose={() => setAdjusting(null)}
-          onDone={handleAdjusted}
-        />
+        <StockAdjustModal product={adjusting} onClose={() => setAdjusting(null)} onDone={handleAdjusted} />
       )}
       {archiving && (
-        <ArchiveConfirm
-          product={archiving}
-          onClose={() => setArchiving(null)}
-          onDone={handleArchived}
-        />
+        <ArchiveConfirm product={archiving} onClose={() => setArchiving(null)} onDone={handleArchived} />
       )}
       {destroying && (
-        <DestroyConfirm
-          product={destroying}
-          onClose={() => setDestroying(null)}
-          onDone={handleDestroyed}
-        />
+        <DestroyConfirm product={destroying} onClose={() => setDestroying(null)} onDone={handleDestroyed} />
       )}
       {viewingMovements && (
-        <MovementsModal
-          product={viewingMovements}
-          onClose={() => setViewingMovements(null)}
-        />
+        <MovementsModal product={viewingMovements} onClose={() => setViewingMovements(null)} />
       )}
       {viewingMovementDetail && (
-        <MovementDetailModal
-          movement={viewingMovementDetail}
-          onClose={() => setViewingMovementDetail(null)}
-        />
+        <MovementDetailModal movement={viewingMovementDetail} onClose={() => setViewingMovementDetail(null)} />
       )}
       {viewingStockDetail && (
         <StockDetailModal

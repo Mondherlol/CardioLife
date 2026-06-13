@@ -1,3 +1,5 @@
+const path           = require('path')
+const fs             = require('fs')
 const Intervention   = require('../models/Intervention')
 const Installation   = require('../models/Installation')
 
@@ -52,7 +54,11 @@ async function getOne(req, res) {
     const intervention = await Intervention.findById(req.params.id)
       .populate('technicien', 'fullName username')
       .populate('client', 'name')
-      .populate('installation', 'deviceType serialNumber address location')
+      .populate({
+        path: 'installation',
+        select: 'deviceType serialNumber address location deviceProduct',
+        populate: { path: 'deviceProduct', select: 'images name' },
+      })
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
     // Technician can only view their own
@@ -108,6 +114,30 @@ async function update(req, res) {
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
+    // Build descriptive change log before applying mutations
+    const changed = []
+    if (req.body.scheduledDate !== undefined) {
+      const oldD = intervention.scheduledDate
+        ? new Date(intervention.scheduledDate).toLocaleDateString('fr-FR')
+        : 'Non définie'
+      const newD = req.body.scheduledDate
+        ? new Date(req.body.scheduledDate).toLocaleDateString('fr-FR')
+        : 'Non définie'
+      if (oldD !== newD) changed.push(`Date planifiée : ${oldD} → ${newD}`)
+    }
+    if (req.body.technicienName !== undefined || req.body.technicien !== undefined) {
+      const oldT = intervention.technicienName || 'Non assigné'
+      const newT = req.body.technicienName || 'Non assigné'
+      if (oldT !== newT) changed.push(`Technicien : ${oldT} → ${newT}`)
+    }
+    if (req.body.notes !== undefined) {
+      const hadNotes = !!(intervention.notes || '').trim()
+      const hasNotes = !!(req.body.notes || '').trim()
+      if (!hadNotes && hasNotes)                   changed.push('Notes ajoutées')
+      else if (hadNotes && !hasNotes)              changed.push('Notes supprimées')
+      else if (hadNotes && hasNotes)               changed.push('Notes modifiées')
+    }
+
     const allowed = ['client','clientName','installation','installationSnap',
                      'technicien','technicienName','scheduledDate','notes','status']
     allowed.forEach(k => { if (req.body[k] !== undefined) intervention[k] = req.body[k] })
@@ -116,7 +146,7 @@ async function update(req, res) {
       action:   'modification',
       user:     req.user._id,
       userName: req.user.fullName || req.user.username,
-      details:  'Intervention modifiée par l\'admin',
+      details:  changed.length ? changed.join(' · ') : 'Intervention modifiée',
     })
 
     await intervention.save()
@@ -149,6 +179,116 @@ async function submitRapport(req, res) {
       details:  'Fiche d\'intervention remplie et soumise',
     })
 
+    await intervention.save()
+    res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Save fiche (auto-save) ───────────────────────────────── */
+const FICHE_FIELDS = [
+  'serialNumber', 'emplacement', 'signaletique',
+  'batteriePct', 'batterieNote', 'electrodesPct', 'electrodesNote',
+  'armoire', 'observation', 'dateReception', 'visa', 'observationGenerale',
+]
+
+async function saveFiche(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    if (req.user.role === 'technicien' &&
+        String(intervention.technicien) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    if (!intervention.fiche) intervention.fiche = {}
+    FICHE_FIELDS.forEach(k => {
+      if (req.body[k] !== undefined) {
+        intervention.fiche[k] = req.body[k] === '' ? undefined : req.body[k]
+      }
+    })
+    intervention.markModified('fiche')
+
+    if (intervention.status === 'planifie') {
+      intervention.status = 'en_cours'
+      intervention.history.push({
+        action: 'debut',
+        user: req.user._id,
+        userName: req.user.fullName || req.user.username,
+        details: 'Intervention démarrée',
+      })
+    }
+
+    await intervention.save()
+    res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Close intervention ────────────────────────────────────── */
+async function closeIntervention(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    if (req.user.role === 'technicien' &&
+        String(intervention.technicien) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    intervention.status = 'termine'
+    intervention.completedDate = new Date()
+    intervention.history.push({
+      action: 'cloture',
+      user: req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details: 'Intervention clôturée',
+    })
+
+    await intervention.save()
+    res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Upload photo (fiche) ──────────────────────────────────── */
+async function uploadFichePhoto(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Aucun fichier fourni.' })
+
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    if (!intervention.fiche) intervention.fiche = {}
+    if (!intervention.fiche.photos) intervention.fiche.photos = []
+    intervention.fiche.photos.push(req.file.filename)
+    intervention.markModified('fiche')
+
+    await intervention.save()
+    res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Delete photo (fiche) ──────────────────────────────────── */
+async function deleteFichePhoto(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    const { filename } = req.params
+    const photos = intervention.fiche?.photos || []
+    const idx = photos.indexOf(filename)
+    if (idx === -1) return res.status(404).json({ message: 'Photo introuvable.' })
+
+    fs.unlink(path.join(__dirname, '..', 'uploads', 'interventions', filename), () => {})
+    intervention.fiche.photos.splice(idx, 1)
+    intervention.markModified('fiche')
     await intervention.save()
     res.json(intervention)
   } catch (err) {
@@ -195,4 +335,7 @@ async function searchInstallations(req, res) {
   }
 }
 
-module.exports = { getAll, getOne, create, update, submitRapport, remove, searchInstallations }
+module.exports = {
+  getAll, getOne, create, update, submitRapport, remove, searchInstallations,
+  saveFiche, closeIntervention, uploadFichePhoto, deleteFichePhoto,
+}

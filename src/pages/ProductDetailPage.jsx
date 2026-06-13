@@ -5,7 +5,7 @@ import {
   ArrowLeft, Pencil, SlidersHorizontal, X, AlertTriangle, Package,
   TrendingUp, TrendingDown, Clock, CheckCircle2, History,
   Users, ShoppingCart, Info, User, ImagePlus, Trash2,
-  ChevronLeft, ChevronRight, Hash, Layers, FileText,
+  ChevronLeft, ChevronRight, Hash, Layers, FileText, Search,
 } from 'lucide-react'
 import {
   getProduct, getMovements, adjustStock,
@@ -228,73 +228,118 @@ function MovementDetailModal({ movement, onClose }) {
   )
 }
 
-/* ─── Stock adjust modal (with serial/lot support) ─── */
+/* ─── Stock adjust modal ─── */
 function StockAdjustModal({ product, onClose, onDone }) {
-  const [type,           setType]           = useState('entree')
-  const [quantity,       setQuantity]       = useState('')
-  const [reason,         setReason]         = useState('')
-  const [serialsText,    setSerialsText]    = useState('')
-  const [lotNumber,      setLotNumber]      = useState('')
-  const [expirationDate, setExpirationDate] = useState('')
-  const [error,          setError]          = useState('')
-  const [loading,        setLoading]        = useState(false)
-  const [inStockSerials, setInStockSerials] = useState([])
+  const [type,            setType]            = useState('entree')
+  const [quantity,        setQuantity]        = useState('')
+  const [reason,          setReason]          = useState('')
+  // Entrée — serial textarea
+  const [serialsText,     setSerialsText]     = useState('')
+  const [lotNumber,       setLotNumber]       = useState('')
+  const [expirationDate,  setExpirationDate]  = useState('')
+  // Sortie — serial picker
+  const [selectedSerials, setSelectedSerials] = useState([])
+  const [serialSearch,    setSerialSearch]    = useState('')
+  // Sortie — lot picker
+  const [selectedLot,     setSelectedLot]     = useState('')
+
+  const [error,           setError]           = useState('')
+  const [loading,         setLoading]         = useState(false)
+  const [inStockSerials,  setInStockSerials]  = useState([])
+  const [inStockLots,     setInStockLots]     = useState([])
 
   useEffect(() => {
-    if (!product.requiresSerialNumber) return
+    if (!product.requiresSerialNumber && !product.requiresLotNumber) return
     getMovements(product._id)
       .then(raw => {
         const mvs = Array.isArray(raw) ? raw : (raw.data || [])
-        const entered = new Set()
-        const exited  = new Set()
-        mvs.forEach(mv => {
-          if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
-          if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
-        })
-        setInStockSerials([...entered].filter(sn => !exited.has(sn)))
+        if (product.requiresSerialNumber) {
+          const entered = new Set()
+          const exited  = new Set()
+          mvs.forEach(mv => {
+            if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
+            if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
+          })
+          setInStockSerials([...entered].filter(sn => !exited.has(sn)))
+        }
+        if (product.requiresLotNumber) {
+          const lotMap = {}
+          mvs.forEach(mv => {
+            if (mv.type === 'entree' && mv.lotNumber)
+              lotMap[mv.lotNumber] = (lotMap[mv.lotNumber] || 0) + (mv.quantity || 0)
+            if (mv.type === 'sortie' && mv.lotNumber)
+              lotMap[mv.lotNumber] = (lotMap[mv.lotNumber] || 0) - (mv.quantity || 0)
+          })
+          setInStockLots(
+            Object.entries(lotMap)
+              .filter(([, q]) => q > 0)
+              .map(([lot, q]) => ({ lot, qty: q }))
+          )
+        }
       })
       .catch(() => {})
-  }, [product._id, product.requiresSerialNumber])
+  }, [product._id, product.requiresSerialNumber, product.requiresLotNumber])
 
-  const qty      = Number(quantity) || 0
-  const newStock = type === 'entree'
-    ? product.stock + qty
-    : type === 'sortie'
-      ? product.stock - qty
-      : qty
+  const isSortieSerial   = type === 'sortie' && product.requiresSerialNumber
+  const needsSerialEntry = type === 'entree'  && product.requiresSerialNumber
+  const needsLotEntry    = product.requiresLotNumber && type === 'entree'
 
-  const needsSerial = product.requiresSerialNumber && type !== 'ajustement'
-  const needsLot    = product.requiresLotNumber    && type === 'entree'
+  const qty      = isSortieSerial ? selectedSerials.length : Number(quantity) || 0
+  const newStock = type === 'entree' ? product.stock + qty : product.stock - qty
+
   const serialLines = serialsText.split('\n').map(s => s.trim()).filter(Boolean)
-  const serialsOk   = !needsSerial || (qty > 0 && serialLines.length === qty)
+  const serialsOk   = !needsSerialEntry || (qty > 0 && serialLines.length === qty)
 
-  const duplicatesInInput = needsSerial
+  const duplicatesInInput = needsSerialEntry
     ? serialLines.filter((sn, i) => serialLines.indexOf(sn) !== i)
     : []
-  const alreadyInStock = (needsSerial && type === 'entree')
+  const alreadyInStock = needsSerialEntry
     ? serialLines.filter(sn => inStockSerials.includes(sn))
     : []
+
+  const filteredAvailableSerials = inStockSerials
+    .filter(sn => !selectedSerials.includes(sn))
+    .filter(sn => !serialSearch || sn.toLowerCase().includes(serialSearch.toLowerCase()))
+
+  function addSerial(sn)    { setSelectedSerials(p => [...p, sn]) }
+  function removeSerial(sn) { setSelectedSerials(p => p.filter(s => s !== sn)) }
+
+  function switchType(t) {
+    setType(t)
+    setSelectedSerials([])
+    setSerialsText('')
+    setSerialSearch('')
+    setSelectedLot('')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (qty <= 0) { setError('La quantité doit être supérieure à 0.'); return }
-    if (needsSerial && serialLines.length !== qty) {
-      setError(`Vous devez saisir exactement ${qty} numéro${qty > 1 ? 's' : ''} de série.`); return
+    if (needsSerialEntry && serialLines.length !== qty) {
+      setError(`Saisissez exactement ${qty} numéro${qty > 1 ? 's' : ''} de série.`); return
     }
     if (duplicatesInInput.length > 0) {
-      setError(`Numéros de série en double dans la saisie : ${[...new Set(duplicatesInInput)].join(', ')}`); return
+      setError(`En double : ${[...new Set(duplicatesInInput)].join(', ')}`); return
     }
     if (alreadyInStock.length > 0) {
-      setError(`Ces numéros sont déjà en stock : ${alreadyInStock.join(', ')}`); return
+      setError(`Déjà en stock : ${alreadyInStock.join(', ')}`); return
+    }
+    if (type === 'sortie' && product.requiresLotNumber && !selectedLot) {
+      setError('Sélectionnez un lot.'); return
     }
     setError('')
     setLoading(true)
     try {
+      const finalSerials = isSortieSerial ? selectedSerials : needsSerialEntry ? serialLines : []
+      const finalLot = type === 'sortie' && product.requiresLotNumber
+        ? selectedLot
+        : needsLotEntry && lotNumber ? lotNumber : undefined
+
       await adjustStock(product._id, {
         type, quantity: qty, reason,
-        serialNumbers:  needsSerial ? serialLines : [],
-        lotNumber:      needsLot && lotNumber ? lotNumber : undefined,
-        expirationDate: needsLot && expirationDate ? expirationDate : undefined,
+        serialNumbers:  finalSerials,
+        lotNumber:      finalLot || undefined,
+        expirationDate: needsLotEntry && expirationDate ? expirationDate : undefined,
       })
       toast.success('Stock mis à jour.')
       onDone()
@@ -312,6 +357,7 @@ function StockAdjustModal({ product, onClose, onDone }) {
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit} className="modal-body">
+          {/* Produit */}
           <div className="adjust-product-card">
             <Package size={16} color="var(--orange-500)" />
             <div>
@@ -323,32 +369,105 @@ function StockAdjustModal({ product, onClose, onDone }) {
               <span className="adjust-stock-label">en stock</span>
             </div>
           </div>
+
+          {/* Type */}
           <div className="form-group">
             <label className="form-label">Type de mouvement</label>
             <div className="adjust-type-row">
               {[
-                { value: 'entree',     icon: TrendingUp,        label: 'Entrée',     cls: 'entree' },
-                { value: 'sortie',     icon: TrendingDown,      label: 'Sortie',     cls: 'sortie' },
-                { value: 'ajustement', icon: SlidersHorizontal, label: 'Correction', cls: 'ajust'  },
+                { value: 'entree', icon: TrendingUp,  label: 'Entrée', cls: 'entree' },
+                { value: 'sortie', icon: TrendingDown, label: 'Sortie', cls: 'sortie' },
               ].map(({ value, icon: Icon, label, cls }) => (
-                <button key={value} type="button" onClick={() => setType(value)}
-                  className={`adjust-type-btn adjust-type-btn--${cls}${type === value ? ' adjust-type-btn--active' : ''}`}>
+                <button key={value} type="button"
+                  onClick={() => switchType(value)}
+                  className={`adjust-type-btn adjust-type-btn--${cls}${type === value ? ' adjust-type-btn--active' : ''}`}
+                  style={{ flex: 1 }}
+                >
                   <Icon size={15} /> {label}
                 </button>
               ))}
             </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">
-              {type === 'ajustement' ? 'Nouveau stock' : 'Quantité'}
-            </label>
-            <input className="form-input form-input--plain" type="number" min="1"
-              value={quantity} onChange={e => setQuantity(e.target.value)}
-              placeholder={type === 'ajustement' ? 'Nouveau total…' : 'Quantité…'}
-              required autoFocus />
-          </div>
 
-          {needsSerial && (
+          {/* Quantité — masquée pour sortie+serial (auto-calculée) */}
+          {!isSortieSerial && (
+            <div className="form-group">
+              <label className="form-label">Quantité</label>
+              <input className="form-input form-input--plain" type="number" min="1"
+                value={quantity} onChange={e => setQuantity(e.target.value)}
+                placeholder="Quantité…" required autoFocus />
+            </div>
+          )}
+
+          {/* SORTIE + SERIAL : sélection depuis le stock */}
+          {isSortieSerial && (
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Numéros de série à retirer</span>
+                <span className={`adj-serial-count${selectedSerials.length > 0 ? ' adj-serial-count--ok' : ''}`}>
+                  {selectedSerials.length} sélectionné{selectedSerials.length !== 1 ? 's' : ''}
+                </span>
+              </label>
+
+              {selectedSerials.length > 0 && (
+                <div className="adj-selected-serials">
+                  {selectedSerials.map(sn => (
+                    <span key={sn} className="adj-selected-chip">
+                      {sn}
+                      <button type="button" className="adj-chip-remove" onClick={() => removeSerial(sn)}>
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {inStockSerials.length > 0 ? (
+                <>
+                  <div className="adj-serial-search-wrap">
+                    <Search size={13} className="adj-serial-search-icon" />
+                    <input
+                      className="form-input form-input--plain"
+                      style={{ paddingLeft: 30 }}
+                      placeholder="Rechercher un numéro de série…"
+                      value={serialSearch}
+                      onChange={e => setSerialSearch(e.target.value)}
+                    />
+                  </div>
+                  <div className="adj-serial-available">
+                    {filteredAvailableSerials.length === 0 ? (
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>
+                        {serialSearch ? 'Aucun résultat.' : 'Tous les numéros sont déjà sélectionnés.'}
+                      </p>
+                    ) : (
+                      filteredAvailableSerials.slice(0, 60).map(sn => (
+                        <button key={sn} type="button" className="adj-available-chip" onClick={() => addSerial(sn)}>
+                          {sn}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={{ marginTop: 8, padding: '12px 14px', background: 'var(--gray-50)', borderRadius: 8, border: '1px dashed var(--gray-200)' }}>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px' }}>
+                    Aucun numéro de série enregistré en stock pour ce produit.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    style={{ fontSize: 12, padding: '5px 12px', gap: 6 }}
+                    onClick={() => switchType('entree')}
+                  >
+                    <TrendingUp size={12} /> Faire une entrée de stock
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ENTRÉE + SERIAL : saisie textarea */}
+          {needsSerialEntry && (
             <div className="form-group">
               <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Numéros de série <span style={{ color: 'var(--red-500)' }}>*</span></span>
@@ -366,20 +485,19 @@ function StockAdjustModal({ product, onClose, onDone }) {
               <p className="adj-serial-hint">Un numéro par ligne — vous pouvez coller depuis un scanner</p>
               {duplicatesInInput.length > 0 && (
                 <div className="adj-serial-warn">
-                  <AlertTriangle size={12} />
-                  En double : {[...new Set(duplicatesInInput)].join(', ')}
+                  <AlertTriangle size={12} /> En double : {[...new Set(duplicatesInInput)].join(', ')}
                 </div>
               )}
               {alreadyInStock.length > 0 && (
                 <div className="adj-serial-warn">
-                  <AlertTriangle size={12} />
-                  Déjà en stock : {alreadyInStock.join(', ')}
+                  <AlertTriangle size={12} /> Déjà en stock : {alreadyInStock.join(', ')}
                 </div>
               )}
             </div>
           )}
 
-          {needsLot && (
+          {/* LOT ENTRÉE */}
+          {needsLotEntry && (
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label">N° de lot <span style={{ color: 'var(--red-500)' }}>*</span></label>
@@ -395,6 +513,28 @@ function StockAdjustModal({ product, onClose, onDone }) {
             </div>
           )}
 
+          {/* LOT SORTIE */}
+          {type === 'sortie' && product.requiresLotNumber && (
+            <div className="form-group">
+              <label className="form-label">Lot à sortir</label>
+              {inStockLots.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Aucun lot en stock.</p>
+              ) : (
+                <select
+                  className="form-input form-input--plain"
+                  value={selectedLot}
+                  onChange={e => setSelectedLot(e.target.value)}
+                >
+                  <option value="">— Sélectionner un lot —</option>
+                  {inStockLots.map(({ lot, qty: lq }) => (
+                    <option key={lot} value={lot}>{lot} ({lq} en stock)</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* Aperçu */}
           {qty > 0 && (
             <div className={`adjust-preview${newStock < 0 ? ' adjust-preview--danger' : ''}`}>
               <span>Stock après :</span>
@@ -403,15 +543,17 @@ function StockAdjustModal({ product, onClose, onDone }) {
               </strong>
             </div>
           )}
+
+          {/* Motif */}
           <div className="form-group">
-            <label className="form-label">
-              Motif <span className="form-label-opt">(optionnel)</span>
-            </label>
+            <label className="form-label">Motif <span className="form-label-opt">(optionnel)</span></label>
             <input className="form-input form-input--plain" value={reason}
               onChange={e => setReason(e.target.value)}
               placeholder="ex. Livraison fournisseur, Installation client…" />
           </div>
+
           {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
+
           <div className="modal-footer">
             <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
             <button type="submit" className="btn btn--primary"
