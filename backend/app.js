@@ -9,6 +9,7 @@ const usersRoutes       = require('./routes/users')
 const clientsRoutes     = require('./routes/clients')
 const clientTypesRoutes = require('./routes/clientTypes')
 const productsRoutes    = require('./routes/products')
+const publicProductsRoutes = require('./routes/publicProducts')
 const movementsRoutes       = require('./routes/movements')
 const installationsRoutes   = require('./routes/installations')
 const documentsRoutes       = require('./routes/documents')
@@ -23,8 +24,12 @@ const app = express()
 
 connectDB()
 
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map(o => o.trim())
+
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
   exposedHeaders: ['Content-Disposition'],
 }))
 app.use(express.json())
@@ -34,6 +39,7 @@ app.use('/api/auth',         authRoutes)
 app.use('/api/users',        usersRoutes)
 app.use('/api/clients',      clientsRoutes)
 app.use('/api/client-types', clientTypesRoutes)
+app.use('/api/public/products', publicProductsRoutes)
 app.use('/api/products',     productsRoutes)
 app.use('/api/movements',     movementsRoutes)
 app.use('/api/installations', installationsRoutes)

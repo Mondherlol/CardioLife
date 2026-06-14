@@ -32,6 +32,16 @@ const productSchema = new mongoose.Schema({
   supplier:       { type: String, trim: true },
   notes:          { type: String, trim: true },
   images:         [{ type: String }],
+  webCard: {
+    title:       { type: String, trim: true },
+    badges:      [{ type: String, trim: true }],
+    rating:      { type: Number, min: 0, max: 5, default: 5.0 },
+    ratingLabel: { type: String, trim: true, default: 'Certifié' },
+    slug:        { type: String, trim: true },
+    description: { type: String },
+    features:    [{ type: String, trim: true }],
+    footerText:  { type: String, trim: true, default: 'Réponse garantie sous 24h · Livraison en Tunisie' },
+  },
   isActive:       { type: Boolean, default: true },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

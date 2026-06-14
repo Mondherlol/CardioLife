@@ -6,10 +6,12 @@ import {
   TrendingUp, TrendingDown, Clock, CheckCircle2, History,
   Users, ShoppingCart, Info, User, ImagePlus, Trash2,
   ChevronLeft, ChevronRight, Hash, Layers, FileText, Search,
+  Globe, Plus, Save,
 } from 'lucide-react'
 import {
   getProduct, getMovements, adjustStock,
   uploadProductImage, deleteProductImage, productImageUrl,
+  updateProduct,
 } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
@@ -567,12 +569,152 @@ function StockAdjustModal({ product, onClose, onDone }) {
   )
 }
 
+/* ─── WebCardTab ─── */
+function WebCardTab({ product, onSaved }) {
+  const wc = product.webCard || {}
+  const [form, setForm] = useState({
+    title:       wc.title       ?? product.name        ?? '',
+    description: wc.description ?? product.description ?? '',
+    features:    wc.features    ?? [],
+  })
+  const [saving, setSaving]             = useState(false)
+  const [featureInput, setFeatureInput] = useState('')
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const addFeature = async () => {
+    const val = featureInput.trim()
+    if (!val) return
+    const newFeatures = [...form.features, val]
+    set('features', newFeatures)
+    setFeatureInput('')
+    try {
+      const updated = await updateProduct(product._id, {
+        name:     product.name,
+        category: product.category,
+        webCard:  { ...form, features: newFeatures },
+      })
+      onSaved(updated)
+    } catch (err) {
+      toast.error(formatApiError(err))
+    }
+  }
+  const removeFeature = (i) => set('features', form.features.filter((_, idx) => idx !== i))
+  const updateFeature = (i, v) => set('features', form.features.map((f, idx) => idx === i ? v : f))
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const updated = await updateProduct(product._id, {
+        name:     product.name,
+        category: product.category,
+        webCard:  form,
+      })
+      onSaved(updated)
+      toast.success('Fiche site web mise à jour.')
+    } catch (err) {
+      toast.error(formatApiError(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const coverImage = product.images?.[0] ? productImageUrl(product.images[0]) : null
+
+  return (
+    <div className="wc-layout">
+      {/* ── Aperçu ── */}
+      <div className="wc-preview-col">
+        <div className="wc-preview-label"><Globe size={13} /> Aperçu de la fiche</div>
+        <div className="wc-card">
+          {/* Image */}
+          <div className="wc-card-img-wrap">
+            {coverImage
+              ? <img src={coverImage} alt={form.title} className="wc-card-img" />
+              : <div className="wc-card-img-placeholder"><Package size={40} color="var(--gray-300)" /></div>
+            }
+          </div>
+
+          {/* Contenu */}
+          <div className="wc-card-body">
+            <h2 className="wc-card-title">{form.title || <span className="wc-placeholder">Titre du produit</span>}</h2>
+            {product.reference && (
+              <div className="wc-card-slug">Réf. <code>{product.reference}</code></div>
+            )}
+            {form.description && (
+              <div className="wc-card-desc" dangerouslySetInnerHTML={{ __html: form.description }} />
+            )}
+            {form.features.length > 0 && (
+              <div className="wc-card-features">
+                <div className="wc-features-label">CARACTÉRISTIQUES</div>
+                {form.features.map((f, i) => (
+                  <div key={i} className="wc-feature-row">
+                    <CheckCircle2 size={14} color="#22c55e" />
+                    <span>{f}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="wc-cta-btn">
+              <ShoppingCart size={16} /> Demander un devis
+            </button>
+            <button className="wc-secondary-btn">Continuer la navigation</button>
+            <div className="wc-card-footer">🔒 Réponse garantie sous 24h · Livraison en Tunisie</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Formulaire ── */}
+      <div className="wc-form-col">
+        <div className="wc-form-section">
+          <label className="wc-label">Titre</label>
+          <input className="wc-input" value={form.title} onChange={e => set('title', e.target.value)} placeholder={product.name} />
+        </div>
+
+        <div className="wc-form-section">
+          <label className="wc-label">Description</label>
+          <textarea className="wc-textarea" rows={3} value={form.description} onChange={e => set('description', e.target.value)} placeholder="Description affichée sur le site..." />
+        </div>
+
+        <div className="wc-form-section">
+          <label className="wc-label">Caractéristiques</label>
+          {form.features.map((f, i) => (
+            <div key={i} className="wc-feature-edit-row">
+              <input
+                className="wc-input"
+                value={f}
+                onChange={e => updateFeature(i, e.target.value)}
+              />
+              <button className="wc-badge-del wc-feat-del" onClick={() => removeFeature(i)}>×</button>
+            </div>
+          ))}
+          <div className="wc-add-row">
+            <input
+              className="wc-input"
+              value={featureInput}
+              onChange={e => setFeatureInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addFeature()}
+              placeholder="Ex : Fournisseur: CardioLife Tunisie"
+            />
+            <button className="wc-add-btn" onClick={addFeature}><Plus size={14} /></button>
+          </div>
+        </div>
+
+        <button className="wc-save-btn" onClick={handleSave} disabled={saving}>
+          {saving ? <span className="login-btn-spinner" /> : <><Save size={14} /> Sauvegarder la fiche</>}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Page principale ─── */
 const TABS = [
   { key: 'info',      label: 'Informations', icon: Info         },
   { key: 'stock',     label: 'Stock',        icon: History      },
   { key: 'commandes', label: 'Commandes',    icon: ShoppingCart },
   { key: 'clients',   label: 'Clients',      icon: Users        },
+  { key: 'site-web',  label: 'Site Web',     icon: Globe        },
 ]
 
 export default function ProductDetailPage() {
@@ -996,6 +1138,19 @@ export default function ProductDetailPage() {
             <p>Aucun client associé à ce produit.</p>
             <span className="pd-empty-note">L'association clients-produits sera disponible prochainement.</span>
           </div>
+        </div>
+      )}
+
+      {/* ── Onglet Site Web ── */}
+      {activeTab === 'site-web' && (
+        <div className="pd-section">
+          <div className="pd-section-title">
+            <Globe size={14} /> Fiche site web
+          </div>
+          <WebCardTab
+            product={product}
+            onSaved={(updated) => { if (updated) setProduct(updated) }}
+          />
         </div>
       )}
 
