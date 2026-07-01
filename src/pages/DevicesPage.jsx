@@ -20,10 +20,16 @@ function daysUntil(d) {
   return Math.round((new Date(d) - new Date()) / 86400000)
 }
 
+const CTRL_TAG = {
+  annuel:       { label: 'A',  cls: 'ctrl-tag ctrl-tag--a',  title: 'Annuel (contrat)' },
+  semestriel:   { label: 'S',  cls: 'ctrl-tag ctrl-tag--s',  title: 'Semestriel (contrat)' },
+  hors_contrat: { label: 'HC', cls: 'ctrl-tag ctrl-tag--hc', title: 'Hors contrat' },
+}
+
 function computeStatus(inst) {
   const now  = new Date()
   const d60  = new Date(now.getTime() + 60 * 86400000)
-  const ctrl = inst.nextControlDate ? new Date(inst.nextControlDate) : null
+  const ctrl = inst.nextControl?.scheduledDate ? new Date(inst.nextControl.scheduledDate) : null
 
   const firstBatt = inst.batteries?.[0]
   const batt      = firstBatt?.expiryDate ? new Date(firstBatt.expiryDate) : null
@@ -38,6 +44,9 @@ function computeStatus(inst) {
 }
 
 function StatusBadge({ inst }) {
+  if (inst.status === 'a_installer') {
+    return <span className="inst-badge inst-badge--pending">À installer</span>
+  }
   const s = computeStatus(inst)
   const cls = s === 'expiré'    ? 'inst-badge inst-badge--expired'
             : s === 'attention' ? 'inst-badge inst-badge--warning'
@@ -70,6 +79,26 @@ function ControlDate({ date }) {
   return (
     <div className={cls}>
       <span>{formatDate(date)}</span>
+      {days != null && (
+        <span className="ctrl-date-sub">
+          {days < 0 ? `${Math.abs(days)}j dépassé` : days === 0 ? "Aujourd'hui" : `dans ${days}j`}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function NextControlCell({ control }) {
+  if (!control?.scheduledDate) return <span className="text-muted">—</span>
+  const date = control.scheduledDate
+  const days = daysUntil(date)
+  const cls  = days < 0    ? 'ctrl-date ctrl-date--expired'
+             : days <= 60  ? 'ctrl-date ctrl-date--soon'
+             : 'ctrl-date ctrl-date--ok'
+  const tag = CTRL_TAG[control.controlType] || CTRL_TAG.hors_contrat
+  return (
+    <div className={cls}>
+      <span>{formatDate(date)} <span className={tag.cls} title={tag.title}>{tag.label}</span></span>
       {days != null && (
         <span className="ctrl-date-sub">
           {days < 0 ? `${Math.abs(days)}j dépassé` : days === 0 ? "Aujourd'hui" : `dans ${days}j`}
@@ -243,7 +272,7 @@ export default function DevicesPage() {
       if (sortField === 'device') return inst.deviceProduct?.name || inst.deviceType || ''
       if (sortField === 'battery') return inst.batteries?.[0]?.level ?? -1
       if (sortField === 'electrode') return inst.electrodes?.[0]?.expiryDate ? new Date(inst.electrodes[0].expiryDate).getTime() : 0
-      if (sortField === 'control') return inst.nextControlDate ? new Date(inst.nextControlDate).getTime() : 0
+      if (sortField === 'control') return inst.nextControl?.scheduledDate ? new Date(inst.nextControl.scheduledDate).getTime() : 0
       if (sortField === 'status') return statusOrder[computeStatus(inst)] || 0
       return ''
     }
@@ -420,7 +449,7 @@ export default function DevicesPage() {
                     <ControlDate date={inst.electrodes?.[0]?.expiryDate} />
                   </td>
                   <td>
-                    <ControlDate date={inst.nextControlDate} />
+                    <NextControlCell control={inst.nextControl} />
                   </td>
                   <td>
                     <StatusBadge inst={inst} />

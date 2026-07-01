@@ -3,15 +3,26 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Zap, Users, MapPin, Battery,
   Plus, X, Trash2, Activity, Calendar, FileText,
-  Save, ChevronDown, Search, RefreshCw,
+  Save, ChevronDown, Search, RefreshCw, CheckCircle2, AlertTriangle, Lock,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getClients }          from '../api/clients'
-import { getProducts }         from '../api/products'
+import { getProducts, getMovements } from '../api/products'
+import { getUsers }            from '../api/users'
 import { getInstallation, createInstallation, updateInstallation } from '../api/installations'
 import ComboSearch              from '../components/ComboSearch'
 import ClientModal              from '../components/ClientModal'
 import ProductModal             from '../components/ProductModal'
+
+/* Numéros de série actuellement en stock pour un produit (entrées − sorties) */
+function computeInStockSerials(movements) {
+  const entered = new Set(), exited = new Set()
+  ;(movements || []).forEach(mv => {
+    if (mv.type === 'entree') (mv.serialNumbers || []).forEach(s => entered.add(s))
+    if (mv.type === 'sortie') (mv.serialNumbers || []).forEach(s => exited.add(s))
+  })
+  return [...entered].filter(s => !exited.has(s))
+}
 
 /* ─── Helpers ───────────────────────────────────────────────── */
 function toDateInput(d) {
@@ -196,12 +207,15 @@ export default function InstallationFormPage() {
   const [location,     setLocation]    = useState('')
   const [serialNumber, setSerial]      = useState('')
   const [installDate,  setInstDate]    = useState(isEdit ? '' : todayStr())
-  const [controlDate,  setCtrlDate]    = useState('')
-  const [controlType,  setControlType] = useState('')
-  const [ctrlManual,   setCtrlManual]  = useState(false)
+  const [technician,     setTechnician]     = useState('')
+  const [technicianName, setTechnicianName] = useState('')
+  const [technicians,    setTechnicians]    = useState([])
+  const [fromContract,   setFromContract]   = useState(false)
+  const [inStockSerials, setInStockSerials] = useState([])
   const [batteries,    setBatteries]   = useState([])
   const [electrodes,   setElectrodes]  = useState([])
   const [notes,        setNotes]       = useState('')
+  const [loadedStatus, setLoadedStatus]= useState(null)
   const [errors,       setErrors]      = useState({})
   const [saving,       setSaving]      = useState(false)
 
@@ -216,13 +230,22 @@ export default function InstallationFormPage() {
     p.category === 'electrodes_adulte' || p.category === 'electrodes_enfant'
   ), [products])
 
-  /* ── Auto-compute control date ── */
+  /* ── Techniciens (pour l'affectation de la pose) ── */
   useEffect(() => {
-    if (installDate && !ctrlManual) {
-      const months = controlType === 'annuel' ? 12 : 6
-      setCtrlDate(addMonths(installDate, months))
-    }
-  }, [installDate, controlType, ctrlManual])
+    getUsers().then(d => {
+      const list = Array.isArray(d) ? d : (d?.data || [])
+      setTechnicians(list.filter(u => u.role === 'technicien'))
+    }).catch(() => {})
+  }, [])
+
+  /* ── N° de série en stock pour l'appareil sélectionné ── */
+  useEffect(() => {
+    const pid = selectedDevice?._id
+    if (!pid || selectedDevice?._stub) { setInStockSerials([]); return }
+    getMovements(pid)
+      .then(raw => setInStockSerials(computeInStockSerials(Array.isArray(raw) ? raw : (raw.data || []))))
+      .catch(() => setInStockSerials([]))
+  }, [selectedDevice])
 
   /* ── Auto-fill address from client (create mode only) ── */
   useEffect(() => {
@@ -253,18 +276,20 @@ export default function InstallationFormPage() {
   }, [id, isEdit])
 
   function populateForm(inst, clientList, productList) {
-    setClient(clientList.find(c => c._id === inst.client) || null)
+    setLoadedStatus(inst.status || 'installe')
+    setFromContract(!!inst.contract)
+    setClient(clientList.find(c => c._id === (inst.client?._id || inst.client)) || inst.client || null)
     setAddress(inst.address || '')
     setLocation(inst.location || '')
     setSerial(inst.serialNumber || '')
     setInstDate(toDateInput(inst.installationDate))
-    setCtrlDate(toDateInput(inst.nextControlDate))
-    setControlType(inst.controlType || '')
-    setCtrlManual(true)
+    setTechnician(inst.technician?._id || (typeof inst.technician === 'string' ? inst.technician : '') || '')
+    setTechnicianName(inst.technicianName || inst.technician?.fullName || '')
     setNotes(inst.notes || '')
-    if (inst.deviceProduct) {
-      setDevice(productList.find(p => p._id === inst.deviceProduct)
-        || (inst.deviceType ? { _id: inst.deviceProduct, name: inst.deviceType } : null))
+    const devId = inst.deviceProduct?._id || inst.deviceProduct
+    if (devId) {
+      setDevice(productList.find(p => p._id === devId)
+        || { _id: devId, name: inst.deviceProduct?.name || inst.deviceType })
     } else if (inst.deviceType) {
       setDevice({ _stub: true, name: inst.deviceType })
     }
@@ -311,47 +336,51 @@ export default function InstallationFormPage() {
     return e
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
+  function buildPayload() {
+    const tech = technicians.find(t => t._id === technician)
+    return {
+      client:     selectedClient?._id,
+      clientName: selectedClient?.name,
+      address:    address.trim(),
+      location:   location.trim()   || undefined,
+      installationDate: installDate || undefined,
+      technician:     technician || undefined,
+      technicianName: tech ? (tech.fullName || tech.username) : (technicianName || undefined),
+      deviceProduct: selectedDevice?._id && !selectedDevice?._stub ? selectedDevice._id : undefined,
+      deviceType:    selectedDevice?.name || undefined,
+      serialNumber:  serialNumber.trim() || undefined,
+      batteries: batteries.map(b => ({
+        product:        b.product?._id && !b.product?._stub ? b.product._id : undefined,
+        productName:    b.product?.name || undefined,
+        expiryDate:     b.expiryDate     || undefined,
+        activationDate: b.activationDate || undefined,
+        level:          b.level !== '' ? Number(b.level) : undefined,
+        notes:          b.notes.trim()   || undefined,
+      })),
+      electrodes: electrodes.map(e => ({
+        product:     e.product?._id && !e.product?._stub ? e.product._id : undefined,
+        productName: e.product?.name || undefined,
+        expiryDate:  e.expiryDate   || undefined,
+        notes:       e.notes.trim() || undefined,
+      })),
+      notes: notes.trim() || undefined,
+    }
+  }
+
+  async function persist() {
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
     setSaving(true)
     try {
-      const payload = {
-        client:     selectedClient?._id,
-        clientName: selectedClient?.name,
-        address:    address.trim(),
-        location:   location.trim()   || undefined,
-        controlType: controlType      || undefined,
-        installationDate: installDate || undefined,
-        nextControlDate:  controlDate || undefined,
-        deviceProduct: selectedDevice?._id && !selectedDevice?._stub ? selectedDevice._id : undefined,
-        deviceType:    selectedDevice?.name || undefined,
-        serialNumber:  serialNumber.trim() || undefined,
-        batteries: batteries.map(b => ({
-          product:        b.product?._id && !b.product?._stub ? b.product._id : undefined,
-          productName:    b.product?.name || undefined,
-          expiryDate:     b.expiryDate     || undefined,
-          activationDate: b.activationDate || undefined,
-          level:          b.level !== '' ? Number(b.level) : undefined,
-          notes:          b.notes.trim()   || undefined,
-        })),
-        electrodes: electrodes.map(e => ({
-          product:     e.product?._id && !e.product?._stub ? e.product._id : undefined,
-          productName: e.product?.name || undefined,
-          expiryDate:  e.expiryDate   || undefined,
-          notes:       e.notes.trim() || undefined,
-        })),
-        notes: notes.trim() || undefined,
-      }
-      if (isEdit) {
-        await updateInstallation(id, payload)
-        toast.success('Installation mise à jour.')
-        navigate(`/devices/${id}`)
-      } else {
+      const payload = buildPayload()
+      if (!isEdit) {
         const created = await createInstallation(payload)
         toast.success('Installation créée.')
         navigate(`/devices/${created._id}`)
+      } else {
+        await updateInstallation(id, payload)
+        toast.success('Installation mise à jour.')
+        navigate(`/devices/${id}`)
       }
     } catch (err) {
       toast.error(err.message || 'Erreur lors de la sauvegarde.')
@@ -359,6 +388,18 @@ export default function InstallationFormPage() {
       setSaving(false)
     }
   }
+
+  function handleSubmit(e) { e.preventDefault(); persist() }
+
+  const isPending = isEdit && loadedStatus === 'a_installer'
+
+  // Vérif n° de série vs stock (create ou pose en attente uniquement — un appareil
+  // déjà installé a été déduit du stock, ne pas alerter dans ce cas).
+  const deviceIsProduct = selectedDevice?._id && !selectedDevice?._stub
+  const serialTrim      = serialNumber.trim()
+  const checkSerial     = !isEdit || loadedStatus === 'a_installer'
+  const serialInStock   = !!(deviceIsProduct && serialTrim && inStockSerials.includes(serialTrim))
+  const serialMissing   = checkSerial && deviceIsProduct && !!serialTrim && !serialInStock
 
   /* ─── Render ──────────────────────────────────────────────── */
   return (
@@ -387,111 +428,145 @@ export default function InstallationFormPage() {
 
         {/* ── 1. Client & Site ─────────────────────── */}
         <FormCard icon={Users} color="#f97316" title="Client & Site">
-          <div className="ifc-two-col">
-            <div>
-              <label className="form-label">Client *</label>
-              <ComboSearch
-                items={clients.filter(c => c.isActive !== false)}
-                value={selectedClient}
-                onChange={c => { setClient(c); setErrors(e => ({ ...e, client: undefined })) }}
-                onClear={() => setClient(null)}
-                displayFn={c => c.name}
-                subtextFn={c => [c.address?.city, c.address?.governorate].filter(Boolean).join(', ') || null}
-                placeholder="Rechercher un client…"
-                onCreateNew={() => setClientModal(true)}
-                emptyText="Aucun client trouvé"
-              />
-              {errors.client && <p className="form-error">{errors.client}</p>}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {fromContract ? (
+            <div className="ifc-two-col">
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  Adresse du site *
-                  {selectedClient?.address && !isEdit && (
-                    <button type="button" className="ifc-autofill-btn"
-                      onClick={() => {
-                        const a = selectedClient.address
-                        const parts = [a.street, a.city, a.governorate].filter(Boolean)
-                        setAddress(parts.join(', '))
-                      }}>
-                      <RefreshCw size={10} /> Auto
-                    </button>
-                  )}
-                </label>
-                <input
-                  className={`form-input form-input--plain${errors.address ? ' form-input--error' : ''}`}
-                  value={address}
-                  onChange={e => { setAddress(e.target.value); setErrors(err => ({ ...err, address: undefined })) }}
-                  placeholder="ex. Avenue Habib Bourguiba, Tunis…"
+                <label className="form-label">Client</label>
+                <div className="ifc-readonly-field">{selectedClient?.name || '—'}</div>
+                <p className="ifc-locked-hint"><Lock size={10} /> Défini par le contrat</p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Adresse du site</label>
+                  <div className="ifc-readonly-field">{address || '—'}</div>
+                </div>
+                {location && (
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Lieu précis</label>
+                    <div className="ifc-readonly-field">{location}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="ifc-two-col">
+              <div>
+                <label className="form-label">Client *</label>
+                <ComboSearch
+                  items={clients.filter(c => c.isActive !== false)}
+                  value={selectedClient}
+                  onChange={c => { setClient(c); setErrors(e => ({ ...e, client: undefined })) }}
+                  onClear={() => setClient(null)}
+                  displayFn={c => c.name}
+                  subtextFn={c => [c.address?.city, c.address?.governorate].filter(Boolean).join(', ') || null}
+                  placeholder="Rechercher un client…"
+                  onCreateNew={() => setClientModal(true)}
+                  emptyText="Aucun client trouvé"
                 />
-                {errors.address && <span className="form-error">{errors.address}</span>}
+                {errors.client && <p className="form-error">{errors.client}</p>}
               </div>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Lieu précis</label>
-                <input className="form-input form-input--plain" value={location}
-                  onChange={e => setLocation(e.target.value)}
-                  placeholder="ex. 2ème étage, Réception, Hall…" />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Adresse du site *
+                    {selectedClient?.address && !isEdit && (
+                      <button type="button" className="ifc-autofill-btn"
+                        onClick={() => {
+                          const a = selectedClient.address
+                          const parts = [a.street, a.city, a.governorate].filter(Boolean)
+                          setAddress(parts.join(', '))
+                        }}>
+                        <RefreshCw size={10} /> Auto
+                      </button>
+                    )}
+                  </label>
+                  <input
+                    className={`form-input form-input--plain${errors.address ? ' form-input--error' : ''}`}
+                    value={address}
+                    onChange={e => { setAddress(e.target.value); setErrors(err => ({ ...err, address: undefined })) }}
+                    placeholder="ex. Avenue Habib Bourguiba, Tunis…"
+                  />
+                  {errors.address && <span className="form-error">{errors.address}</span>}
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Lieu précis</label>
+                  <input className="form-input form-input--plain" value={location}
+                    onChange={e => setLocation(e.target.value)}
+                    placeholder="ex. 2ème étage, Réception, Hall…" />
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </FormCard>
 
-        {/* ── 2. Appareil & Contrôle ───────────────── */}
-        <FormCard icon={Zap} color="#3b82f6" title="Appareil DAE & Contrôle">
+        {/* ── 2. Appareil DAE ──────────────────────── */}
+        <FormCard icon={Zap} color="#3b82f6" title="Appareil DAE">
           <div className="ifc-two-col">
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Modèle DAE</label>
-              <ComboSearch
-                items={deviceProducts}
-                value={selectedDevice}
-                onChange={setDevice}
-                onClear={() => setDevice(null)}
-                displayFn={p => p.name}
-                subtextFn={p => [p.brand, p.reference].filter(Boolean).join(' · ') || null}
-                placeholder="ZOLL, Philips, Schiller…"
-                onCreateNew={() => setProductModal({ type: 'device' })}
-                emptyText="Aucun défibrillateur dans le catalogue"
-              />
+              {fromContract ? (
+                <>
+                  <div className="ifc-readonly-field">{selectedDevice?.name || '—'}</div>
+                  <p className="ifc-locked-hint"><Lock size={10} /> Défini par le contrat</p>
+                </>
+              ) : (
+                <ComboSearch
+                  items={deviceProducts}
+                  value={selectedDevice}
+                  onChange={setDevice}
+                  onClear={() => setDevice(null)}
+                  displayFn={p => p.name}
+                  subtextFn={p => [p.brand, p.reference].filter(Boolean).join(' · ') || null}
+                  placeholder="ZOLL, Philips, Schiller…"
+                  onCreateNew={() => setProductModal({ type: 'device' })}
+                  emptyText="Aucun défibrillateur dans le catalogue"
+                />
+              )}
             </div>
             <div className="form-group" style={{ margin: 0 }}>
               <label className="form-label">Numéro de série</label>
-              <input className="form-input form-input--plain" value={serialNumber}
+              <input className={`form-input form-input--plain${serialMissing ? ' form-input--warn' : ''}`}
+                value={serialNumber}
                 onChange={e => setSerial(e.target.value)} placeholder="ex. D00000096721" />
+              {serialMissing && (
+                <p className="ifc-serial-warn">
+                  <AlertTriangle size={11} /> Absent du stock de « {selectedDevice?.name} » — il sera ajouté au stock puis déduit à l'installation (traçabilité).
+                </p>
+              )}
+              {serialInStock && (
+                <p className="ifc-serial-ok">
+                  <CheckCircle2 size={11} /> En stock — sera déduit à l'installation.
+                </p>
+              )}
             </div>
           </div>
 
-          <div className="ifc-divider" />
-
-          <div className="ifc-two-col">
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Date d'installation</label>
-              <input type="date" className="form-input form-input--plain"
-                value={installDate} onChange={e => setInstDate(e.target.value)} />
-            </div>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                Prochain contrôle
-                {!ctrlManual && installDate && (
-                  <span className="ifc-auto-badge">auto</span>
-                )}
-                {ctrlManual && (
-                  <button type="button" className="ifc-autofill-btn"
-                    onClick={() => setCtrlManual(false)}>
-                    <RefreshCw size={10} /> Recalculer
-                  </button>
-                )}
-              </label>
-              <input type="date" className="form-input form-input--plain"
-                value={controlDate}
-                onChange={e => { setCtrlDate(e.target.value); setCtrlManual(true) }} />
-            </div>
-          </div>
-
-          <div>
-            <label className="form-label" style={{ marginBottom: 8 }}>Type de contrôle</label>
-            <ControlTypePills value={controlType} onChange={setControlType} />
-          </div>
+          {!isPending && (
+            <>
+              <div className="ifc-divider" />
+              <div className="ifc-two-col">
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Date d'installation</label>
+                  <input type="date" className="form-input form-input--plain"
+                    value={installDate} onChange={e => setInstDate(e.target.value)} />
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Intervenant / installateur</label>
+                  <select className="form-input form-input--plain" value={technician}
+                    onChange={e => setTechnician(e.target.value)}>
+                    <option value="">— Non assigné</option>
+                    {technicians.map(t => <option key={t._id} value={t._id}>{t.fullName || t.username}</option>)}
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
+          {isPending && (
+            <p className="ifc-locked-hint" style={{ marginTop: 10 }}>
+              <Lock size={10} /> La date, l'heure et l'intervenant se gèrent depuis la section « Planifier l'installation » de la fiche.
+            </p>
+          )}
         </FormCard>
 
         {/* ── 3. Composants ───────────────────────── */}

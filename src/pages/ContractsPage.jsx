@@ -7,12 +7,11 @@ import {
 } from 'lucide-react'
 import {
   getContracts, getContractStats, archiveContract, restoreContract, destroyContract,
-  CONTRACT_TYPES, CONTRACT_STATUSES,
+  CONTRACT_STATUSES,
 } from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 
 const LIMIT = 20
-const TYPE_MAP   = Object.fromEntries(CONTRACT_TYPES.map(t => [t.value, t.label]))
 const STATUS_MAP = Object.fromEntries(CONTRACT_STATUSES.map(s => [s.value, s]))
 
 function formatApiError(err) {
@@ -73,7 +72,6 @@ export default function ContractsPage() {
   const [page,       setPage]       = useState(1)
   const [search,     setSearch]     = useState('')
   const [statusF,    setStatusF]    = useState('')
-  const [typeF,      setTypeF]      = useState('')
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
   const [archiving,  setArchiving]  = useState(null)
@@ -94,18 +92,17 @@ export default function ContractsPage() {
       const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false' }
       if (search)  params.search = search
       if (statusF) params.status = statusF
-      if (typeF)   params.type   = typeF
       const res = await getContracts(params)
       setContracts(res.data || [])
       setTotal(res.total || 0)
     } catch (err) {
       const msg = formatApiError(err); setError(msg); toast.error(msg)
     } finally { setLoading(false) }
-  }, [page, search, statusF, typeF, isArchived])
+  }, [page, search, statusF, isArchived])
 
   useEffect(() => { fetchStats() }, [fetchStats])
   useEffect(() => { fetchContracts() }, [fetchContracts])
-  useEffect(() => { setPage(1) }, [search, tab, statusF, typeF])
+  useEffect(() => { setPage(1) }, [search, tab, statusF])
 
   async function handleRestore(c) {
     try { await restoreContract(c._id); toast.success('Contrat restauré.'); fetchContracts(); fetchStats() }
@@ -131,7 +128,7 @@ export default function ContractsPage() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className={`btn btn--ghost${isArchived ? ' btn--ghost-active' : ''}`}
-            onClick={() => { setTab(isArchived ? 'active' : 'archived'); setSearch(''); setStatusF(''); setTypeF('') }}>
+            onClick={() => { setTab(isArchived ? 'active' : 'archived'); setSearch(''); setStatusF('') }}>
             <Archive size={14} /> {isArchived ? '← Contrats actifs' : 'Archivés'}
           </button>
           {!isArchived && (
@@ -171,16 +168,10 @@ export default function ContractsPage() {
           {search && <button className="search-clear" onClick={() => setSearch('')}><X size={13} /></button>}
         </div>
         {!isArchived && (
-          <>
-            <select className="cat-filter-select" value={statusF} onChange={e => setStatusF(e.target.value)}>
-              <option value="">Tous les statuts</option>
-              {CONTRACT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-            <select className="cat-filter-select" value={typeF} onChange={e => setTypeF(e.target.value)}>
-              <option value="">Tous les types</option>
-              {CONTRACT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-          </>
+          <select className="cat-filter-select" value={statusF} onChange={e => setStatusF(e.target.value)}>
+            <option value="">Tous les statuts</option>
+            {CONTRACT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
         )}
       </div>
 
@@ -192,7 +183,7 @@ export default function ContractsPage() {
         ) : contracts.length === 0 ? (
           <div className="table-empty">
             <FileText size={36} color="var(--gray-300)" />
-            <p>{search || statusF || typeF ? 'Aucun contrat pour ces critères.' : isArchived ? 'Aucun contrat archivé.' : 'Aucun contrat enregistré.'}</p>
+            <p>{search || statusF ? 'Aucun contrat pour ces critères.' : isArchived ? 'Aucun contrat archivé.' : 'Aucun contrat enregistré.'}</p>
             {!search && !isArchived && (
               <button className="btn btn--primary" onClick={() => navigate('/contrats/new')}>
                 <Plus size={14} /> Créer le premier contrat
@@ -203,10 +194,11 @@ export default function ContractsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ minWidth: 150 }}>N° / Type</th>
+                <th style={{ minWidth: 150 }}>N° de contrat</th>
                 <th style={{ minWidth: 200 }}>Client</th>
                 <th>Statut</th>
                 <th>Période</th>
+                <th>Prochain contrôle</th>
                 <th>Installations</th>
                 <th>Valeur estimée</th>
                 <th style={{ width: 100 }}></th>
@@ -219,7 +211,7 @@ export default function ContractsPage() {
                   title={isArchived ? '' : 'Voir le contrat'}>
                   <td>
                     <div className="cell-primary">{c.contractNumber || '—'}</div>
-                    <div className="cell-secondary">{TYPE_MAP[c.type] || c.type}</div>
+                    <div className="cell-secondary">Maintenance</div>
                   </td>
                   <td>
                     <div className="cell-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -229,6 +221,13 @@ export default function ContractsPage() {
                   <td><StatusBadge status={c.status} /></td>
                   <td className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
                     <Calendar size={11} style={{ verticalAlign: -1 }} /> {formatDate(c.startDate)} → {formatDate(c.endDate)}
+                  </td>
+                  <td className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
+                    {c.nextControlDate ? (
+                      <span style={{ color: new Date(c.nextControlDate) < new Date() ? 'var(--red-600)' : undefined, fontWeight: new Date(c.nextControlDate) < new Date() ? 600 : undefined }}>
+                        <Clock size={11} style={{ verticalAlign: -1 }} /> {formatDate(c.nextControlDate)}
+                      </span>
+                    ) : '—'}
                   </td>
                   <td>
                     <span className="ct-count-chip"><Zap size={11} /> {c.installations?.length || 0}</span>
