@@ -2,4 +2,7 @@ node_modules/
 backend/node_modules/
 .env
 backend/.env
+.env.prod
+cardiotrack_deploy
+cardiotrack_deploy.pub
 .claude/

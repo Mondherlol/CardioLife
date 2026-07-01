@@ -59,6 +59,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /opt/cardiotrack
+            git pull --ff-only
             docker login ghcr.io -u ${{ github.repository_owner }} -p ${{ secrets.GHCR_READ_TOKEN }}
             docker compose --env-file .env.prod -f docker-compose.prod.yml pull
             docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
