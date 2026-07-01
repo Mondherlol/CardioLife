@@ -21,6 +21,15 @@ const installationSchema = new mongoose.Schema({
   client:     { type: mongoose.Schema.Types.ObjectId, ref: 'Client' },
   clientName: { type: String, required: true, trim: true },
 
+  // Cycle de vie : à installer (planifiée, en attente) → installé (posé sur site)
+  status: { type: String, enum: ['a_installer', 'installe'], default: 'installe' },
+
+  // Planification de la pose (utilisé quand status = a_installer)
+  scheduledDate:  Date,
+  technician:     { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  technicianName: { type: String, trim: true },
+  contract:       { type: mongoose.Schema.Types.ObjectId, ref: 'Contract' },
+
   // Location
   address:  { type: String, required: true, trim: true },
   location: { type: String, trim: true },

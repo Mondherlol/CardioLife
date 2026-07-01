@@ -38,6 +38,9 @@ function computeStatus(inst) {
 }
 
 function StatusBadge({ inst }) {
+  if (inst.status === 'a_installer') {
+    return <span className="inst-badge inst-badge--pending">À installer</span>
+  }
   const s = computeStatus(inst)
   const cls = s === 'expiré'    ? 'inst-badge inst-badge--expired'
             : s === 'attention' ? 'inst-badge inst-badge--warning'

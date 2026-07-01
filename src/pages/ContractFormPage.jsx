@@ -8,10 +8,8 @@ import {
 import { getClients }      from '../api/clients'
 import { getProducts }     from '../api/products'
 import { getPacks }        from '../api/packs'
-import { getInstallations } from '../api/installations'
 import {
   getContract, createContract, updateContract, getNextNumber,
-  CONTRACT_TYPES, expandToInstallations,
 } from '../api/contracts'
 import ComboSearch from '../components/ComboSearch'
 import ClientModal from '../components/ClientModal'
@@ -65,7 +63,6 @@ export default function ContractFormPage() {
   /* ── État du contrat ── */
   const [selectedClient, setClient]   = useState(null)
   const [contractNumber, setNumber]   = useState('')
-  const [type,        setType]        = useState('maintenance')
   const [status,      setStatus]      = useState('actif')
   const [startDate,   setStartDate]   = useState(isEdit ? '' : todayStr())
   const [endDate,     setEndDate]     = useState(isEdit ? '' : addMonths(todayStr(), 12))
@@ -75,10 +72,6 @@ export default function ContractFormPage() {
   const [lineItems,     setLineItems]     = useState([])   // { _key, product, productName, category, quantity, unitPrice, fromPack }
   const [services,      setServices]      = useState([])   // { _key, name, price, fromPack }
   const [packRefs,      setPackRefs]      = useState([])   // { pack, name }
-  const [installDrafts, setInstallDrafts] = useState([])   // nouvelles installations à créer
-  const [linkedInstalls,setLinkedInstalls]= useState([])   // installations existantes rattachées (objets)
-
-  const [clientInstalls, setClientInstalls] = useState([]) // installations existantes du client
 
   const [errors,  setErrors]  = useState({})
   const [saving,  setSaving]  = useState(false)
@@ -107,7 +100,6 @@ export default function ContractFormPage() {
   function populate(ct, clientList) {
     setClient(clientList.find(c => c._id === (ct.client?._id || ct.client)) || ct.client || null)
     setNumber(ct.contractNumber || '')
-    setType(ct.type || 'maintenance')
     setStatus(ct.status || 'actif')
     setStartDate(toDateInput(ct.startDate))
     setEndDate(toDateInput(ct.endDate))
@@ -121,21 +113,12 @@ export default function ContractFormPage() {
     })))
     setServices((ct.services || []).map(s => ({ _key: key(), name: s.name, price: s.price ?? '', fromPack: s.fromPack || '' })))
     setPackRefs((ct.packs || []).map(p => ({ pack: p.pack?._id || p.pack, name: p.name })))
-    setLinkedInstalls(ct.installations || [])
   }
 
   /* ── Auto-fin de contrat depuis la date de début (création) ── */
   useEffect(() => {
     if (!isEdit && startDate) setEndDate(prev => prev || addMonths(startDate, 12))
   }, [startDate, isEdit])
-
-  /* ── Installations existantes du client sélectionné ── */
-  useEffect(() => {
-    if (!selectedClient?._id) { setClientInstalls([]); return }
-    getInstallations({ client: selectedClient._id, limit: 500 })
-      .then(res => setClientInstalls(res.data || res || []))
-      .catch(() => setClientInstalls([]))
-  }, [selectedClient])
 
   /* ── Ajouts ── */
   function addPack(pack) {
@@ -156,13 +139,6 @@ export default function ContractFormPage() {
       ...prev,
       ...(pack.services || []).map(s => ({ _key: key(), name: s.name, price: s.price ?? '', fromPack: pack.name })),
     ])
-    const drafts = expandToInstallations(pack.products, pack.name).map(d => ({
-      ...d, _key: key(),
-      address: clientAddress(selectedClient), location: '', serialNumber: '',
-      installationDate: todayStr(),
-      nextControlDate: addMonths(todayStr(), periodicity === 'semestriel' ? 6 : 12),
-    }))
-    setInstallDrafts(prev => [...prev, ...drafts])
     toast.success(`Pack « ${pack.name} » ajouté.`)
   }
 
@@ -171,22 +147,9 @@ export default function ContractFormPage() {
       _key: key(), product, productName: product.name, category: product.category,
       quantity: qty, unitPrice: product.salePrice ?? '', fromPack: '',
     }])
-    if (product.category === 'defibrillateur') {
-      const drafts = expandToInstallations([{ product, quantity: qty }], 'Produit seul').map(d => ({
-        ...d, _key: key(),
-        address: clientAddress(selectedClient), location: '', serialNumber: '',
-        installationDate: todayStr(),
-        nextControlDate: addMonths(todayStr(), periodicity === 'semestriel' ? 6 : 12),
-      }))
-      setInstallDrafts(prev => [...prev, ...drafts])
-    }
   }
 
   function addService() { setServices(prev => [...prev, { _key: key(), name: '', price: '', fromPack: '' }]) }
-
-  function attachInstall(inst) {
-    setLinkedInstalls(prev => prev.some(i => i._id === inst._id) ? prev : [...prev, inst])
-  }
 
   /* ── Valeur estimée ── */
   const estimatedValue = useMemo(() => {
@@ -213,7 +176,7 @@ export default function ContractFormPage() {
         contractNumber: contractNumber.trim() || undefined,
         client:     selectedClient._id,
         clientName: selectedClient.name,
-        type, status,
+        status,
         startDate:  startDate || undefined,
         endDate:    endDate   || undefined,
         controlPeriodicity: periodicity || '',
@@ -230,16 +193,6 @@ export default function ContractFormPage() {
         services: services.filter(s => s.name.trim()).map(s => ({
           name: s.name.trim(), price: Number(s.price) || 0, fromPack: s.fromPack || undefined,
         })),
-        newInstallations: installDrafts.map(d => ({
-          client: selectedClient._id, clientName: selectedClient.name,
-          address: d.address, location: d.location, serialNumber: d.serialNumber,
-          installationDate: d.installationDate || undefined,
-          nextControlDate:  d.nextControlDate  || undefined,
-          controlType: periodicity || undefined,
-          deviceProduct: d.deviceProduct, deviceType: d.deviceType,
-          batteries: d.batteries, electrodes: d.electrodes,
-        })),
-        installations: linkedInstalls.map(i => i._id),  // existants conservés
       }
       if (isEdit) {
         await updateContract(id, payload)
@@ -258,8 +211,6 @@ export default function ContractFormPage() {
   }
 
   const availablePacks = packs
-  const attachedIds = new Set(linkedInstalls.map(i => i._id))
-  const availableInstalls = clientInstalls.filter(i => !attachedIds.has(i._id))
 
   return (
     <div className="page-content">
@@ -312,29 +263,21 @@ export default function ContractFormPage() {
 
           <div className="ifc-divider" />
 
-          <div className="ifc-two-col">
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Type de contrat</label>
-              <select className="form-input form-input--plain" value={type} onChange={e => setType(e.target.value)}>
-                {CONTRACT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label className="form-label">Statut</label>
-              <div className="ct-status-pills">
-                {[
-                  { value: 'brouillon', label: 'Brouillon' },
-                  { value: 'actif',     label: 'Actif' },
-                  { value: 'expire',    label: 'Expiré' },
-                  { value: 'resilie',   label: 'Résilié' },
-                ].map(s => (
-                  <button key={s.value} type="button"
-                    className={`ct-status-pill ct-status-pill--${s.value}${status === s.value ? ' ct-status-pill--on' : ''}`}
-                    onClick={() => setStatus(s.value)}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Statut</label>
+            <div className="ct-status-pills">
+              {[
+                { value: 'brouillon', label: 'Brouillon' },
+                { value: 'actif',     label: 'Actif' },
+                { value: 'expire',    label: 'Expiré' },
+                { value: 'resilie',   label: 'Résilié' },
+              ].map(s => (
+                <button key={s.value} type="button"
+                  className={`ct-status-pill ct-status-pill--${s.value}${status === s.value ? ' ct-status-pill--on' : ''}`}
+                  onClick={() => setStatus(s.value)}>
+                  {s.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -470,106 +413,6 @@ export default function ContractFormPage() {
               <span>Valeur estimée du contrat</span>
               <strong>{formatPrice(estimatedValue)}</strong>
             </div>
-          )}
-        </FormCard>
-
-        {/* 3. Installations */}
-        <FormCard icon={Zap} color="#3b82f6" title="Installations couvertes"
-          action={
-            !selectedClient ? null : (
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                {installDrafts.length + linkedInstalls.length} installation(s)
-              </span>
-            )
-          }>
-          {!selectedClient ? (
-            <div className="ifc-comp-empty">
-              <Zap size={30} color="var(--gray-300)" />
-              <p>Sélectionnez d'abord un client.</p>
-            </div>
-          ) : (
-            <>
-              {/* Rattacher une existante */}
-              <div className="form-group">
-                <label className="form-label"><Link2 size={12} /> Rattacher une installation existante</label>
-                <ComboSearch
-                  items={availableInstalls}
-                  value={null}
-                  onChange={attachInstall}
-                  onClear={() => {}}
-                  displayFn={i => i.deviceType || 'DAE'}
-                  subtextFn={i => [i.address, i.serialNumber && `N° ${i.serialNumber}`].filter(Boolean).join(' · ') || null}
-                  placeholder={availableInstalls.length ? 'Rechercher une installation du client…' : 'Aucune installation existante'}
-                  emptyText="Aucune installation existante pour ce client"
-                />
-              </div>
-
-              {/* Installations existantes rattachées */}
-              {linkedInstalls.map(inst => (
-                <div key={inst._id} className="ct-install-card ct-install-card--linked">
-                  <span className="ct-install-icon ct-install-icon--linked"><Link2 size={14} /></span>
-                  <div className="ct-install-body">
-                    <div className="ct-install-title">{inst.deviceType || 'DAE'} <span className="ct-install-badge">existante</span></div>
-                    <div className="ct-install-sub">
-                      {[inst.address, inst.serialNumber && `N° ${inst.serialNumber}`].filter(Boolean).join(' · ') || '—'}
-                    </div>
-                  </div>
-                  <button type="button" className="pack-row-remove"
-                    onClick={() => setLinkedInstalls(prev => prev.filter(i => i._id !== inst._id))}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-
-              {/* Brouillons d'installations à créer */}
-              {installDrafts.map((d, idx) => (
-                <div key={d._key} className="ct-install-card">
-                  <span className="ct-install-icon"><Zap size={14} /></span>
-                  <div className="ct-install-body" style={{ width: '100%' }}>
-                    <div className="ct-install-title">
-                      {d.deviceType} <span className="ct-install-badge ct-install-badge--new">à créer</span>
-                      {d.source && <span className="ct-frompack-chip">{d.source}</span>}
-                    </div>
-                    <div className="ct-install-fields">
-                      <div className="form-group" style={{ margin: 0, flex: 2 }}>
-                        <label className="form-label"><MapPin size={11} /> Adresse du site</label>
-                        <input className="form-input form-input--plain" value={d.address}
-                          onChange={e => setInstallDrafts(prev => prev.map((x, i) => i === idx ? { ...x, address: e.target.value } : x))}
-                          placeholder="Adresse d'installation" />
-                      </div>
-                      <div className="form-group" style={{ margin: 0, flex: 1 }}>
-                        <label className="form-label">N° de série</label>
-                        <input className="form-input form-input--plain" value={d.serialNumber}
-                          onChange={e => setInstallDrafts(prev => prev.map((x, i) => i === idx ? { ...x, serialNumber: e.target.value } : x))}
-                          placeholder="Optionnel" />
-                      </div>
-                      <div className="form-group" style={{ margin: 0, flex: 1 }}>
-                        <label className="form-label">Date d'installation</label>
-                        <input type="date" className="form-input form-input--plain" value={d.installationDate}
-                          onChange={e => setInstallDrafts(prev => prev.map((x, i) => i === idx ? { ...x, installationDate: e.target.value } : x))} />
-                      </div>
-                    </div>
-                    {(d.batteries.length > 0 || d.electrodes.length > 0) && (
-                      <div className="ct-install-comps">
-                        {d.batteries.map((b, i) => <span key={`b${i}`} className="ct-comp-chip"><Battery size={10} /> {b.productName}</span>)}
-                        {d.electrodes.map((e, i) => <span key={`e${i}`} className="ct-comp-chip ct-comp-chip--elec"><Zap size={10} /> {e.productName}</span>)}
-                      </div>
-                    )}
-                  </div>
-                  <button type="button" className="pack-row-remove"
-                    onClick={() => setInstallDrafts(prev => prev.filter((_, i) => i !== idx))}>
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-
-              {installDrafts.length === 0 && linkedInstalls.length === 0 && (
-                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                  Ajoutez un pack ou un produit défibrillateur ci-dessus pour générer des installations,
-                  ou rattachez une installation existante.
-                </p>
-              )}
-            </>
           )}
         </FormCard>
 

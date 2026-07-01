@@ -5,7 +5,7 @@ import {
   ArrowLeft, CheckCircle2, Clock, AlertCircle, MapPin, Zap,
   Camera, Trash2, X, Save, ImagePlus, Hash, Navigation,
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
-  ChevronDown, ClipboardList, History, Download,
+  ChevronDown, ClipboardList, History, Download, FileText,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -49,6 +49,16 @@ function fmtTs(d) {
 function isoDate(d) {
   if (!d) return ''
   return new Date(d).toISOString().slice(0, 10)
+}
+function isoDateTime(d) {
+  if (!d) return ''
+  const dt = new Date(d)
+  const pad = n => String(n).padStart(2, '0')
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`
+}
+function fmtTime(d) {
+  if (!d) return ''
+  return new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 
 /* ─── AutoField ─── */
@@ -136,6 +146,53 @@ function CloseConfirm({ onClose, onConfirm, loading }) {
   )
 }
 
+/* ─── Contexte du contrôle (type + installation + contrat) ─── */
+const CTRL_CTX = {
+  semestriel:   { label: 'Semestriel (contrat)', cls: 'ct-type-badge ct-type-badge--semestriel' },
+  annuel:       { label: 'Annuel (contrat)',     cls: 'ct-type-badge ct-type-badge--annuel' },
+  hors_contrat: { label: 'Hors contrat',         cls: 'ct-type-badge ct-type-badge--hors' },
+}
+function ControlContextSection({ iv, navigate }) {
+  const ct       = CTRL_CTX[iv.controlType] || CTRL_CTX.hors_contrat
+  const inst     = iv.installation
+  const contract = iv.contract
+  return (
+    <div className="fiche-page-section">
+      <div className="fiche-page-section-title"><ClipboardList size={14} /> Contexte du contrôle</div>
+      <div className="fiche-page-body">
+        <div className="ctx-grid">
+          <div className="ctx-item">
+            <span className="ctx-label">Type de contrôle</span>
+            <span className={ct.cls}>{ct.label}</span>
+          </div>
+          <div className="ctx-item">
+            <span className="ctx-label">Installation liée</span>
+            {inst?._id ? (
+              <button type="button" className="cell-link" onClick={() => navigate(`/devices/${inst._id}`)}>
+                <Zap size={12} /> {inst.deviceType || 'DAE'}{inst.serialNumber ? ` · ${inst.serialNumber}` : ''}
+              </button>
+            ) : <span className="ctx-muted">Aucune installation liée</span>}
+          </div>
+          <div className="ctx-item">
+            <span className="ctx-label">Contrat</span>
+            {contract?._id ? (
+              <button type="button" className="cell-link" onClick={() => navigate(`/contrats/${contract._id}`)}>
+                <FileText size={12} /> {contract.contractNumber || 'Voir le contrat'}
+              </button>
+            ) : <span className="ctx-muted">Hors contrat</span>}
+          </div>
+          {inst?.address && (
+            <div className="ctx-item">
+              <span className="ctx-label">Adresse</span>
+              <span className="ctx-value"><MapPin size={12} /> {inst.address}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Page ─── */
 export default function InterventionFichePage() {
   const { id }   = useParams()
@@ -203,7 +260,7 @@ export default function InterventionFichePage() {
   useEffect(() => {
     if (!iv) return
     setAdminForm({
-      scheduledDate:  isoDate(iv.scheduledDate),
+      scheduledDate:  isoDateTime(iv.scheduledDate),
       notes:          iv.notes || '',
       technicien:     iv.technicien?._id || (typeof iv.technicien === 'string' ? iv.technicien : '') || '',
       technicienName: iv.technicienName || iv.technicien?.fullName || '',
@@ -384,7 +441,7 @@ export default function InterventionFichePage() {
                 </span>
               )}
               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <Calendar size={12} /> Planifié le {fmt(iv.scheduledDate)}
+                <Calendar size={12} /> Planifié le {fmt(iv.scheduledDate)}{iv.scheduledDate ? ` à ${fmtTime(iv.scheduledDate)}` : ''}
               </span>
               {iv.technicienName && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -410,7 +467,7 @@ export default function InterventionFichePage() {
           >
             <Download size={14} /> PDF
           </button>
-          {!isTermine && (
+          {isTech && !isTermine && (
             <button className="btn btn--primary" onClick={() => setShowClose(true)}>
               <CheckCircle2 size={14} /> Clôturer l'intervention
             </button>
@@ -474,6 +531,9 @@ export default function InterventionFichePage() {
       {/* ══ Fiche tab ══ */}
       {tab === 'fiche' && (
         <>
+          {/* Contexte (installation / contrat / type) — vue non-technicien */}
+          {!isTech && <ControlContextSection iv={iv} navigate={navigate} />}
+
           {/* Notes pour le technicien */}
           {!isAdmin && iv.notes && (
             <div className="fiche-admin-notes">
@@ -495,9 +555,9 @@ export default function InterventionFichePage() {
               </div>
               <div className="fiche-page-body">
                 <div className="fiche-row-2col">
-                  <AutoField label="Date planifiée" icon={Calendar} saving={savingAdminField === 'scheduledDate'}>
+                  <AutoField label="Date et heure planifiées" icon={Calendar} saving={savingAdminField === 'scheduledDate'}>
                     <input
-                      type="date"
+                      type="datetime-local"
                       className={`fiche-input${adminReadOnly ? ' fiche-input--ro' : ''}`}
                       value={adminForm.scheduledDate}
                       readOnly={adminReadOnly}
@@ -549,6 +609,9 @@ export default function InterventionFichePage() {
             </div>
           )}
 
+          {/* Fiche appareil — technicien : toujours ; non-technicien : seulement une fois remplie/validée */}
+          {(isTech || isTermine) ? (
+          <>
           {/* ── Section appareil ── */}
           <div className="fiche-page-section">
             <button
@@ -729,9 +792,21 @@ export default function InterventionFichePage() {
               </AutoField>
             </div>
           </div>
+          </>
+          ) : (
+            <div className="fiche-page-section">
+              <div className="fiche-locked-note">
+                <Clock size={20} />
+                <div>
+                  <strong>Fiche non encore remplie</strong>
+                  <p>Le technicien n'a pas encore rempli et validé la fiche d'intervention. Elle s'affichera ici une fois le contrôle réalisé.</p>
+                </div>
+              </div>
+            </div>
+          )}
 
-          {/* Clôturer */}
-          {!isTermine && (
+          {/* Clôturer — technicien uniquement */}
+          {isTech && !isTermine && (
             <div className="fiche-close-bar">
               <p className="fiche-close-hint">Tout est saisi ? Vous pouvez clôturer l'intervention.</p>
               <button className="btn btn--primary" style={{ minWidth: 200 }} onClick={() => setShowClose(true)}>

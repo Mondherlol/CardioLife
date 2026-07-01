@@ -7,4 +7,5 @@ export const getInstallations  = (params = {}) => {
 export const getInstallation   = (id)       => get(`/installations/${id}`)
 export const createInstallation = (data)    => post('/installations', data)
 export const updateInstallation = (id, data) => put(`/installations/${id}`, data)
+export const completeInstallation = (id, data) => post(`/installations/${id}/complete`, data)
 export const deleteInstallation = (id)      => del(`/installations/${id}`)

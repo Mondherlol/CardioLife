@@ -6,7 +6,7 @@ import timeGridPlugin  from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin      from '@fullcalendar/list'
 import frLocale        from '@fullcalendar/core/locales/fr'
-import { Calendar, Plus, X, AlertTriangle, Trash2, Search, Check, ChevronDown, Users, Wrench } from 'lucide-react'
+import { Calendar, Plus, X, AlertTriangle, Trash2, Search, Check, ChevronDown, Users, Wrench, Zap } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
   getAppointments,
@@ -15,6 +15,7 @@ import {
   deleteAppointment,
 } from '../api/appointments'
 import { getInterventions } from '../api/interventions'
+import { getInstallations } from '../api/installations'
 import { getClients } from '../api/clients'
 import { getUsers }   from '../api/users'
 
@@ -51,9 +52,9 @@ export const STATUS_OPTS = [
   { value: 'annule',    label: 'Annulé',    color: '#ef4444' },
 ]
 
-// Types proposés dans la modal : « intervention » exclu (les interventions se
-// créent uniquement depuis la page Interventions et apparaissent quand même ici).
-const MODAL_TYPE_OPTS = TYPE_OPTS.filter(t => t.value !== 'intervention')
+// Types proposés dans la modal : contrôles et installations exclus (ils se créent
+// depuis la page Contrôles / les contrats et apparaissent quand même ici).
+const MODAL_TYPE_OPTS = TYPE_OPTS.filter(t => !['controle', 'intervention', 'installation'].includes(t.value))
 
 // Durées prédéfinies (en minutes). 1 h par défaut.
 const DURATION_OPTS = [
@@ -97,13 +98,13 @@ const pad2 = n => String(n).padStart(2, '0')
 function localDateStr(d) { d = new Date(d); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
 function localTimeStr(d) { d = new Date(d); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
 
-// Une intervention (collection séparée) affichée comme évènement lecture seule.
+// Un contrôle (intervention, collection séparée) en lecture seule.
 function toInterventionEvent(iv) {
   const color = TYPE_MAP.intervention.color
   const start = new Date(iv.scheduledDate)
   return {
     id:              `intv-${iv._id}`,
-    title:           `Intervention${iv.clientName ? ' — ' + iv.clientName : ''}`,
+    title:           `Contrôle${iv.clientName ? ' — ' + iv.clientName : ''}`,
     start,
     end:             new Date(start.getTime() + 60 * 60000),
     backgroundColor: color,
@@ -111,6 +112,23 @@ function toInterventionEvent(iv) {
     textColor:       '#fff',
     editable:        false,
     extendedProps:   { kind: 'intervention', type: 'intervention', status: iv.status, clientName: iv.clientName, _intv: iv },
+  }
+}
+
+// Une pose d'installation « à installer » en lecture seule.
+function toInstallationEvent(inst) {
+  const color = TYPE_MAP.installation.color
+  const start = new Date(inst.scheduledDate)
+  return {
+    id:              `inst-${inst._id}`,
+    title:           `Installation${inst.clientName ? ' — ' + inst.clientName : ''}`,
+    start,
+    end:             new Date(start.getTime() + 60 * 60000),
+    backgroundColor: color,
+    borderColor:     color,
+    textColor:       '#fff',
+    editable:        false,
+    extendedProps:   { kind: 'installation', type: 'installation', status: inst.status, clientName: inst.clientName, _inst: inst },
   }
 }
 
@@ -539,13 +557,21 @@ export default function PlanningPage() {
     Promise.all([
       getAppointments({ start, end }).catch(() => []),
       getInterventions({ from: start, to: end }).catch(() => []),
-    ]).then(([appts, intvs]) => {
+      getInstallations({ status: 'a_installer', from: start, to: end }).catch(() => ({ data: [] })),
+    ]).then(([appts, intvs, instRes]) => {
+      const insts = Array.isArray(instRes) ? instRes : (instRes?.data || [])
       const items = [
         ...(Array.isArray(appts) ? appts : []).map(a => ({ ...a, _kind: 'appointment' })),
         ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(i => ({
           _id: i._id, _kind: 'intervention',
-          title: `Intervention${i.clientName ? ' — ' + i.clientName : ''}`,
+          title: `Contrôle${i.clientName ? ' — ' + i.clientName : ''}`,
           start: i.scheduledDate, type: 'intervention',
+          clientName: i.clientName, status: i.status,
+        })),
+        ...insts.filter(i => i.scheduledDate).map(i => ({
+          _id: i._id, _kind: 'installation',
+          title: `Installation${i.clientName ? ' — ' + i.clientName : ''}`,
+          start: i.scheduledDate, type: 'installation',
           clientName: i.clientName, status: i.status,
         })),
       ].sort((a, b) => new Date(a.start) - new Date(b.start))
@@ -561,22 +587,34 @@ export default function PlanningPage() {
   }
 
   const loadEvents = useCallback((info, success, fail) => {
-    // Le filtre « intervention » n'affiche que les interventions ; un autre filtre
-    // masque les interventions. Sans filtre, on agrège les deux sources.
-    const apptP = (!typeFilter || typeFilter !== 'intervention')
+    // Sources : RDV (appointments), contrôles (interventions), poses (installations
+    // à installer). Un filtre par type ne montre que la source correspondante.
+    const wantAppt = !typeFilter || !['intervention', 'installation'].includes(typeFilter)
+    const wantIntv = !typeFilter || typeFilter === 'intervention'
+    const wantInst = !typeFilter || typeFilter === 'installation'
+
+    const apptP = wantAppt
       ? getAppointments({
           start: info.startStr, end: info.endStr,
-          ...(typeFilter && typeFilter !== 'intervention' ? { type: typeFilter } : {}),
+          ...(typeFilter && !['intervention', 'installation'].includes(typeFilter) ? { type: typeFilter } : {}),
         }).catch(() => [])
       : Promise.resolve([])
-    const intvP = (!typeFilter || typeFilter === 'intervention')
+    const intvP = wantIntv
       ? getInterventions({ from: info.startStr, to: info.endStr }).catch(() => [])
       : Promise.resolve([])
-    Promise.all([apptP, intvP])
-      .then(([appts, intvs]) => success([
-        ...(Array.isArray(appts) ? appts : []).map(toFCEvent),
-        ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(toInterventionEvent),
-      ]))
+    const instP = wantInst
+      ? getInstallations({ status: 'a_installer', from: info.startStr, to: info.endStr }).catch(() => ({ data: [] }))
+      : Promise.resolve({ data: [] })
+
+    Promise.all([apptP, intvP, instP])
+      .then(([appts, intvs, instRes]) => {
+        const insts = Array.isArray(instRes) ? instRes : (instRes?.data || [])
+        success([
+          ...(Array.isArray(appts) ? appts : []).map(toFCEvent),
+          ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(toInterventionEvent),
+          ...insts.filter(i => i.scheduledDate).map(toInstallationEvent),
+        ])
+      })
       .catch(fail)
   }, [typeFilter])
 
@@ -587,7 +625,8 @@ export default function PlanningPage() {
 
   function handleEventClick(info) {
     const ep = info.event.extendedProps
-    if (ep.kind === 'intervention') { navigate(`/interventions/${ep._intv._id}`); return }
+    if (ep.kind === 'intervention')  { navigate(`/interventions/${ep._intv._id}`); return }
+    if (ep.kind === 'installation')  { navigate(`/devices/${ep._inst._id}`); return }
     setModal({ mode: 'edit', appt: ep._raw })
   }
 
@@ -640,12 +679,15 @@ export default function PlanningPage() {
                 <li key={`${e._kind}-${e._id}`} className="plan-today-item"
                   onClick={() => e._kind === 'intervention'
                     ? navigate(`/interventions/${e._id}`)
-                    : setModal({ mode: 'edit', appt: e })}>
+                    : e._kind === 'installation'
+                      ? navigate(`/devices/${e._id}`)
+                      : setModal({ mode: 'edit', appt: e })}>
                   <span className="plan-today-dot"
                     style={{ background: TYPE_MAP[e.type]?.color || '#6b7280' }} />
                   <div>
                     <div className="plan-today-title">
                       {e._kind === 'intervention' && <Wrench size={11} style={{ verticalAlign: -1, marginRight: 4 }} />}
+                      {e._kind === 'installation' && <Zap size={11} style={{ verticalAlign: -1, marginRight: 4 }} />}
                       {e.title}
                     </div>
                     {!e.allDay && (
@@ -720,6 +762,8 @@ export default function PlanningPage() {
           selectable
           selectMirror
           dayMaxEvents={4}
+          eventDisplay="block"
+          displayEventTime={false}
           nowIndicator
           events={loadEvents}
           select={handleSelect}

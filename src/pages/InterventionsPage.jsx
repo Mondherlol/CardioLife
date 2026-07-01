@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Wrench, Plus, Search, X, CheckCircle2,
   Clock, AlertCircle, Calendar, MapPin, Zap, User,
-  ChevronDown, AlertTriangle, ArrowRight,
+  ChevronDown, AlertTriangle, ArrowRight, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
@@ -452,6 +452,8 @@ const STATUS_FILTERS = [
   { value: 'termine',  label: 'Terminées' },
 ]
 
+const PAGE_SIZE = 100
+
 export default function InterventionsPage() {
   const { user } = useAuth()
   const navigate  = useNavigate()
@@ -464,6 +466,8 @@ export default function InterventionsPage() {
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [sortDir, setSortDir]     = useState('desc')  // tri par date planifiée
+  const [page, setPage]           = useState(1)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -478,6 +482,7 @@ export default function InterventionsPage() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => { setPage(1) }, [search, statusFilter, sortDir])
 
   const filtered = useMemo(() => {
     let list = all
@@ -494,6 +499,22 @@ export default function InterventionsPage() {
     }
     return list
   }, [all, statusFilter, search])
+
+  // Tri par date planifiée (par défaut la plus récente d'abord) + pagination
+  const sortedFiltered = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...filtered].sort((a, b) => {
+      const ta = a.scheduledDate ? new Date(a.scheduledDate).getTime() : null
+      const tb = b.scheduledDate ? new Date(b.scheduledDate).getTime() : null
+      if (ta == null && tb == null) return 0
+      if (ta == null) return 1     // sans date planifiée en dernier
+      if (tb == null) return -1
+      return (ta - tb) * dir
+    })
+  }, [filtered, sortDir])
+
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE))
+  const pageItems  = sortedFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const stats = useMemo(() => ({
     total:    all.length,
@@ -628,29 +649,45 @@ export default function InterventionsPage() {
                 <th>Client / Site</th>
                 <th>DAE</th>
                 <th>Technicien</th>
-                <th>Planifié</th>
+                <th onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                  style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                  title="Trier par date planifiée">
+                  Planifié <span style={{ color: 'var(--orange-500)', fontSize: 10 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
+                </th>
                 <th>Réalisé</th>
                 <th>Type de contrôle</th>
                 <th>Statut</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(iv => (
+              {pageItems.map(iv => (
                 <AdminRow
                   key={iv._id}
                   intervention={iv}
                   onClick={() => navigate(`/interventions/${iv._id}`)}
                 />
               ))}
-              {filtered.length === 0 && (
+              {sortedFiltered.length === 0 && (
                 <tr><td colSpan={7} className="table-empty">
                   {search || statusFilter
                     ? 'Aucun résultat pour ces critères.'
-                    : 'Aucune intervention enregistrée.'}
+                    : 'Aucun contrôle enregistré.'}
                 </td></tr>
               )}
             </tbody>
           </table>
+
+          {totalPages > 1 && (
+            <div className="pagination">
+              <button className="pag-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
+                <ChevronLeft size={15} />
+              </button>
+              <span className="pag-info">Page {page} / {totalPages} · {sortedFiltered.length} contrôle{sortedFiltered.length !== 1 ? 's' : ''}</span>
+              <button className="pag-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          )}
         </div>
       )}
 

@@ -4,10 +4,11 @@ import {
   ArrowLeft, Pencil, Trash2, Zap, MapPin, Calendar,
   Activity, AlertTriangle, X, Battery, Plus, CheckCircle2,
   ClipboardList, Clock, ChevronRight, Check, User, Wrench, FileText,
+  Save, CalendarClock,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
-import { getInstallation, deleteInstallation } from '../api/installations'
+import { getInstallation, deleteInstallation, updateInstallation, completeInstallation } from '../api/installations'
 import { getInterventions, createIntervention, deleteIntervention } from '../api/interventions'
 import { getUsers } from '../api/users'
 
@@ -164,7 +165,7 @@ function ScheduleControlModal({ installation, users, onClose, onCreated }) {
         </div>
         <form onSubmit={handleSubmit} className="modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <p className="ctrl-hint-line">
-            <AlertTriangle size={13} /> Contrôle <strong>hors contrat</strong> — crée une intervention à la date choisie.
+            <AlertTriangle size={13} /> Contrôle <strong>hors contrat</strong>
           </p>
           <div className="form-row">
             <div className="form-group">
@@ -342,6 +343,85 @@ function DeleteModal({ inst, onClose, onConfirm }) {
 
 /* ─── PAGE ───────────────────────────────────────────────────── */
 
+/* ─── Section « Planifier l'installation » (pose en attente) ─── */
+function PlanificationSection({ inst, users, canManage, onSaved, onInstalled }) {
+  const techniciens = users.filter(u => u.role === 'technicien')
+  const [date, setDate] = useState(inst.scheduledDate ? toDateInput(inst.scheduledDate) : todayStr())
+  const [time, setTime] = useState(inst.scheduledDate
+    ? new Date(inst.scheduledDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    : '09:00')
+  const [tech, setTech] = useState(inst.technician?._id || (typeof inst.technician === 'string' ? inst.technician : '') || '')
+  const [saving,  setSaving]  = useState(false)
+  const [marking, setMarking] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      const start = new Date(`${date}T${time || '09:00'}`)
+      const t = techniciens.find(u => u._id === tech)
+      await updateInstallation(inst._id, {
+        scheduledDate:  isNaN(start.getTime()) ? undefined : start.toISOString(),
+        technician:     tech || undefined,
+        technicianName: t ? (t.fullName || t.username) : undefined,
+      })
+      toast.success('Planification enregistrée.')
+      onSaved()
+    } catch (err) { toast.error(err.message || 'Erreur.') } finally { setSaving(false) }
+  }
+
+  async function markInstalled() {
+    if (!window.confirm('Marquer cette installation comme posée sur site ?')) return
+    setMarking(true)
+    try {
+      await completeInstallation(inst._id, {})
+      toast.success('Installation marquée comme installée.')
+      onInstalled()
+    } catch (err) { toast.error(err.message || 'Erreur.') } finally { setMarking(false) }
+  }
+
+  return (
+    <div className="inst-plan-section">
+      <div className="inst-plan-head">
+        <span className="inst-plan-icon"><CalendarClock size={16} /></span>
+        <div>
+          <div className="inst-plan-title">Planifier l'installation</div>
+          <div className="inst-plan-sub">Pose en attente — définissez la date, l'heure et l'intervenant.</div>
+        </div>
+      </div>
+      <div className="inst-plan-grid">
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Date de pose</label>
+          <input type="date" className="form-input form-input--plain" value={date}
+            onChange={e => setDate(e.target.value)} disabled={!canManage} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Heure</label>
+          <input type="time" className="form-input form-input--plain" value={time}
+            onChange={e => setTime(e.target.value)} disabled={!canManage} />
+        </div>
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="form-label">Intervenant / installateur</label>
+          <select className="form-input form-input--plain" value={tech}
+            onChange={e => setTech(e.target.value)} disabled={!canManage}>
+            <option value="">— En attente d'affectation</option>
+            {techniciens.map(t => <option key={t._id} value={t._id}>{t.fullName || t.username}</option>)}
+          </select>
+        </div>
+      </div>
+      {canManage && (
+        <div className="inst-plan-actions">
+          <button className="btn btn--ghost" onClick={save} disabled={saving || marking}>
+            {saving ? <span className="login-btn-spinner" /> : <Save size={14} />} Enregistrer la planification
+          </button>
+          <button className="btn btn--primary" onClick={markInstalled} disabled={saving || marking}>
+            {marking ? <span className="login-btn-spinner" /> : <CheckCircle2 size={14} />} Marquer installée
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const TABS = [
   { id: 'details',   label: 'Détails',    icon: Zap },
   { id: 'controles', label: 'Contrôles',  icon: ClipboardList },
@@ -360,6 +440,8 @@ export default function InstallationDetailPage() {
 
   const canManage = user?.role === 'superadmin' || user?.role === 'admin'
     || user?.permissions?.canManageDevices
+
+  const reload = useCallback(() => getInstallation(id).then(setInst).catch(() => {}), [id])
 
   useEffect(() => {
     getInstallation(id)
@@ -382,6 +464,8 @@ export default function InstallationDetailPage() {
   const statusCls  = status === 'expiré' ? 'inst-badge inst-badge--expired' : status === 'attention' ? 'inst-badge inst-badge--warning' : 'inst-badge inst-badge--ok'
   const statusLabel = status === 'expiré' ? 'Expiré' : status === 'attention' ? 'Attention' : 'Actif'
 
+  const isPending = inst.status === 'a_installer'
+
   const firstBatt   = inst.batteries?.[0]
   const level       = firstBatt?.level
   const battCls     = level == null ? '' : level < 25 ? 'batt-bar--red' : level < 50 ? 'batt-bar--amber' : 'batt-bar--green'
@@ -399,7 +483,9 @@ export default function InstallationDetailPage() {
             <Zap size={18} strokeWidth={1.8} />
             {inst.client?.name || inst.clientName}
           </button>
-          <span className={statusCls}>{statusLabel}</span>
+          {isPending
+            ? <span className="inst-badge inst-badge--pending">À installer</span>
+            : <span className={statusCls}>{statusLabel}</span>}
         </div>
         {canManage && (
           <div className="inst-detail-actions">
@@ -423,11 +509,6 @@ export default function InstallationDetailPage() {
             <Zap size={11} /> {inst.deviceType && `${inst.deviceType} / `}{inst.serialNumber}
           </span>
         )}
-        {inst.controlType && (
-          <span className="inst-ctrl-type-chip">
-            <Calendar size={11} /> Contrôle {inst.controlType}
-          </span>
-        )}
         {inst.contract && (
           <button type="button" className="inst-contract-chip"
             onClick={() => navigate(`/contrats/${inst.contract._id}`)}
@@ -438,25 +519,31 @@ export default function InstallationDetailPage() {
         )}
       </div>
 
-      {/* Key metrics */}
-      <div className="inst-metrics">
-        <div className="inst-metric-card inst-metric-card--battery">
-          <div className="inst-metric-label">Niveau batterie</div>
-          {level != null ? (
-            <>
-              <div className={`inst-batt-pct ${battTextCls}`}>{level}%</div>
-              <div className="inst-batt-track">
-                <div className={`inst-batt-fill ${battCls}`} style={{ width: `${level}%` }} />
-              </div>
-            </>
-          ) : (
-            <div className="inst-metric-value inst-metric-value--muted">Non renseigné</div>
-          )}
+      {/* Pose en attente : planification — sinon métriques de suivi */}
+      {isPending ? (
+        <PlanificationSection
+          inst={inst} users={users} canManage={canManage}
+          onSaved={reload} onInstalled={reload}
+        />
+      ) : (
+        <div className="inst-metrics">
+          <div className="inst-metric-card inst-metric-card--battery">
+            <div className="inst-metric-label">Niveau batterie</div>
+            {level != null ? (
+              <>
+                <div className={`inst-batt-pct ${battTextCls}`}>{level}%</div>
+                <div className="inst-batt-track">
+                  <div className={`inst-batt-fill ${battCls}`} style={{ width: `${level}%` }} />
+                </div>
+              </>
+            ) : (
+              <div className="inst-metric-value inst-metric-value--muted">Non renseigné</div>
+            )}
+          </div>
+          <RelativeDate date={firstBatt?.expiryDate}          label="Expiration batterie" />
+          <RelativeDate date={inst.electrodes?.[0]?.expiryDate} label="Expiration électrode" />
         </div>
-        <RelativeDate date={firstBatt?.expiryDate}          label="Expiration batterie" />
-        <RelativeDate date={inst.electrodes?.[0]?.expiryDate} label="Expiration électrode" />
-        <RelativeDate date={inst.nextControlDate}            label="Prochain contrôle" />
-      </div>
+      )}
 
       {/* Tabs */}
       <div className="cd-tabs" style={{ marginTop: 4 }}>
@@ -487,10 +574,8 @@ export default function InstallationDetailPage() {
                   <DetailItem label="Type / Modèle" value={inst.deviceType} />
                 )}
                 <DetailItem label="Numéro de série"     value={inst.serialNumber} />
-                <DetailItem label="Date d'installation" value={formatDate(inst.installationDate)} />
-                <DetailItem label="Type de contrôle"    value={inst.controlType
-                  ? (inst.controlType === 'semestriel' ? 'Semestriel (6 mois)' : 'Annuel (12 mois)')
-                  : undefined} />
+                <DetailItem label={isPending ? 'Date de pose prévue' : "Date d'installation"}
+                  value={formatDate(isPending ? inst.scheduledDate : inst.installationDate)} />
               </dl>
             </div>
 
@@ -533,7 +618,7 @@ export default function InstallationDetailPage() {
             <div className="inst-section-card">
               <div className="inst-section-title"><Calendar size={14} /> Suivi</div>
               <dl className="inst-details-grid">
-                <DetailItem label="Prochain contrôle" value={formatDate(inst.nextControlDate)} />
+                <DetailItem label={isPending ? 'Intervenant prévu' : 'Installé par'} value={inst.technicianName} />
                 <DetailItem label="Ajouté par"        value={inst.createdBy?.fullName || inst.createdBy?.username} />
                 <DetailItem label="Créé le"           value={formatDate(inst.createdAt)} />
                 <DetailItem label="Modifié le"        value={formatDate(inst.updatedAt)} />

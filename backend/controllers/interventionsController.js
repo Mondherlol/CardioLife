@@ -65,9 +65,10 @@ async function getOne(req, res) {
       .populate('client', 'name')
       .populate({
         path: 'installation',
-        select: 'deviceType serialNumber address location deviceProduct',
+        select: 'deviceType serialNumber address location status deviceProduct',
         populate: { path: 'deviceProduct', select: 'images name' },
       })
+      .populate('contract', 'contractNumber status')
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
     // Technician can only view their own

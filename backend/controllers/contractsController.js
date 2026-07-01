@@ -1,8 +1,40 @@
 const { validationResult } = require('express-validator')
 const Contract     = require('../models/Contract')
 const Installation = require('../models/Installation')
+const Intervention = require('../models/Intervention')
 
 const { TYPES, STATUSES } = Contract
+
+/* Génère les contrôles périodiques du contrat, de startDate → endDate, sans
+   technicien assigné (l'admin l'affectera plus tard). */
+async function generateControls(contract, userId) {
+  const { startDate, endDate, controlPeriodicity, client, clientName } = contract
+  if (!startDate || !endDate || !['semestriel', 'annuel'].includes(controlPeriodicity)) return
+
+  const interval = controlPeriodicity === 'annuel' ? 12 : 6
+  const end = new Date(endDate)
+  const d   = new Date(startDate)
+  d.setHours(9, 0, 0, 0)                // heure par défaut des contrôles générés
+  d.setMonth(d.getMonth() + interval)   // premier contrôle : début + période
+
+  const docs = []
+  let guard = 0
+  while (d <= end && guard < 60) {
+    docs.push({
+      client:        client || undefined,
+      clientName:    clientName || undefined,
+      contract:      contract._id,
+      controlType:   controlPeriodicity,
+      scheduledDate: new Date(d),
+      status:        'planifie',
+      history: [{ action: 'creation', user: userId, details: 'Contrôle généré automatiquement par le contrat' }],
+      createdBy:     userId,
+    })
+    d.setMonth(d.getMonth() + interval)
+    guard++
+  }
+  if (docs.length) await Intervention.insertMany(docs)
+}
 
 /* ── Helpers ──────────────────────────────────────────── */
 
@@ -75,7 +107,7 @@ function sanitizePacks(packs) {
 
 const POPULATE = [
   { path: 'client', select: 'name type address' },
-  { path: 'installations', select: 'clientName address location deviceType serialNumber installationDate nextControlDate' },
+  { path: 'installations', select: 'clientName address location deviceType serialNumber installationDate nextControlDate status scheduledDate technicianName' },
   { path: 'createdBy', select: 'username fullName' },
 ]
 
@@ -125,7 +157,16 @@ async function getAll(req, res) {
     .limit(Number(limit))
     .populate(POPULATE)
 
-  res.json({ data, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
+  // Prochain contrôle par contrat (contrôle non terminé le plus proche)
+  const ids = data.map(c => c._id)
+  const nextControls = await Intervention.aggregate([
+    { $match: { contract: { $in: ids }, status: { $ne: 'termine' }, scheduledDate: { $ne: null } } },
+    { $group: { _id: '$contract', next: { $min: '$scheduledDate' } } },
+  ])
+  const nextMap = Object.fromEntries(nextControls.map(n => [String(n._id), n.next]))
+  const withNext = data.map(c => ({ ...c.toObject(), nextControlDate: nextMap[String(c._id)] || null }))
+
+  res.json({ data: withNext, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
 }
 
 async function getById(req, res) {
@@ -134,7 +175,15 @@ async function getById(req, res) {
     .populate({ path: 'lineItems.product', select: 'name category reference images' })
     .populate({ path: 'packs.pack', select: 'name' })
   if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
-  res.json(contract)
+
+  // Contrôles liés à ce contrat (interventions générées / manuelles)
+  const controls = await Intervention.find({ contract: contract._id })
+    .sort({ scheduledDate: 1 })
+    .select('clientName controlType status scheduledDate completedDate technicienName installationSnap')
+    .populate('technicien', 'fullName username')
+    .lean()
+
+  res.json({ ...contract.toObject(), controls })
 }
 
 /* ── Création ─────────────────────────────────────────── */
@@ -144,19 +193,9 @@ async function create(req, res) {
 
   const b = req.body
 
-  // Crée les installations issues des packs / produits défibrillateurs
-  const createdIds = []
-  if (Array.isArray(b.newInstallations)) {
-    for (const draft of b.newInstallations) {
-      const created = await Installation.create({
-        ...sanitizeInstallation(draft, b.client, b.clientName),
-        createdBy: req.user._id,
-      })
-      createdIds.push(created._id)
-    }
-  }
-
-  const existing = Array.isArray(b.existingInstallations) ? b.existingInstallations : []
+  // Les installations ne sont PAS créées automatiquement : elles se planifient
+  // depuis la fiche du contrat (section « Installations couvertes »).
+  const existing  = Array.isArray(b.existingInstallations) ? b.existingInstallations : []
   const lineItems = sanitizeLineItems(b.lineItems)
   const services  = sanitizeServices(b.services)
 
@@ -164,12 +203,12 @@ async function create(req, res) {
     contractNumber: b.contractNumber?.trim() || undefined,
     client:     b.client,
     clientName: b.clientName?.trim() || undefined,
-    type:       TYPES.includes(b.type) ? b.type : 'maintenance',
+    type:       'maintenance',   // les contrats sont toujours de maintenance
     status:     STATUSES.includes(b.status) ? b.status : 'actif',
     startDate:  b.startDate || undefined,
     endDate:    b.endDate   || undefined,
     controlPeriodicity: ['semestriel', 'annuel'].includes(b.controlPeriodicity) ? b.controlPeriodicity : '',
-    installations: [...createdIds, ...existing],
+    installations: existing,
     packs:      sanitizePacks(b.packs),
     lineItems,
     services,
@@ -177,6 +216,9 @@ async function create(req, res) {
     notes:      b.notes?.trim() || undefined,
     createdBy:  req.user._id,
   })
+
+  // Génère les prochains contrôles jusqu'à l'échéance
+  await generateControls(contract, req.user._id)
 
   const populated = await Contract.findById(contract._id).populate(POPULATE)
   res.status(201).json(populated)
