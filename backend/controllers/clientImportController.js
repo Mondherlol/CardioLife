@@ -1,6 +1,7 @@
 const multer = require('multer')
 const XLSX   = require('xlsx')
 const Client = require('../models/Client')
+const ClientType = require('../models/ClientType')
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -25,6 +26,14 @@ const COL_MAP = {
   'city':             'city',
   'gouvernorat':      'governorate',
   'governorate':      'governorate',
+  'gps lat':          'gpsLat',
+  'latitude':         'gpsLat',
+  'lat':              'gpsLat',
+  'gps lng':          'gpsLng',
+  'gps lon':          'gpsLng',
+  'longitude':        'gpsLng',
+  'lng':              'gpsLng',
+  'lon':              'gpsLng',
   'contact nom':      'contactName',
   'contact name':     'contactName',
   'contact':          'contactName',
@@ -50,8 +59,53 @@ const COL_MAP = {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+function normalizeText(str) {
+  return String(str || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function slugify(str) {
+  return normalizeText(str)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '')
+}
+
 function normalizeHeader(h) {
-  return String(h).trim().toLowerCase().replace(/\s+/g, ' ')
+  return normalizeText(h).replace(/\s+/g, ' ')
+}
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+async function getTypeMap() {
+  const types = await ClientType.find()
+  const map = new Map()
+  types.forEach(t => {
+    map.set(normalizeText(t.slug), t.slug)
+    map.set(normalizeText(t.name), t.slug)
+  })
+  return map
+}
+
+async function ensureClientType(rawType, typeMap) {
+  const label = String(rawType || '').trim()
+  const normalized = normalizeText(label)
+  if (!label) return ''
+  if (typeMap.has(normalized)) return typeMap.get(normalized)
+
+  const slug = slugify(label)
+  const type = await ClientType.findOneAndUpdate(
+    { slug },
+    { $setOnInsert: { name: label, slug } },
+    { upsert: true, new: true }
+  )
+  typeMap.set(normalized, type.slug)
+  typeMap.set(normalizeText(type.slug), type.slug)
+  return type.slug
 }
 
 function parseSheet(workbook) {
@@ -72,15 +126,26 @@ function parseSheet(workbook) {
   return { headers, rows }
 }
 
-function validateRow(row, idx) {
+function normalizeRow(row, typeMap) {
+  const out = { ...row }
+  if (out.type) out.type = typeMap.get(normalizeText(out.type)) || slugify(out.type)
+  if (out.email1) out.email1 = out.email1.toLowerCase()
+  if (out.email2) out.email2 = out.email2.toLowerCase()
+  return out
+}
+
+function validateRow(row, idx, typeMap) {
+  const normalized = normalizeRow(row, typeMap)
   const errors = []
 
-  if (!row.name) errors.push('Nom obligatoire')
-  if (!row.type) errors.push('Type obligatoire')
-  if (row.email1 && !EMAIL_RE.test(row.email1)) errors.push(`Email invalide : ${row.email1}`)
-  if (row.email2 && !EMAIL_RE.test(row.email2)) errors.push(`Email 2 invalide : ${row.email2}`)
+  if (!normalized.name) errors.push('Nom obligatoire')
+  if (!normalized.type) errors.push('Type obligatoire')
+  if (normalized.email1 && !EMAIL_RE.test(normalized.email1)) errors.push(`Email invalide : ${normalized.email1}`)
+  if (normalized.email2 && !EMAIL_RE.test(normalized.email2)) errors.push(`Email 2 invalide : ${normalized.email2}`)
+  if (normalized.gpsLat && Number.isNaN(Number(normalized.gpsLat))) errors.push(`Latitude invalide : ${normalized.gpsLat}`)
+  if (normalized.gpsLng && Number.isNaN(Number(normalized.gpsLng))) errors.push(`Longitude invalide : ${normalized.gpsLng}`)
 
-  return { row, rowNum: idx + 2, errors, valid: errors.length === 0 }
+  return { row: normalized, rowNum: idx + 2, errors, valid: errors.length === 0 }
 }
 
 function buildClientDoc(row, userId) {
@@ -93,6 +158,10 @@ function buildClientDoc(row, userId) {
       street:      row.street      || undefined,
       city:        row.city        || undefined,
       governorate: row.governorate || undefined,
+      gps: {
+        lat: row.gpsLat ? Number(row.gpsLat) : undefined,
+        lng: row.gpsLng ? Number(row.gpsLng) : undefined,
+      },
     },
     contact: {
       name:   row.contactName || undefined,
@@ -125,7 +194,8 @@ async function validate(req, res) {
     return res.status(400).json({ message: 'Aucune ligne de données trouvée dans le fichier.' })
   }
 
-  const results = rows.map((r, i) => validateRow(r, i))
+  const typeMap = await getTypeMap()
+  const results = rows.map((r, i) => validateRow(r, i, typeMap))
   const valid   = results.filter(r => r.valid).length
   const invalid = results.filter(r => !r.valid).length
 
@@ -140,19 +210,34 @@ async function execute(req, res) {
   }
 
   const results = []
+  const typeMap = await getTypeMap()
   for (const row of rows) {
     try {
-      const doc = buildClientDoc(row, req.user._id)
-      const client = await Client.create(doc)
-      results.push({ name: row.name, success: true, id: client._id })
+      const normalized = normalizeRow(row, typeMap)
+      normalized.type = await ensureClientType(normalized.type, typeMap)
+      const doc = buildClientDoc(normalized, req.user._id)
+      const existing = await Client.findOne({
+        name: { $regex: `^${escapeRegex(normalized.name)}$`, $options: 'i' },
+      })
+      const client = existing
+        ? await Client.findByIdAndUpdate(existing._id, { $set: doc }, { new: true, runValidators: true })
+        : await Client.create(doc)
+      results.push({
+        name: normalized.name,
+        success: true,
+        id: client._id,
+        action: existing ? 'updated' : 'created',
+      })
     } catch (err) {
       results.push({ name: row.name, success: false, error: err.message })
     }
   }
 
   const imported = results.filter(r => r.success).length
+  const created  = results.filter(r => r.action === 'created').length
+  const updated  = results.filter(r => r.action === 'updated').length
   const failed   = results.filter(r => !r.success).length
-  res.json({ results, summary: { imported, failed } })
+  res.json({ results, summary: { imported, created, updated, failed } })
 }
 
 module.exports = { validate, execute }

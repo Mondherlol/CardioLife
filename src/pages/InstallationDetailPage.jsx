@@ -683,13 +683,12 @@ export default function InstallationDetailPage() {
   const battTextCls = level == null ? 'text-muted' : level < 25 ? 'inst-pct--red' : level < 50 ? 'inst-pct--amber' : 'inst-pct--green'
 
   return (
-    <div className="page-content">
+    <div className="page-content inst-detail-page">
       {/* Header */}
       <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="inst-detail-header-main">
           <button className="back-btn" onClick={() => navigate('/devices')}><ArrowLeft size={16} /></button>
-          <button type="button" className="page-title"
-            style={{ fontSize: 18, marginBottom: 0, textAlign: 'left' }}
+          <button type="button" className="page-title inst-detail-title"
             onClick={() => inst.client?._id && navigate(`/clients/${inst.client._id}`)}
             disabled={!inst.client?._id}>
             <Zap size={18} strokeWidth={1.8} />
@@ -698,7 +697,7 @@ export default function InstallationDetailPage() {
           <span className={statusCls}>{statusLabel}</span>
         </div>
         {canManage && (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="inst-detail-actions">
             <button className="btn btn--ghost btn--sm" onClick={() => navigate(`/devices/${id}/edit`)}>
               <Pencil size={14} /> Modifier
             </button>

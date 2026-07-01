@@ -2,20 +2,34 @@ const { validationResult } = require('express-validator')
 const Client = require('../models/Client')
 
 async function getAll(req, res) {
-  const { governorate, type, search, q, page = 1, limit = 20, archived = 'false' } = req.query
+  const { governorate, type, search, q, page = 1, limit = 20, archived = 'false', sort = 'createdAt', dir = 'desc' } = req.query
 
   const filter = { isActive: archived === 'true' ? false : true }
   if (governorate) filter['address.governorate'] = governorate
-  if (type)        filter.type = type
+  if (type) {
+    const types = String(type).split(',').map(t => t.trim()).filter(Boolean)
+    filter.type = types.length > 1 ? { $in: types } : types[0]
+  }
   if (search)      filter.$text = { $search: search }
   if (q)           filter.name  = { $regex: q, $options: 'i' }
 
   const skip  = (Number(page) - 1) * Number(limit)
   const total = await Client.countDocuments(filter)
+  const sortFields = {
+    name:        'name',
+    type:        'type',
+    governorate: 'address.governorate',
+    contactName: 'contact.name',
+    phone:       'contact.phones.0',
+    createdAt:   'createdAt',
+  }
+  const sortKey = sortFields[sort] || sortFields.createdAt
+  const sortDir = dir === 'asc' ? 1 : -1
   const clients = await Client.find(filter)
     .skip(skip)
     .limit(Number(limit))
-    .sort({ createdAt: -1 })
+    .sort({ [sortKey]: sortDir, createdAt: -1 })
+    .collation({ locale: 'fr', strength: 1 })
     .populate('createdBy', 'username fullName')
 
   res.json({
