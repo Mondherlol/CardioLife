@@ -13,6 +13,7 @@ async function generateControls(contract, userId) {
 
   const interval = controlPeriodicity === 'annuel' ? 12 : 6
   const end = new Date(endDate)
+  const today = new Date(); today.setHours(0, 0, 0, 0)   // on ne génère rien avant aujourd'hui
   const d   = new Date(startDate)
   d.setHours(9, 0, 0, 0)                // heure par défaut des contrôles générés
   d.setMonth(d.getMonth() + interval)   // premier contrôle : début + période
@@ -20,16 +21,19 @@ async function generateControls(contract, userId) {
   const docs = []
   let guard = 0
   while (d <= end && guard < 60) {
-    docs.push({
-      client:        client || undefined,
-      clientName:    clientName || undefined,
-      contract:      contract._id,
-      controlType:   controlPeriodicity,
-      scheduledDate: new Date(d),
-      status:        'planifie',
-      history: [{ action: 'creation', user: userId, details: 'Contrôle généré automatiquement par le contrat' }],
-      createdBy:     userId,
-    })
+    // On saute les échéances déjà passées (inutile de créer un contrôle en retard)
+    if (d >= today) {
+      docs.push({
+        client:        client || undefined,
+        clientName:    clientName || undefined,
+        contract:      contract._id,
+        controlType:   controlPeriodicity,
+        scheduledDate: new Date(d),
+        status:        'planifie',
+        history: [{ action: 'creation', user: userId, details: 'Contrôle généré automatiquement par le contrat' }],
+        createdBy:     userId,
+      })
+    }
     d.setMonth(d.getMonth() + interval)
     guard++
   }
