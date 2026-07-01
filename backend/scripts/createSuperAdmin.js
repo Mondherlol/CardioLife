@@ -21,7 +21,7 @@ async function main() {
     username: 'admin',
     fullName: 'Super Admin CardioLife',
     email:    'admin@cardiolife.tn',
-    password: 'Admin@2025!',
+    password: 'admin',
     role:     'superadmin',
     permissions: {
       canManageClients:       true,
