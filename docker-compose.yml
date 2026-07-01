@@ -23,6 +23,8 @@ services:
   frontend:
     build:
       context: .
+      args:
+        VITE_API_URL: /api
     restart: unless-stopped
     ports:
       - "8080:80"

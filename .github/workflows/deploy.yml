@@ -12,11 +12,12 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    env:
-      IMAGE_NAMESPACE: ${{ github.repository_owner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Compute lowercase image namespace
+        run: echo "IMAGE_NAMESPACE=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -34,6 +35,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          build-args: |
+            VITE_API_URL=/api
           tags: |
             ghcr.io/${{ env.IMAGE_NAMESPACE }}/cardiotrack-frontend:latest
             ghcr.io/${{ env.IMAGE_NAMESPACE }}/cardiotrack-frontend:${{ github.sha }}
