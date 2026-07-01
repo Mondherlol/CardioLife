@@ -2,6 +2,7 @@ const Installation = require('../models/Installation')
 const Contract     = require('../models/Contract')
 const Product      = require('../models/Product')
 const StockMovement = require('../models/StockMovement')
+const Intervention = require('../models/Intervention')
 
 /* Traçabilité stock du DAE posé : si le n° de série n'est pas en stock, on l'ajoute
    (entrée) puis on le déduit (sortie) ; s'il y est, simple sortie. */
@@ -91,7 +92,38 @@ async function getAll(req, res) {
     .populate('technician', 'fullName username')
     .populate('createdBy', 'username fullName')
 
-  res.json({ data, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
+  // Prochain contrôle réel de chaque installation : contrôle non terminé le plus
+  // proche parmi ses contrôles propres (hors contrat) ET ceux de son contrat.
+  const instIds     = data.map(i => i._id)
+  const contractIds = [...new Set(data.map(i => i.contract).filter(Boolean).map(String))]
+  const orConds = [{ installation: { $in: instIds } }]
+  if (contractIds.length) orConds.push({ contract: { $in: contractIds } })
+
+  const ctrls = await Intervention.find({
+    status: { $ne: 'termine' },
+    scheduledDate: { $ne: null },
+    $or: orConds,
+  }).select('installation contract controlType scheduledDate').sort({ scheduledDate: 1 }).lean()
+
+  const nextByInst     = {}   // instId -> plus proche contrôle propre
+  const nextByContract = {}   // contractId -> plus proche contrôle du contrat
+  ctrls.forEach(c => {
+    if (c.installation) { const k = String(c.installation); if (!nextByInst[k])     nextByInst[k]     = c }
+    if (c.contract)     { const k = String(c.contract);     if (!nextByContract[k]) nextByContract[k] = c }
+  })
+
+  const withNext = data.map(i => {
+    const obj  = i.toObject()
+    const own  = nextByInst[String(i._id)]
+    const ctr  = i.contract ? nextByContract[String(i.contract)] : null
+    let next = null
+    if (own && ctr)  next = new Date(own.scheduledDate) <= new Date(ctr.scheduledDate) ? own : ctr
+    else             next = own || ctr || null
+    obj.nextControl = next ? { scheduledDate: next.scheduledDate, controlType: next.controlType } : null
+    return obj
+  })
+
+  res.json({ data: withNext, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
 }
 
 async function getById(req, res) {

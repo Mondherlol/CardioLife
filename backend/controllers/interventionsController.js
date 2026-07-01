@@ -12,7 +12,7 @@ function isAdmin(user) {
 /* ─── List ─────────────────────────────────────────────────── */
 async function getAll(req, res) {
   try {
-    const { status, technicien, client, search, from, to, installation, controlType } = req.query
+    const { status, technicien, client, search, from, to, installation, controlType, contract } = req.query
     const query = {}
 
     // Technicians only see their own interventions
@@ -26,6 +26,7 @@ async function getAll(req, res) {
     if (status)       query.status       = status
     if (installation) query.installation = installation
     if (controlType)  query.controlType  = controlType
+    if (contract)     query.contract     = contract
 
     // Plage de dates (utilisé par le planning) — sur la date planifiée
     if (from || to) {
