@@ -8,7 +8,7 @@ const createValidation = [
   body('username').trim().notEmpty().withMessage('Identifiant requis.'),
   body('fullName').trim().notEmpty().withMessage('Nom complet requis.'),
   body('email').isEmail().withMessage('Email invalide.'),
-  body('password').isLength({ min: 8 }).withMessage('Mot de passe : 8 caractères minimum.'),
+  body('password').isLength({ min: 5 }).withMessage('Mot de passe : 5 caractères minimum.'),
   body('role').optional().isIn(['superadmin','admin','technicien','commercial','assistante','readonly']),
 ]
 

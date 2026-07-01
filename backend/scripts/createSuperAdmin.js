@@ -36,7 +36,7 @@ async function main() {
 
   console.log('Super Admin créé avec succès.')
   console.log('  username :', admin.username)
-  console.log('  password : Admin@2025!')
+  console.log('  password : admin')
   console.log('Changez le mot de passe après la première connexion.')
   process.exit(0)
 }
