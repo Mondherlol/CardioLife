@@ -1,0 +1,32 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    image: ghcr.io/${IMAGE_NAMESPACE}/cardiotrack-backend:latest
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://mongo:27017/cardiotrack
+    depends_on:
+      - mongo
+    volumes:
+      - backend_uploads:/app/uploads
+
+  frontend:
+    image: ghcr.io/${IMAGE_NAMESPACE}/cardiotrack-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+  backend_uploads:

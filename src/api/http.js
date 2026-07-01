@@ -1,4 +1,8 @@
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const DEFAULT_BASE = import.meta.env.DEV
+  ? 'http://localhost:5000/api'
+  : `${window.location.origin}/api`
+
+const BASE = import.meta.env.VITE_API_URL || DEFAULT_BASE
 
 // Base URL for static files (strip /api suffix)
 export const STATIC_BASE = BASE.replace(/\/api\/?$/, '')
