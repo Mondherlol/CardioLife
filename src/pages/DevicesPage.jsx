@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Plus, Search, Pencil, Trash2, Eye, X, AlertTriangle,
-  Zap, MapPin,
+  Plus, Search, Pencil, Trash2, X, AlertTriangle,
+  Zap, Check, ChevronDown, ArrowUp, ArrowDown,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
@@ -125,6 +125,73 @@ const STATUS_FILTERS = [
   { value: 'expiré',    label: 'Expiré' },
 ]
 
+function DeviceStatusSelector({ selected, stats, onChange }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+  const options = STATUS_FILTERS.filter(s => s.value)
+
+  useEffect(() => {
+    function onDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [])
+
+  function toggle(value) {
+    onChange(selected.includes(value) ? selected.filter(v => v !== value) : [...selected, value])
+  }
+
+  const counts = { actif: stats.active, attention: stats.warning, 'expirÃ©': stats.expired }
+  const label = selected.length === 0
+    ? 'Tous les statuts'
+    : selected.length === 1
+      ? options.find(s => s.value === selected[0])?.label
+      : `${selected.length} statuts`
+
+  return (
+    <div className="inst-status-select" ref={wrapRef}>
+      <button
+        type="button"
+        className={`inst-status-select-btn${open ? ' inst-status-select-btn--open' : ''}${selected.length ? ' inst-status-select-btn--active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span className="inst-status-select-label">{label}</span>
+        {selected.length > 0 && <span className="inst-status-select-count">{selected.length}</span>}
+        <ChevronDown size={14} className="inst-status-select-chevron" />
+      </button>
+      {open && (
+        <div className="inst-status-select-menu">
+          <button
+            type="button"
+            className={`inst-status-select-option${selected.length === 0 ? ' inst-status-select-option--active' : ''}`}
+            onClick={() => onChange([])}
+          >
+            <span className="inst-status-select-check">{selected.length === 0 && <Check size={12} />}</span>
+            <span>Tous les statuts</span>
+            <span className="inst-status-select-option-count">{stats.total}</span>
+          </button>
+          {options.map(s => {
+            const active = selected.includes(s.value)
+            return (
+              <button
+                key={s.value}
+                type="button"
+                className={`inst-status-select-option${active ? ' inst-status-select-option--active' : ''}`}
+                onClick={() => toggle(s.value)}
+              >
+                <span className="inst-status-select-check">{active && <Check size={12} />}</span>
+                <span>{s.label}</span>
+                <span className="inst-status-select-option-count">{counts[s.value] || 0}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DevicesPage() {
   const navigate = useNavigate()
   const { user }  = useAuth()
@@ -132,7 +199,9 @@ export default function DevicesPage() {
   const [all, setAll]             = useState([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
-  const [statusFilter, setStatus] = useState('')
+  const [statusFilter, setStatus] = useState([])
+  const [sortField, setSortField] = useState('client')
+  const [sortDir, setSortDir]     = useState('asc')
   const [deleteTarget, setDelete] = useState(null)
 
   const canManage = user?.role === 'superadmin' || user?.role === 'admin'
@@ -165,15 +234,33 @@ export default function DevicesPage() {
         i.deviceType?.toLowerCase().includes(q)
       )
     }
-    if (statusFilter) {
-      list = list.filter(i => computeStatus(i) === statusFilter)
+    if (statusFilter.length) {
+      list = list.filter(i => statusFilter.includes(computeStatus(i)))
     }
-    return list
-  }, [all, search, statusFilter])
+    const statusOrder = { actif: 1, attention: 2, 'expirÃ©': 3 }
+    const valueForSort = (inst) => {
+      if (sortField === 'client') return inst.client?.name || inst.clientName || ''
+      if (sortField === 'device') return inst.deviceProduct?.name || inst.deviceType || ''
+      if (sortField === 'battery') return inst.batteries?.[0]?.level ?? -1
+      if (sortField === 'electrode') return inst.electrodes?.[0]?.expiryDate ? new Date(inst.electrodes[0].expiryDate).getTime() : 0
+      if (sortField === 'control') return inst.nextControlDate ? new Date(inst.nextControlDate).getTime() : 0
+      if (sortField === 'status') return statusOrder[computeStatus(inst)] || 0
+      return ''
+    }
+    return [...list].sort((a, b) => {
+      const av = valueForSort(a)
+      const bv = valueForSort(b)
+      const res = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv), 'fr', { sensitivity: 'base' })
+      return sortDir === 'asc' ? res : -res
+    })
+  }, [all, search, statusFilter, sortField, sortDir])
 
   /* ── Stats ── */
   const stats = useMemo(() => ({
     total:   all.length,
+    active:  all.filter(i => computeStatus(i) === 'actif').length,
     expired: all.filter(i => computeStatus(i) === 'expiré').length,
     warning: all.filter(i => computeStatus(i) === 'attention').length,
     lowBatt: all.filter(i => (i.batteries?.[0]?.level ?? null) !== null && i.batteries[0].level < 25).length,
@@ -186,19 +273,40 @@ export default function DevicesPage() {
     setDelete(null)
   }
 
+  function toggleSort(field) {
+    if (sortField === field) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+    else {
+      setSortField(field)
+      setSortDir('asc')
+    }
+  }
+
+  function sortIcon(field) {
+    if (sortField !== field) return null
+    return sortDir === 'asc'
+      ? <ArrowUp size={12} strokeWidth={2.2} className="th-sort-icon" />
+      : <ArrowDown size={12} strokeWidth={2.2} className="th-sort-icon" />
+  }
+
+  function siteLabel(inst) {
+    return inst.location || inst.client?.address?.city || inst.address || ''
+  }
+
   return (
-    <div className="page-content">
+    <div className="page-content devices-page">
       {/* Header */}
       <div className="page-header">
         <div>
           <h1 className="page-title"><Zap size={20} strokeWidth={1.8} /> DAE Installés</h1>
           <p className="page-subtitle">{all.length} installation{all.length !== 1 ? 's' : ''}</p>
         </div>
-        {canManage && (
-          <button className="btn btn--primary" onClick={() => navigate('/devices/new')}>
-            <Plus size={15} /> Nouvelle installation
-          </button>
-        )}
+        <div className="devices-header-actions">
+          {canManage && (
+            <button className="btn btn--primary" onClick={() => navigate('/devices/new')}>
+              <Plus size={15} /> Nouvelle installation
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats */}
@@ -222,7 +330,7 @@ export default function DevicesPage() {
       </div>
 
       {/* Toolbar */}
-      <div className="table-toolbar">
+      <div className="table-toolbar devices-toolbar">
         <div className="search-wrap">
           <Search size={14} className="search-icon" />
           <input
@@ -235,7 +343,8 @@ export default function DevicesPage() {
             <button className="search-clear" onClick={() => setSearch('')}><X size={13} /></button>
           )}
         </div>
-        <div className="inst-status-filters">
+        <DeviceStatusSelector selected={statusFilter} stats={stats} onChange={setStatus} />
+        <div className="inst-status-filters" style={{ display: 'none' }}>
           {STATUS_FILTERS.map(f => (
             <button
               key={f.value}
@@ -259,16 +368,16 @@ export default function DevicesPage() {
       {loading ? (
         <div className="table-loading"><span className="spinner" /></div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap devices-table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Client / Site</th>
-                <th>Appareil</th>
-                <th>Batterie</th>
-                <th>Électrode</th>
-                <th>Prochain contrôle</th>
-                <th>Statut</th>
+                <th><button className="th-sort-btn" onClick={() => toggleSort('client')}>Client / Site {sortIcon('client')}</button></th>
+                <th><button className="th-sort-btn" onClick={() => toggleSort('device')}>Appareil {sortIcon('device')}</button></th>
+                <th><button className="th-sort-btn" onClick={() => toggleSort('battery')}>Batterie {sortIcon('battery')}</button></th>
+                <th><button className="th-sort-btn" onClick={() => toggleSort('electrode')}>Électrode {sortIcon('electrode')}</button></th>
+                <th><button className="th-sort-btn" onClick={() => toggleSort('control')}>Prochain contrôle {sortIcon('control')}</button></th>
+                <th><button className="th-sort-btn" onClick={() => toggleSort('status')}>Statut {sortIcon('status')}</button></th>
                 <th style={{ width: 110 }}>Actions</th>
               </tr>
             </thead>
@@ -293,14 +402,13 @@ export default function DevicesPage() {
                         {inst.client?.name || inst.clientName}
                       </button>
                       <div className="inst-site-loc">
-                        <MapPin size={11} strokeWidth={1.8} />
                         {inst.address}{inst.location ? ` · ${inst.location}` : ''}
                       </div>
                     </div>
                   </td>
                   <td>
                     <div className="inst-device-cell">
-                      {inst.deviceType   && <span className="inst-device-type">{inst.deviceType}</span>}
+                      {(inst.deviceProduct?.name || inst.deviceType) && <span className="inst-device-type">{inst.deviceProduct?.name || inst.deviceType}</span>}
                       {inst.serialNumber && <span className="inst-device-sn">{inst.serialNumber}</span>}
                       {!inst.deviceType && !inst.serialNumber && <span className="text-muted">—</span>}
                     </div>
@@ -319,9 +427,8 @@ export default function DevicesPage() {
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     <div className="sp-actions">
-                      <button className="sp-action-btn" title="Voir le détail"
+                      <button className="sp-action-btn inst-detail-action-hidden" title="Voir le détail"
                         onClick={() => navigate(`/devices/${inst._id}`)}>
-                        <Eye size={14} />
                       </button>
                       {canManage && (
                         <>

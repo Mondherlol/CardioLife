@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import {
@@ -22,14 +22,16 @@ const SAMPLE_COLUMNS = [
   { key: 'téléphone 2',      label: 'Téléphone 2',        required: false, example: '+216 20 000 000' },
   { key: 'email 1',          label: 'Email 1',            required: false, example: 'contact@elamel.tn' },
   { key: 'email 2',          label: 'Email 2',            required: false, example: 'daf@elamel.tn' },
+  { key: 'latitude',         label: 'Latitude GPS',       required: false, example: '36.8065' },
+  { key: 'longitude',        label: 'Longitude GPS',      required: false, example: '10.1815' },
   { key: 'responsable',      label: 'Responsable interne',required: false, example: 'Sophie Martin' },
   { key: 'notes',            label: 'Notes',              required: false, example: 'Contrat prioritaire' },
 ]
 
 const SAMPLE_ROWS = [
-  ['Clinique El Amel', 'Clinique', '12 Av. Habib Bourguiba', 'Tunis', 'Tunis', 'Ahmed Ben Ali', '+216 71 100 200', '', 'contact@elamel.tn', '', 'Sophie Martin', 'Contrat prioritaire'],
-  ['Mairie de Sfax', 'Mairie', 'Place de la Liberté', 'Sfax', 'Sfax', 'Fatma Trabelsi', '+216 74 200 300', '+216 74 200 301', 'mairie@sfax.tn', '', 'Pierre Dupont', ''],
-  ['École Secondaire Ibn Khaldoun', 'École', 'Rue de l\'Indépendance', 'Sousse', 'Sousse', '', '+216 73 300 400', '', '', '', '', 'Renouvellement prévu juin'],
+  ['Clinique El Amel', 'Clinique', '12 Av. Habib Bourguiba', 'Tunis', 'Tunis', 'Ahmed Ben Ali', '+216 71 100 200', '', 'contact@elamel.tn', '', '36.8065', '10.1815', 'Sophie Martin', 'Contrat prioritaire'],
+  ['Mairie de Sfax', 'Mairie', 'Place de la Liberté', 'Sfax', 'Sfax', 'Fatma Trabelsi', '+216 74 200 300', '+216 74 200 301', 'mairie@sfax.tn', '', '34.7406', '10.7603', 'Pierre Dupont', ''],
+  ['École Secondaire Ibn Khaldoun', 'École', 'Rue de l\'Indépendance', 'Sousse', 'Sousse', '', '+216 73 300 400', '', '', '', '35.8245', '10.6346', '', 'Renouvellement prévu juin'],
 ]
 
 function downloadSample() {
@@ -299,8 +301,12 @@ export default function ClientImportPage() {
                     <th>Nom</th>
                     <th>Type</th>
                     <th>Ville</th>
+                    <th>Gouvernorat</th>
+                    <th>Contact</th>
                     <th>Téléphone</th>
                     <th>Email</th>
+                    <th>GPS</th>
+                    <th>Responsable</th>
                     <th style={{ width: 60 }}>Statut</th>
                     <th>Erreurs</th>
                   </tr>
@@ -312,8 +318,17 @@ export default function ClientImportPage() {
                       <td className="ci-cell-name">{r.row.name || <em className="ci-cell--empty">—</em>}</td>
                       <td>{r.row.type || <em className="ci-cell--empty">—</em>}</td>
                       <td>{r.row.city || <em className="ci-cell--empty">—</em>}</td>
+                      <td>{r.row.governorate || <em className="ci-cell--empty">-</em>}</td>
+                      <td>{r.row.contactName || <em className="ci-cell--empty">-</em>}</td>
                       <td>{r.row.phone1 || <em className="ci-cell--empty">—</em>}</td>
                       <td>{r.row.email1 || <em className="ci-cell--empty">—</em>}</td>
+                      <td>
+                        {r.row.gpsLat || r.row.gpsLng
+                          ? `${r.row.gpsLat || '?'} / ${r.row.gpsLng || '?'}`
+                          : <em className="ci-cell--empty">-</em>
+                        }
+                      </td>
+                      <td>{r.row.internalManager || <em className="ci-cell--empty">-</em>}</td>
                       <td>
                         {r.valid
                           ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /></span>
@@ -392,6 +407,7 @@ export default function ClientImportPage() {
                 </p>
                 <p className="ci-done-sub">
                   {importRes.summary.imported} client{importRes.summary.imported !== 1 ? 's' : ''} importé{importRes.summary.imported !== 1 ? 's' : ''}
+                  {importRes.summary.created != null && ` (${importRes.summary.created} cree${importRes.summary.created !== 1 ? 's' : ''}, ${importRes.summary.updated || 0} mis a jour)`}
                   {importRes.summary.failed > 0 && `, ${importRes.summary.failed} échec${importRes.summary.failed !== 1 ? 's' : ''}`}
                 </p>
               </div>
@@ -413,7 +429,7 @@ export default function ClientImportPage() {
                       <td className="ci-cell-name">{r.name}</td>
                       <td>
                         {r.success
-                          ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /> Importé</span>
+                          ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /> {r.action === 'updated' ? 'Mis a jour' : 'Cree'}</span>
                           : <span className="ci-status ci-status--error"><XCircle size={14} /> Échec</span>
                         }
                       </td>
