@@ -19,12 +19,13 @@ const controlsRoutes        = require('./routes/controls')
 const formationsRoutes      = require('./routes/formations')
 const interventionsRoutes   = require('./routes/interventions')
 const profileRoutes         = require('./routes/profile')
+const dashboardRoutes       = require('./routes/dashboard')
 
 const app = express()
 
 connectDB()
 
-const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5174')
   .split(',')
   .map(o => o.trim())
 
@@ -50,6 +51,7 @@ app.use('/api/controls',      controlsRoutes)
 app.use('/api/formations',     formationsRoutes)
 app.use('/api/interventions',  interventionsRoutes)
 app.use('/api/profile',        profileRoutes)
+app.use('/api/dashboard',      dashboardRoutes)
 
 app.use((err, req, res, next) => {
   console.error(err.stack)

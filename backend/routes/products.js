@@ -32,6 +32,7 @@ router.post('/:id/images',                upload.single('image'), ctrl.uploadIma
 router.delete('/:id/images/:filename',    ctrl.deleteImage)
 router.post('/',               productValidation, ctrl.create)
 router.put('/:id',             productValidation, ctrl.update)
+router.patch('/:id',           ctrl.update)
 router.post('/:id/stock',      ctrl.adjustStock)
 router.delete('/:id',          ctrl.archive)
 router.put('/:id/restore',     ctrl.restore)

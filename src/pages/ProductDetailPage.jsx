@@ -11,7 +11,7 @@ import {
 import {
   getProduct, getMovements, adjustStock,
   uploadProductImage, deleteProductImage, productImageUrl,
-  updateProduct,
+  updateProduct, patchProduct,
 } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
@@ -579,6 +579,24 @@ function WebCardTab({ product, onSaved }) {
   })
   const [saving, setSaving]             = useState(false)
   const [featureInput, setFeatureInput] = useState('')
+  const [listed, setListed]             = useState(product.listedOnWebsite !== false)
+  const [togglingListed, setTogglingListed] = useState(false)
+
+  async function handleToggleListed() {
+    const next = !listed
+    setListed(next)
+    setTogglingListed(true)
+    try {
+      const updated = await patchProduct(product._id, { listedOnWebsite: next })
+      onSaved(updated)
+      toast.success(next ? 'Produit visible sur le site web.' : 'Produit masqué du site web.')
+    } catch (err) {
+      setListed(!next)
+      toast.error(formatApiError(err))
+    } finally {
+      setTogglingListed(false)
+    }
+  }
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -666,6 +684,24 @@ function WebCardTab({ product, onSaved }) {
 
       {/* ── Formulaire ── */}
       <div className="wc-form-col">
+        {/* Visibilité site web */}
+        <div className="wc-form-section">
+          <button
+            type="button"
+            className={`wc-listed-toggle${listed ? ' wc-listed-toggle--on' : ' wc-listed-toggle--off'}`}
+            onClick={handleToggleListed}
+            disabled={togglingListed}
+          >
+            <span className="wc-listed-track">
+              <span className="wc-listed-thumb" />
+            </span>
+            <span className="wc-listed-label">
+              <Globe size={13} />
+              {listed ? 'En vente sur le site web' : 'Masqué du site web'}
+            </span>
+          </button>
+        </div>
+
         <div className="wc-form-section">
           <label className="wc-label">Titre</label>
           <input className="wc-input" value={form.title} onChange={e => set('title', e.target.value)} placeholder={product.name} />

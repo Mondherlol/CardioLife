@@ -19,7 +19,7 @@ const PUBLIC_PRODUCT_FIELDS = [
 async function getAll(req, res) {
   const { category, brand, supplier, search, page = 1, limit = 20 } = req.query
 
-  const filter = { isActive: true }
+  const filter = { isActive: true, listedOnWebsite: { $ne: false } }
   if (category) filter.category = category
   if (brand) filter.brand = { $regex: brand, $options: 'i' }
   if (supplier) filter.supplier = { $regex: supplier, $options: 'i' }
@@ -65,6 +65,7 @@ async function getById(req, res) {
   const product = await Product.findOne({
     _id: req.params.id,
     isActive: true,
+    listedOnWebsite: { $ne: false },
   }).select(PUBLIC_PRODUCT_FIELDS)
 
   if (!product) return res.status(404).json({ message: 'Produit introuvable.' })

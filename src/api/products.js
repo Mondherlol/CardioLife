@@ -1,4 +1,4 @@
-import { get, post, put, del, upload, STATIC_BASE } from './http'
+import { get, post, put, patch, del, upload, STATIC_BASE } from './http'
 
 export function productImageUrl(filename) {
   return `${STATIC_BASE}/uploads/products/${filename}`
@@ -19,6 +19,7 @@ export const getProduct       = (id)       => get(`/products/${id}`)
 export const getMovements     = (id)       => get(`/products/${id}/movements`)
 export const createProduct    = (data)     => post('/products', data)
 export const updateProduct    = (id, data) => put(`/products/${id}`, data)
+export const patchProduct     = (id, data) => patch(`/products/${id}`, data)
 export const adjustStock      = (id, data) => post(`/products/${id}/stock`, data)
 export const uploadProductImage = (id, file) => {
   const fd = new FormData()

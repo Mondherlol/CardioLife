@@ -42,7 +42,8 @@ const productSchema = new mongoose.Schema({
     features:    [{ type: String, trim: true }],
     footerText:  { type: String, trim: true, default: 'Réponse garantie sous 24h · Livraison en Tunisie' },
   },
-  isActive:       { type: Boolean, default: true },
+  listedOnWebsite: { type: Boolean, default: true },
+  isActive:        { type: Boolean, default: true },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
