@@ -13154,3 +13154,17 @@ button {
 }
 .fiche-locked-note strong { display: block; font-size: 14px; color: var(--text-primary); margin-bottom: 3px; }
 .fiche-locked-note p { margin: 0; font-size: 13px; line-height: 1.45; }
+
+/* ═══════════════════════════════════════════════════
+   DAE — tag type de prochain contrôle (A / S / HC)
+   ═══════════════════════════════════════════════════ */
+.ctrl-tag {
+  display: inline-block;
+  font-size: 9.5px; font-weight: 800;
+  padding: 0 5px; border-radius: 5px;
+  vertical-align: middle; margin-left: 2px;
+  letter-spacing: .3px;
+}
+.ctrl-tag--a  { background: #ede9fe; color: #6d28d9; }   /* Annuel */
+.ctrl-tag--s  { background: var(--blue-100, #dbeafe); color: var(--blue-700, #1d4ed8); }  /* Semestriel */
+.ctrl-tag--hc { background: var(--gray-100, #f1f5f9); color: var(--gray-500); }           /* Hors contrat */

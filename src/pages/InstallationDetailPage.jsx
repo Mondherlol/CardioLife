@@ -209,13 +209,25 @@ function ControlsTab({ installation, users }) {
   const [loading,  setLoading]  = useState(true)
   const [modal,    setModal]    = useState(null)
 
+  const contractId = installation.contract?._id || installation.contract || null
+
   const load = useCallback(() => {
     setLoading(true)
-    getInterventions({ installation: installation._id })
-      .then(data => setControls(Array.isArray(data) ? data : []))
+    // Contrôles propres (hors contrat) + contrôles du contrat parent (annuel/semestriel)
+    Promise.all([
+      getInterventions({ installation: installation._id }),
+      contractId ? getInterventions({ contract: contractId }) : Promise.resolve([]),
+    ])
+      .then(([own, ctr]) => {
+        const map = {}
+        ;[...(Array.isArray(own) ? own : []), ...(Array.isArray(ctr) ? ctr : [])].forEach(c => { map[c._id] = c })
+        const list = Object.values(map).sort((a, b) =>
+          new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0))
+        setControls(list)
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [installation._id])
+  }, [installation._id, contractId])
 
   useEffect(() => { load() }, [load])
 

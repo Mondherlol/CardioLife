@@ -635,24 +635,35 @@ export default function DocumentsPage() {
 
   /* ── Upload ────────────────────────────────────────────────── */
 
-  function handleFilesSelected(files) {
-    Array.from(files).forEach(file => {
-      const id = crypto.randomUUID()
-      setUploads(prev => [...prev, { id, name: file.name, progress: 0, status: 'uploading' }])
+  function createUploadId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+    return `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  }
 
-      uploadWithProgress(file, currentFolder, {
-        onProgress: (pct) => setUploads(prev =>
-          prev.map(u => u.id === id ? { ...u, progress: pct } : u)),
-        onSuccess: () => {
-          setUploads(prev => prev.map(u => u.id === id ? { ...u, progress: 100, status: 'done' } : u))
-          refreshAll()
-        },
-        onError: (msg) => {
-          setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'error', error: msg } : u))
-          toast.error(`${file.name} : ${msg}`)
-        },
+  function handleFilesSelected(files) {
+    try {
+      Array.from(files).forEach(file => {
+        const id = createUploadId()
+        setUploads(prev => [...prev, { id, name: file.name, progress: 0, status: 'uploading' }])
+
+        uploadWithProgress(file, currentFolder, {
+          onProgress: (pct) => setUploads(prev =>
+            prev.map(u => u.id === id ? { ...u, progress: pct } : u)),
+          onSuccess: () => {
+            setUploads(prev => prev.map(u => u.id === id ? { ...u, progress: 100, status: 'done' } : u))
+            refreshAll()
+          },
+          onError: (msg) => {
+            setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'error', error: msg } : u))
+            toast.error(`${file.name} : ${msg}`)
+          },
+        })
       })
-    })
+    } catch (err) {
+      toast.error(err.message || "Impossible de démarrer l'envoi du fichier.")
+    }
   }
 
   /* ── Context menu ──────────────────────────────────────────── */
