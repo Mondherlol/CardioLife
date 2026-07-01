@@ -14,21 +14,7 @@ import {
 } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
-
-/* ─── Constantes métier ─── */
-const CATEGORIES = [
-  { value: 'defibrillateur',   label: 'Défibrillateur',     color: 'cat--orange' },
-  { value: 'batterie',         label: 'Batterie',           color: 'cat--amber'  },
-  { value: 'electrodes_adulte',label: 'Électrodes adulte',  color: 'cat--blue'   },
-  { value: 'electrodes_enfant',label: 'Électrodes enfant',  color: 'cat--purple' },
-  { value: 'boitier',          label: 'Boîtier mural',      color: 'cat--teal'   },
-  { value: 'signaletique',     label: 'Signalétique',       color: 'cat--green'  },
-  { value: 'accessoire',       label: 'Accessoire',         color: 'cat--gray'   },
-  { value: 'kit_secours',      label: 'Kit de secours',     color: 'cat--red'    },
-  { value: 'autre',            label: 'Autre',              color: 'cat--gray'   },
-]
-
-const CAT_MAP = Object.fromEntries(CATEGORIES.map(c => [c.value, c]))
+import { PRODUCT_CATEGORIES as CATEGORIES, CATEGORY_MAP as CAT_MAP } from '../constants/categories'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')

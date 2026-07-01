@@ -14,6 +14,7 @@ async function getAll(req, res) {
 
     const appointments = await Appointment.find(filter)
       .populate('client', 'name')
+      .populate('assignedTo', 'fullName username')
       .sort({ start: 1 })
 
     res.json(appointments)
@@ -24,7 +25,7 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const { title, start, end, allDay, type, status, description, client, clientName, installation } = req.body
+    const { title, start, end, allDay, type, status, description, client, clientName, installation, assignedTo } = req.body
     if (!title || !start) return res.status(422).json({ message: 'Titre et date de début requis.' })
 
     const appt = await Appointment.create({
@@ -32,6 +33,7 @@ async function create(req, res) {
       client:       client       || undefined,
       clientName:   clientName   || undefined,
       installation: installation || undefined,
+      assignedTo:   Array.isArray(assignedTo) ? assignedTo : undefined,
       createdBy:    req.user._id,
     })
     res.status(201).json(appt)

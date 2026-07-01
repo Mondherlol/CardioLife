@@ -3,18 +3,25 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Pencil, Trash2, Zap, MapPin, Calendar,
   Activity, AlertTriangle, X, Battery, Plus, CheckCircle2,
-  ClipboardList, Clock, ChevronRight, Check, User,
+  ClipboardList, Clock, ChevronRight, Check, User, Wrench, FileText,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
 import { getInstallation, deleteInstallation } from '../api/installations'
-import {
-  getControlsByInstallation,
-  createControl,
-  updateControl,
-  deleteControl,
-} from '../api/controls'
+import { getInterventions, createIntervention, deleteIntervention } from '../api/interventions'
 import { getUsers } from '../api/users'
+
+/* Type de contrôle → libellé */
+const CONTROL_TYPE_LABELS = {
+  semestriel:   'Semestriel',
+  annuel:       'Annuel',
+  hors_contrat: 'Hors contrat',
+}
+const INTERVENTION_STATUS = {
+  planifie: { label: 'Planifié', cls: 'iv-badge iv-badge--blue' },
+  en_cours: { label: 'En cours', cls: 'iv-badge iv-badge--orange' },
+  termine:  { label: 'Terminé',  cls: 'iv-badge iv-badge--green' },
+}
 
 /* ─── Helpers ───────────────────────────────────────────────── */
 function formatDate(d) {
@@ -105,50 +112,44 @@ function DetailLink({ label, value, onClick }) {
   )
 }
 
-/* ─── CONFORMITE SELECT ──────────────────────────────────────── */
-const CONFORM_OPTS = {
-  dae:          [['conforme','Conforme'],['non_conforme','Non conforme'],['remplace','Remplacé']],
-  batterie:     [['conforme','Conforme'],['non_conforme','Non conforme'],['remplacee','Remplacée']],
-  electrodes:   [['conformes','Conformes'],['non_conformes','Non conformes'],['remplacees','Remplacées']],
-  boitier:      [['conforme','Conforme'],['non_conforme','Non conforme'],['remplace','Remplacé']],
-  signalisation:[['conforme','Conforme'],['non_conforme','Non conforme']],
-}
-
-function ConformSelect({ field, value, onChange }) {
-  return (
-    <select className="form-input form-input--plain" value={value}
-      onChange={e => onChange(e.target.value)}>
-      <option value="">— Non renseigné</option>
-      {(CONFORM_OPTS[field] || []).map(([v, l]) => (
-        <option key={v} value={v}>{l}</option>
-      ))}
-    </select>
-  )
-}
-
-/* ─── CREATE CONTROL MODAL ──────────────────────────────────── */
-function CreateControlModal({ installation, onClose, onCreated }) {
+/* ─── PLANIFIER UN CONTRÔLE (crée une intervention hors contrat) ── */
+function ScheduleControlModal({ installation, users, onClose, onCreated }) {
   const [form, setForm] = useState({
-    type:          installation.controlType || 'semestriel',
-    scheduledDate: toDateInput(installation.nextControlDate) || todayStr(),
+    date:         toDateInput(installation.nextControlDate) || todayStr(),
+    time:         '09:00',
+    technicienId: '',
   })
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
 
+  const techniciens = users.filter(u => u.role === 'technicien')
+  const pickable    = techniciens.length ? techniciens : users
+
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!form.scheduledDate) return setError('La date est requise.')
+    if (!form.date) return setError('La date est requise.')
+    const start = new Date(`${form.date}T${form.time || '09:00'}`)
+    if (isNaN(start.getTime())) return setError('Date ou heure invalide.')
     setLoading(true)
     try {
-      const ctrl = await createControl({
+      const tech = pickable.find(u => u._id === form.technicienId)
+      const created = await createIntervention({
         installation:  installation._id,
         client:        installation.client?._id || installation.client,
         clientName:    installation.clientName,
-        type:          form.type,
-        scheduledDate: new Date(form.scheduledDate).toISOString(),
+        installationSnap: {
+          deviceType:   installation.deviceType   || '',
+          serialNumber: installation.serialNumber || '',
+          address:      installation.address      || '',
+          location:     installation.location     || '',
+        },
+        technicien:     tech?._id || undefined,
+        technicienName: tech ? (tech.fullName || tech.username) : undefined,
+        scheduledDate:  start.toISOString(),
+        controlType:    'hors_contrat',
       })
-      toast.success('Contrôle planifié.')
-      onCreated(ctrl)
+      toast.success('Contrôle planifié — visible dans le planning.')
+      onCreated(created)
     } catch (err) {
       setError(err.message || 'Erreur.')
     } finally { setLoading(false) }
@@ -162,33 +163,30 @@ function CreateControlModal({ installation, onClose, onCreated }) {
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit} className="modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="form-group">
-            <label className="form-label">Type *</label>
-            <div className="ctrl-type-row">
-              {[['semestriel','Semestriel'],['annuel','Annuel']].map(([v,l]) => (
-                <button key={v} type="button"
-                  className={`ctrl-type-btn${form.type === v ? ' ctrl-type-btn--on' : ''}`}
-                  onClick={() => setForm(f => ({ ...f, type: v }))}>
-                  {form.type === v && <Check size={12} />} {l}
-                </button>
-              ))}
+          <p className="ctrl-hint-line">
+            <AlertTriangle size={13} /> Contrôle <strong>hors contrat</strong> — crée une intervention à la date choisie.
+          </p>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Date *</label>
+              <input type="date" className="form-input form-input--plain"
+                value={form.date}
+                onChange={e => setForm(f => ({ ...f, date: e.target.value }))} required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Heure *</label>
+              <input type="time" className="form-input form-input--plain"
+                value={form.time}
+                onChange={e => setForm(f => ({ ...f, time: e.target.value }))} required />
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">Date prévue *</label>
-            <div className="ctrl-date-shortcuts">
-              <button type="button" className="ctrl-shortcut-chip"
-                onClick={() => setForm(f => ({ ...f, scheduledDate: todayPlusMonths(6) }))}>
-                Dans 6 mois
-              </button>
-              <button type="button" className="ctrl-shortcut-chip"
-                onClick={() => setForm(f => ({ ...f, scheduledDate: todayPlusMonths(12) }))}>
-                Dans 12 mois
-              </button>
-            </div>
-            <input type="date" className="form-input form-input--plain"
-              value={form.scheduledDate}
-              onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))} required />
+            <label className="form-label">Intervenant</label>
+            <select className="form-input form-input--plain" value={form.technicienId}
+              onChange={e => setForm(f => ({ ...f, technicienId: e.target.value }))}>
+              <option value="">— Non assigné</option>
+              {pickable.map(u => <option key={u._id} value={u._id}>{u.fullName || u.username}</option>)}
+            </select>
           </div>
           {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
           <div className="modal-footer" style={{ paddingTop: 0 }}>
@@ -203,296 +201,68 @@ function CreateControlModal({ installation, onClose, onCreated }) {
   )
 }
 
-/* ─── EDIT CONTROL MODAL ─────────────────────────────────────── */
-function EditControlModal({ control, onClose, onUpdated }) {
-  const [form, setForm] = useState({
-    type:          control.type,
-    scheduledDate: toDateInput(control.scheduledDate),
-  })
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState('')
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (!form.scheduledDate) return setError('La date est requise.')
-    setLoading(true)
-    try {
-      const updated = await updateControl(control._id, {
-        type:          form.type,
-        scheduledDate: new Date(form.scheduledDate).toISOString(),
-      })
-      toast.success('Contrôle mis à jour.')
-      onUpdated(updated)
-    } catch (err) {
-      setError(err.message || 'Erreur.')
-    } finally { setLoading(false) }
-  }
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--sm">
-        <div className="modal-header">
-          <h2 className="modal-title">Modifier le contrôle</h2>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="form-group">
-            <label className="form-label">Type *</label>
-            <div className="ctrl-type-row">
-              {[['semestriel','Semestriel'],['annuel','Annuel']].map(([v,l]) => (
-                <button key={v} type="button"
-                  className={`ctrl-type-btn${form.type === v ? ' ctrl-type-btn--on' : ''}`}
-                  onClick={() => setForm(f => ({ ...f, type: v }))}>
-                  {form.type === v && <Check size={12} />} {l}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Date prévue *</label>
-            <div className="ctrl-date-shortcuts">
-              <button type="button" className="ctrl-shortcut-chip"
-                onClick={() => setForm(f => ({ ...f, scheduledDate: todayPlusMonths(6) }))}>
-                Dans 6 mois
-              </button>
-              <button type="button" className="ctrl-shortcut-chip"
-                onClick={() => setForm(f => ({ ...f, scheduledDate: todayPlusMonths(12) }))}>
-                Dans 12 mois
-              </button>
-            </div>
-            <input type="date" className="form-input form-input--plain"
-              value={form.scheduledDate}
-              onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))} required />
-          </div>
-          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
-          <div className="modal-footer" style={{ paddingTop: 0 }}>
-            <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
-            <button type="submit" className="btn btn--primary" disabled={loading}>
-              {loading ? <span className="login-btn-spinner" /> : 'Enregistrer'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-/* ─── COMPLETE CONTROL MODAL ─────────────────────────────────── */
-function CompleteControlModal({ control, users, onClose, onUpdated }) {
-  const [form, setForm] = useState({
-    completedDate: todayStr(),
-    technicienId:  '',
-    dae:           '',
-    batterie:      '',
-    electrodes:    '',
-    boitier:       '',
-    signalisation: '',
-    observations:  '',
-    nextControlDate: '',
-  })
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState('')
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (!form.completedDate) return setError('La date de réalisation est requise.')
-    setLoading(true)
-    try {
-      const updated = await updateControl(control._id, {
-        status:        'termine',
-        completedDate: new Date(form.completedDate).toISOString(),
-        technicien:    form.technicienId || undefined,
-        technicienName: form.technicienId
-          ? users.find(u => u._id === form.technicienId)?.fullName
-          : undefined,
-        rapport: {
-          dae:            form.dae,
-          batterie:       form.batterie,
-          electrodes:     form.electrodes,
-          boitier:        form.boitier,
-          signalisation:  form.signalisation,
-          observations:   form.observations || undefined,
-          nextControlDate: form.nextControlDate
-            ? new Date(form.nextControlDate).toISOString() : undefined,
-        },
-      })
-      toast.success('Contrôle marqué comme terminé.')
-      onUpdated(updated)
-    } catch (err) {
-      setError(err.message || 'Erreur.')
-    } finally { setLoading(false) }
-  }
-
-  const items = [
-    { key: 'dae',          label: 'Défibrillateur' },
-    { key: 'batterie',     label: 'Batterie' },
-    { key: 'electrodes',   label: 'Électrodes' },
-    { key: 'boitier',      label: 'Boîtier mural' },
-    { key: 'signalisation',label: 'Signalisation' },
-  ]
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--lg">
-        <div className="modal-header">
-          <div style={{ display:'flex', alignItems:'center', gap: 10 }}>
-            <div className="pmodal-header-icon" style={{ background: '#22c55e' }}>
-              <ClipboardList size={14} color="#fff" />
-            </div>
-            <h2 className="modal-title">Rapport de contrôle</h2>
-          </div>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="modal-body pmodal-body" style={{ gap: 14, padding: '16px 20px 0' }}>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Date de réalisation *</label>
-              <input type="date" className="form-input form-input--plain"
-                value={form.completedDate}
-                onChange={e => set('completedDate', e.target.value)} required />
-            </div>
-            {users.length > 0 && (
-              <div className="form-group">
-                <label className="form-label">Technicien</label>
-                <select className="form-input form-input--plain" value={form.technicienId}
-                  onChange={e => set('technicienId', e.target.value)}>
-                  <option value="">— Non assigné</option>
-                  {users.map(u => <option key={u._id} value={u._id}>{u.fullName}</option>)}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="ctrl-rapport-grid">
-            {items.map(({ key, label }) => (
-              <div key={key} className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">{label}</label>
-                <ConformSelect field={key} value={form[key]} onChange={v => set(key, v)} />
-              </div>
-            ))}
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Observations</label>
-            <textarea className="form-input form-input--plain form-textarea"
-              rows={3} value={form.observations}
-              onChange={e => set('observations', e.target.value)}
-              placeholder="Observations, remarques, actions correctives…" />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Prochain contrôle prévu</label>
-            <input type="date" className="form-input form-input--plain"
-              value={form.nextControlDate}
-              onChange={e => set('nextControlDate', e.target.value)} />
-          </div>
-
-          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
-
-          <div className="modal-footer">
-            <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
-            <button type="submit" className="btn btn--primary" disabled={loading}>
-              {loading ? <span className="login-btn-spinner" /> : <><Check size={13} /> Valider le contrôle</>}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-/* ─── VIEW RAPPORT MODAL ─────────────────────────────────────── */
-function ViewRapportModal({ control, onClose }) {
-  const r = control.rapport || {}
-  const labelMap = {
-    dae: 'Défibrillateur', batterie: 'Batterie', electrodes: 'Électrodes',
-    boitier: 'Boîtier mural', signalisation: 'Signalisation',
-  }
-  const displayVal = v => {
-    if (!v) return '—'
-    return v.replace('_', ' ').replace(/^./, c => c.toUpperCase())
-  }
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--md">
-        <div className="modal-header">
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div className="pmodal-header-icon" style={{ background: '#22c55e' }}>
-              <ClipboardList size={14} color="#fff" />
-            </div>
-            <h2 className="modal-title">Rapport — {formatDate(control.completedDate)}</h2>
-          </div>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        <div className="modal-body" style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {control.technicienName && (
-            <div className="ctrl-rapport-tech">
-              <User size={13} /> Réalisé par <strong>{control.technicienName}</strong>
-            </div>
-          )}
-          <div className="ctrl-rapport-grid">
-            {Object.entries(labelMap).map(([k, l]) => (
-              <div key={k} className="ctrl-rapport-item">
-                <span className="ctrl-rapport-label">{l}</span>
-                <span className={`ctrl-rapport-val ctrl-rapport-val--${r[k] === 'conforme' || r[k] === 'conformes' ? 'ok' : r[k] ? 'warn' : 'muted'}`}>
-                  {displayVal(r[k])}
-                </span>
-              </div>
-            ))}
-          </div>
-          {r.observations && (
-            <div className="ctrl-rapport-obs">
-              <p className="form-label" style={{ marginBottom: 4 }}>Observations</p>
-              <p style={{ fontSize: 13, color: 'var(--text-primary)', margin: 0 }}>{r.observations}</p>
-            </div>
-          )}
-          {r.nextControlDate && (
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              Prochain contrôle prévu : <strong>{formatDate(r.nextControlDate)}</strong>
-            </div>
-          )}
-          <div className="modal-footer">
-            <button className="btn btn--ghost" onClick={onClose}>Fermer</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/* ─── CONTROLS TAB ───────────────────────────────────────────── */
+/* ─── CONTROLS TAB (interventions liées à l'installation) ─────── */
 function ControlsTab({ installation, users }) {
-  const [controls,  setControls]  = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [modal,     setModal]     = useState(null)
+  const navigate = useNavigate()
+  const [controls, setControls] = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [modal,    setModal]    = useState(null)
 
   const load = useCallback(() => {
     setLoading(true)
-    getControlsByInstallation(installation._id)
-      .then(setControls)
+    getInterventions({ installation: installation._id })
+      .then(data => setControls(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [installation._id])
 
   useEffect(() => { load() }, [load])
 
-  function handleCreated(ctrl) { setControls(prev => [...prev, ctrl].sort((a,b) => new Date(a.scheduledDate)-new Date(b.scheduledDate))); setModal(null) }
-  function handleUpdated(ctrl) { setControls(prev => prev.map(c => c._id === ctrl._id ? ctrl : c)); setModal(null) }
-  async function handleDelete(id) {
+  function handleCreated() { setModal(null); load() }
+  async function handleDelete(id, e) {
+    e.stopPropagation()
     if (!window.confirm('Supprimer ce contrôle ?')) return
-    await deleteControl(id)
-    setControls(prev => prev.filter(c => c._id !== id))
-    toast.success('Contrôle supprimé.')
+    try {
+      await deleteIntervention(id)
+      setControls(prev => prev.filter(c => c._id !== id))
+      toast.success('Contrôle supprimé.')
+    } catch (err) { toast.error(err.message || 'Erreur.') }
   }
 
-  const upcoming  = controls.filter(c => c.status === 'a_venir')
+  const upcoming  = controls.filter(c => c.status !== 'termine')
   const completed = controls.filter(c => c.status === 'termine')
 
   if (loading) return <div className="table-loading"><span className="spinner" /></div>
+
+  const renderCard = c => {
+    const st   = INTERVENTION_STATUS[c.status] || INTERVENTION_STATUS.planifie
+    const done = c.status === 'termine'
+    const days = done ? null : daysUntil(c.scheduledDate)
+    const urgCls = done ? 'ctrl-card--done' : days < 0 ? 'ctrl-card--overdue' : days <= 30 ? 'ctrl-card--soon' : ''
+    return (
+      <div key={c._id} className={`ctrl-card ctrl-card--clickable ${urgCls}`}
+        onClick={() => navigate(`/interventions/${c._id}`)}>
+        <div className="ctrl-card-left">
+          <span className={`ctrl-type-badge ctrl-type-badge--${c.controlType}`}>
+            {CONTROL_TYPE_LABELS[c.controlType] || 'Hors contrat'}
+          </span>
+          <span className="ctrl-date">{formatDate(done ? (c.completedDate || c.scheduledDate) : c.scheduledDate)}</span>
+          {!done && days != null && (
+            <span className={`ctrl-days ${days < 0 ? 'ctrl-days--red' : days <= 30 ? 'ctrl-days--amber' : 'ctrl-days--green'}`}>
+              {days < 0 ? `Dépassé de ${Math.abs(days)} j` : days === 0 ? "Aujourd'hui" : `Dans ${days} j`}
+            </span>
+          )}
+          {c.technicienName && <span className="ctrl-tech"><User size={11} /> {c.technicienName}</span>}
+        </div>
+        <div className="ctrl-card-actions">
+          <span className={st.cls}>{st.label}</span>
+          <button className="btn btn--ghost btn--sm" onClick={e => handleDelete(c._id, e)}>
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="ctrl-tab">
@@ -501,8 +271,7 @@ function ControlsTab({ installation, users }) {
           <span className="ctrl-count-chip ctrl-count-chip--upcoming">{upcoming.length} à venir</span>
           <span className="ctrl-count-chip ctrl-count-chip--done">{completed.length} terminé{completed.length > 1 ? 's' : ''}</span>
         </div>
-        <button className="btn btn--primary btn--sm"
-          onClick={() => setModal({ mode: 'create' })}>
+        <button className="btn btn--primary btn--sm" onClick={() => setModal({ mode: 'create' })}>
           <Plus size={13} /> Planifier
         </button>
       </div>
@@ -520,84 +289,20 @@ function ControlsTab({ installation, users }) {
       {upcoming.length > 0 && (
         <section className="ctrl-section">
           <h4 className="ctrl-section-title"><Clock size={14} /> À venir</h4>
-          <div className="ctrl-list">
-            {upcoming.map(c => {
-              const days = daysUntil(c.scheduledDate)
-              const urgCls = days < 0 ? 'ctrl-card--overdue' : days <= 30 ? 'ctrl-card--soon' : ''
-              return (
-                <div key={c._id} className={`ctrl-card ${urgCls}`}>
-                  <div className="ctrl-card-left">
-                    <span className={`ctrl-type-badge ctrl-type-badge--${c.type}`}>
-                      {c.type === 'semestriel' ? 'Semestriel' : 'Annuel'}
-                    </span>
-                    <span className="ctrl-date">{formatDate(c.scheduledDate)}</span>
-                    {days != null && (
-                      <span className={`ctrl-days ${days < 0 ? 'ctrl-days--red' : days <= 30 ? 'ctrl-days--amber' : 'ctrl-days--green'}`}>
-                        {days < 0 ? `Dépassé de ${Math.abs(days)} j` : days === 0 ? "Aujourd'hui" : `Dans ${days} j`}
-                      </span>
-                    )}
-                  </div>
-                  <div className="ctrl-card-actions">
-                    <button className="btn btn--primary btn--sm"
-                      onClick={() => setModal({ mode: 'complete', control: c })}>
-                      <CheckCircle2 size={13} /> Terminer
-                    </button>
-                    <button className="btn btn--ghost btn--sm"
-                      onClick={() => setModal({ mode: 'edit', control: c })}>
-                      <Pencil size={13} />
-                    </button>
-                    <button className="btn btn--ghost btn--sm" onClick={() => handleDelete(c._id)}>
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          <div className="ctrl-list">{upcoming.map(renderCard)}</div>
         </section>
       )}
 
       {completed.length > 0 && (
         <section className="ctrl-section">
           <h4 className="ctrl-section-title"><CheckCircle2 size={14} /> Terminés</h4>
-          <div className="ctrl-list">
-            {completed.map(c => (
-              <div key={c._id} className="ctrl-card ctrl-card--done">
-                <div className="ctrl-card-left">
-                  <span className={`ctrl-type-badge ctrl-type-badge--${c.type}`}>
-                    {c.type === 'semestriel' ? 'Semestriel' : 'Annuel'}
-                  </span>
-                  <span className="ctrl-date">{formatDate(c.completedDate || c.scheduledDate)}</span>
-                  {c.technicienName && (
-                    <span className="ctrl-tech"><User size={11} /> {c.technicienName}</span>
-                  )}
-                </div>
-                <div className="ctrl-card-actions">
-                  <button className="btn btn--ghost btn--sm"
-                    onClick={() => setModal({ mode: 'view', control: c })}>
-                    <ClipboardList size={13} /> Rapport
-                  </button>
-                  <button className="btn btn--ghost btn--sm" onClick={() => handleDelete(c._id)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <div className="ctrl-list">{completed.map(renderCard)}</div>
         </section>
       )}
 
       {modal?.mode === 'create' && (
-        <CreateControlModal installation={installation} onClose={() => setModal(null)} onCreated={handleCreated} />
-      )}
-      {modal?.mode === 'edit' && (
-        <EditControlModal control={modal.control} onClose={() => setModal(null)} onUpdated={handleUpdated} />
-      )}
-      {modal?.mode === 'complete' && (
-        <CompleteControlModal control={modal.control} users={users} onClose={() => setModal(null)} onUpdated={handleUpdated} />
-      )}
-      {modal?.mode === 'view' && (
-        <ViewRapportModal control={modal.control} onClose={() => setModal(null)} />
+        <ScheduleControlModal installation={installation} users={users}
+          onClose={() => setModal(null)} onCreated={handleCreated} />
       )}
     </div>
   )
@@ -722,6 +427,14 @@ export default function InstallationDetailPage() {
           <span className="inst-ctrl-type-chip">
             <Calendar size={11} /> Contrôle {inst.controlType}
           </span>
+        )}
+        {inst.contract && (
+          <button type="button" className="inst-contract-chip"
+            onClick={() => navigate(`/contrats/${inst.contract._id}`)}
+            title="Voir le contrat lié">
+            <FileText size={11} /> Issu du contrat{inst.contract.contractNumber ? ` ${inst.contract.contractNumber}` : ''}
+            <ChevronRight size={11} />
+          </button>
         )}
       </div>
 

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import {
-  LayoutDashboard, Users, Zap, Package, FileText,
+  LayoutDashboard, Users, Zap, Package, Boxes, FileText,
   Wrench, Calendar, File, Map, Mail,
   Settings, UserCircle, Heart, ChevronLeft, ChevronRight,
 } from 'lucide-react'
@@ -14,8 +14,9 @@ const ALL_NAV = [
   { icon: Users,           label: 'Clients',           to: '/clients',        roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: Zap,             label: 'DAE installés',     to: '/devices',        roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: Package,         label: 'Stock & Produits',  to: '/stock',          roles: ['superadmin','admin','commercial','assistante','readonly'] },
+  { icon: Boxes,           label: 'Packs',             to: '/packs',          roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: FileText,        label: 'Contrats',          to: '/contrats',       roles: ['superadmin','admin','commercial','assistante'] },
-  { icon: Wrench,          label: 'Interventions',     to: '/interventions',  roles: null }, // all roles
+  { icon: Wrench,          label: 'Contrôles',         to: '/interventions',  roles: null }, // all roles
   { icon: Calendar,        label: 'Planning',          to: '/planning',       roles: null }, // all roles
   { icon: File,            label: 'Documents',         to: '/documents',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: Map,             label: 'Carte Tunisie',     to: '/carte',          roles: ['superadmin','admin','commercial','assistante','readonly'] },

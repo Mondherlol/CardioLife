@@ -1,4 +1,5 @@
 const Installation = require('../models/Installation')
+const Contract     = require('../models/Contract')
 
 async function getAll(req, res) {
   const { search, page = 1, limit = 200, client } = req.query
@@ -39,7 +40,13 @@ async function getById(req, res) {
     .populate('electrodes.product', 'name category reference')
     .populate('createdBy', 'username fullName')
   if (!inst) return res.status(404).json({ message: 'Installation introuvable.' })
-  res.json(inst)
+
+  // Contrat éventuel dont provient cette installation
+  const contract = await Contract.findOne({ installations: inst._id, isActive: true })
+    .select('contractNumber type status')
+    .lean()
+
+  res.json({ ...inst.toObject(), contract: contract || null })
 }
 
 async function create(req, res) {

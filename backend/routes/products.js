@@ -4,11 +4,7 @@ const ctrl   = require('../controllers/productsController')
 const upload = require('../middleware/upload')
 const { protect }           = require('../middleware/auth')
 const { requirePermission } = require('../middleware/permissions')
-
-const CATEGORIES = [
-  'defibrillateur', 'batterie', 'electrodes_adulte', 'electrodes_enfant',
-  'boitier', 'signaletique', 'accessoire', 'kit_secours', 'autre',
-]
+const { CATEGORIES }        = require('../models/Product')  // source unique
 
 const productValidation = [
   body('name').trim().notEmpty().withMessage('Le nom du produit est requis.'),

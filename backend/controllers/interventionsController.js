@@ -12,7 +12,7 @@ function isAdmin(user) {
 /* ─── List ─────────────────────────────────────────────────── */
 async function getAll(req, res) {
   try {
-    const { status, technicien, client, search } = req.query
+    const { status, technicien, client, search, from, to, installation, controlType } = req.query
     const query = {}
 
     // Technicians only see their own interventions
@@ -23,7 +23,16 @@ async function getAll(req, res) {
       if (client)     query.client     = client
     }
 
-    if (status) query.status = status
+    if (status)       query.status       = status
+    if (installation) query.installation = installation
+    if (controlType)  query.controlType  = controlType
+
+    // Plage de dates (utilisé par le planning) — sur la date planifiée
+    if (from || to) {
+      query.scheduledDate = {}
+      if (from) query.scheduledDate.$gte = new Date(from)
+      if (to)   query.scheduledDate.$lte = new Date(to)
+    }
 
     if (search) {
       const re = { $regex: search, $options: 'i' }
@@ -83,13 +92,18 @@ async function create(req, res) {
       installation, installationSnap,
       technicien, technicienName,
       scheduledDate, notes,
+      controlType, contract,
     } = req.body
+
+    const CONTROL_TYPES = ['semestriel', 'annuel', 'hors_contrat']
 
     const intervention = await Intervention.create({
       client, clientName,
       installation, installationSnap,
       technicien, technicienName,
       scheduledDate, notes,
+      controlType: CONTROL_TYPES.includes(controlType) ? controlType : 'hors_contrat',
+      contract: contract || undefined,
       status: 'planifie',
       history: [{
         action:   'creation',
@@ -139,7 +153,7 @@ async function update(req, res) {
     }
 
     const allowed = ['client','clientName','installation','installationSnap',
-                     'technicien','technicienName','scheduledDate','notes','status']
+                     'technicien','technicienName','scheduledDate','notes','status','controlType','contract']
     allowed.forEach(k => { if (req.body[k] !== undefined) intervention[k] = req.body[k] })
 
     intervention.history.push({

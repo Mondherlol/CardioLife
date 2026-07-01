@@ -18,6 +18,21 @@ const STATUS_META = {
   termine:   { label: 'Terminé',    cls: 'iv-badge iv-badge--green',  Icon: CheckCircle2 },
 }
 
+const CONTROL_TYPE_META = {
+  semestriel:   { label: 'Semestriel',   cls: 'ct-type-badge ct-type-badge--semestriel' },
+  annuel:       { label: 'Annuel',       cls: 'ct-type-badge ct-type-badge--annuel' },
+  hors_contrat: { label: 'Hors contrat', cls: 'ct-type-badge ct-type-badge--hors' },
+}
+const CONTROL_TYPE_OPTS = [
+  { value: 'hors_contrat', label: 'Hors contrat' },
+  { value: 'semestriel',   label: 'Semestriel' },
+  { value: 'annuel',       label: 'Annuel' },
+]
+function ControlTypeBadge({ type }) {
+  const m = CONTROL_TYPE_META[type] || CONTROL_TYPE_META.hors_contrat
+  return <span className={m.cls}>{m.label}</span>
+}
+
 /* ─── Helpers ────────────────────────────────────────────────── */
 
 function fmt(d) {
@@ -54,6 +69,7 @@ function CreateModal({ onClose, onCreated }) {
     technicien:    '',
     technicienName:'',
     scheduledDate: '',
+    controlType:   'hors_contrat',
     notes:         '',
   })
 
@@ -116,7 +132,7 @@ function CreateModal({ onClose, onCreated }) {
     setSaving(true)
     try {
       const created = await createIntervention(form)
-      toast.success('Intervention créée.')
+      toast.success('Contrôle créé.')
       onCreated(created)
       onClose()
     } catch (err) {
@@ -133,7 +149,7 @@ function CreateModal({ onClose, onCreated }) {
       <div className="modal modal--md modal--dropdown">
         <div className="modal-header">
           <h2 className="modal-title">
-            <Plus size={16} /> Nouvelle intervention
+            <Plus size={16} /> Nouveau contrôle
           </h2>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
@@ -219,6 +235,19 @@ function CreateModal({ onClose, onCreated }) {
           </div>
 
           <div className="form-field">
+            <label className="form-label">Type de contrôle</label>
+            <div className="ct-type-pills">
+              {CONTROL_TYPE_OPTS.map(o => (
+                <button key={o.value} type="button"
+                  className={`ct-type-pill${form.controlType === o.value ? ' ct-type-pill--on' : ''}`}
+                  onClick={() => setF('controlType', o.value)}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-field">
             <label className="form-label">Notes</label>
             <textarea
               className="form-input"
@@ -293,6 +322,7 @@ function TechnicianCard({ intervention, onClick }) {
       <div className="iv-card-header">
         <div className="iv-card-client">{intervention.clientName || '—'}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ControlTypeBadge type={intervention.controlType} />
           <StatusBadge status={intervention.status} />
           <ArrowRight size={14} className="iv-card-arrow" />
         </div>
@@ -407,6 +437,7 @@ function AdminRow({ intervention, onClick }) {
           : <span className="text-muted">—</span>
         }
       </td>
+      <td><ControlTypeBadge type={intervention.controlType} /></td>
       <td><StatusBadge status={intervention.status} /></td>
     </tr>
   )
@@ -488,23 +519,23 @@ export default function InterventionsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">
-            <Wrench size={20} strokeWidth={1.8} /> Interventions
+            <Wrench size={20} strokeWidth={1.8} /> Contrôles
           </h1>
           {isTech ? (
             <p className="page-subtitle">
               Bonjour <strong>{user.fullName || user.username}</strong> —
               {pendingCount > 0
-                ? <> <span className="iv-pending-count">{pendingCount}</span> intervention{pendingCount > 1 ? 's' : ''} en attente</>
-                : <> Toutes vos interventions sont à jour</>
+                ? <> <span className="iv-pending-count">{pendingCount}</span> contrôle{pendingCount > 1 ? 's' : ''} en attente</>
+                : <> Tous vos contrôles sont à jour</>
               }
             </p>
           ) : (
-            <p className="page-subtitle">{all.length} intervention{all.length !== 1 ? 's' : ''}</p>
+            <p className="page-subtitle">{all.length} contrôle{all.length !== 1 ? 's' : ''}</p>
           )}
         </div>
         {canManage && (
           <button className="btn btn--primary" onClick={() => setShowCreate(true)}>
-            <Plus size={15} /> Nouvelle intervention
+            <Plus size={15} /> Nouveau contrôle
           </button>
         )}
       </div>
@@ -599,6 +630,7 @@ export default function InterventionsPage() {
                 <th>Technicien</th>
                 <th>Planifié</th>
                 <th>Réalisé</th>
+                <th>Type de contrôle</th>
                 <th>Statut</th>
               </tr>
             </thead>
@@ -611,7 +643,7 @@ export default function InterventionsPage() {
                 />
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="table-empty">
+                <tr><td colSpan={7} className="table-empty">
                   {search || statusFilter
                     ? 'Aucun résultat pour ces critères.'
                     : 'Aucune intervention enregistrée.'}

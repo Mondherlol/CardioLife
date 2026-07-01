@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin   from '@fullcalendar/daygrid'
 import timeGridPlugin  from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin      from '@fullcalendar/list'
 import frLocale        from '@fullcalendar/core/locales/fr'
-import { Calendar, Plus, X, AlertTriangle, Trash2, Search, Check, ChevronDown, Users } from 'lucide-react'
+import { Calendar, Plus, X, AlertTriangle, Trash2, Search, Check, ChevronDown, Users, Wrench } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
   getAppointments,
@@ -13,6 +14,7 @@ import {
   updateAppointment,
   deleteAppointment,
 } from '../api/appointments'
+import { getInterventions } from '../api/interventions'
 import { getClients } from '../api/clients'
 import { getUsers }   from '../api/users'
 
@@ -49,6 +51,21 @@ export const STATUS_OPTS = [
   { value: 'annule',    label: 'Annulé',    color: '#ef4444' },
 ]
 
+// Types proposés dans la modal : « intervention » exclu (les interventions se
+// créent uniquement depuis la page Interventions et apparaissent quand même ici).
+const MODAL_TYPE_OPTS = TYPE_OPTS.filter(t => t.value !== 'intervention')
+
+// Durées prédéfinies (en minutes). 1 h par défaut.
+const DURATION_OPTS = [
+  { value: 30,  label: '30 min' },
+  { value: 60,  label: '1 h' },
+  { value: 90,  label: '1 h 30' },
+  { value: 120, label: '2 h' },
+  { value: 180, label: '3 h' },
+  { value: 240, label: '4 h' },
+  { value: 480, label: 'Journée (8 h)' },
+]
+
 const TYPE_MAP   = Object.fromEntries(TYPE_OPTS.map(t => [t.value, t]))
 const STATUS_MAP = Object.fromEntries(STATUS_OPTS.map(s => [s.value, s]))
 
@@ -74,6 +91,27 @@ function toLocalInput(isoStr) {
   const d   = new Date(isoStr)
   const pad = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+const pad2 = n => String(n).padStart(2, '0')
+function localDateStr(d) { d = new Date(d); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
+function localTimeStr(d) { d = new Date(d); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}` }
+
+// Une intervention (collection séparée) affichée comme évènement lecture seule.
+function toInterventionEvent(iv) {
+  const color = TYPE_MAP.intervention.color
+  const start = new Date(iv.scheduledDate)
+  return {
+    id:              `intv-${iv._id}`,
+    title:           `Intervention${iv.clientName ? ' — ' + iv.clientName : ''}`,
+    start,
+    end:             new Date(start.getTime() + 60 * 60000),
+    backgroundColor: color,
+    borderColor:     color,
+    textColor:       '#fff',
+    editable:        false,
+    extendedProps:   { kind: 'intervention', type: 'intervention', status: iv.status, clientName: iv.clientName, _intv: iv },
+  }
 }
 
 function toDateInput(isoStr) {
@@ -267,24 +305,32 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
   const isEdit = mode === 'edit'
   const raw    = appt || {}
 
-  const initStart = () => {
-    if (isEdit && raw.start) return raw.allDay ? toDateInput(raw.start) : toLocalInput(raw.start)
-    if (slot?.startStr)      return slot.allDay ? slot.startStr.split('T')[0] : toLocalInput(slot.startStr)
-    return toLocalInput(new Date().toISOString())
-  }
-  const initEnd = () => {
-    if (isEdit && raw.end) return raw.allDay ? toDateInput(raw.end) : toLocalInput(raw.end)
-    if (slot?.endStr)      return slot.allDay ? slot.endStr.split('T')[0] : toLocalInput(slot.endStr)
-    return ''
-  }
+  const baseSrc  = (isEdit && raw.start) ? raw.start : (slot?.startStr || new Date().toISOString())
+  const initDate = localDateStr(baseSrc)
+  const initTime = (() => {
+    if (isEdit && raw.start && !raw.allDay) return localTimeStr(raw.start)
+    if (slot?.startStr && !slot.allDay)     return localTimeStr(slot.startStr)
+    return '08:00'
+  })()
+  const initDuration = (() => {
+    if (isEdit && raw.start && raw.end) {
+      const m = Math.round((new Date(raw.end) - new Date(raw.start)) / 60000)
+      if (m > 0) return m
+    }
+    if (slot?.startStr && slot?.endStr && !slot.allDay) {
+      const m = Math.round((new Date(slot.endStr) - new Date(slot.startStr)) / 60000)
+      if (m > 0) return m
+    }
+    return 60
+  })()
 
   const [form, setForm] = useState({
-    title:       isEdit ? raw.title       : '',
-    type:        isEdit ? raw.type        : 'autre',
-    status:      isEdit ? raw.status      : 'planifie',
-    allDay:      isEdit ? !!raw.allDay    : !!(slot?.allDay),
-    start:       initStart(),
-    end:         initEnd(),
+    title:       isEdit ? raw.title  : '',
+    type:        isEdit ? (raw.type || 'autre') : 'autre',
+    status:      isEdit ? raw.status : 'planifie',
+    date:        initDate,
+    time:        initTime,
+    duration:    initDuration,
     clientId:    isEdit ? (raw.client?._id || raw.client || null) : null,
     clientName:  isEdit ? (raw.clientName  || raw.client?.name || '') : '',
     assignedTo:  isEdit
@@ -300,30 +346,21 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
-  function handleAllDayToggle(checked) {
-    set('allDay', checked)
-    if (checked) {
-      // convert datetime to date
-      setForm(f => ({
-        ...f,
-        allDay: true,
-        start: f.start ? f.start.split('T')[0] : '',
-        end:   f.end   ? f.end.split('T')[0]   : '',
-      }))
-    } else {
-      setForm(f => ({
-        ...f,
-        allDay: false,
-        start: f.start ? f.start + 'T08:00' : toLocalInput(new Date().toISOString()),
-        end:   f.end   ? f.end   + 'T09:00' : '',
-      }))
-    }
-  }
+  // Garantit que la durée / le type courant figurent dans les listes déroulantes
+  const durationOptions = DURATION_OPTS.some(o => o.value === form.duration)
+    ? DURATION_OPTS
+    : [...DURATION_OPTS, { value: form.duration, label: `${form.duration} min` }].sort((a, b) => a.value - b.value)
+  const typeOptions = MODAL_TYPE_OPTS.some(t => t.value === form.type)
+    ? MODAL_TYPE_OPTS
+    : [...MODAL_TYPE_OPTS, TYPE_MAP[form.type]].filter(Boolean)
 
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.title.trim()) return setError('Le titre est requis.')
-    if (!form.start)        return setError('La date de début est requise.')
+    if (!form.date)         return setError('La date est requise.')
+    const start = new Date(`${form.date}T${form.time || '08:00'}`)
+    if (isNaN(start.getTime())) return setError('Date ou heure invalide.')
+    const end = new Date(start.getTime() + (Number(form.duration) || 60) * 60000)
     setLoading(true)
     setError('')
     try {
@@ -331,13 +368,13 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
         title:       form.title.trim(),
         type:        form.type,
         status:      form.status,
-        allDay:      form.allDay,
-        start:       new Date(form.start).toISOString(),
-        end:         form.end ? new Date(form.end).toISOString() : undefined,
-        client:      form.clientId                       || undefined,
-        clientName:  form.clientName                      || undefined,
+        allDay:      false,
+        start:       start.toISOString(),
+        end:         end.toISOString(),
+        client:      form.clientId   || undefined,
+        clientName:  form.clientName || undefined,
         assignedTo:  form.assignedTo.map(u => u._id),
-        description: form.description                     || undefined,
+        description: form.description || undefined,
       }
       if (isEdit) {
         await updateAppointment(raw._id, payload)
@@ -394,7 +431,7 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
               <label className="form-label">Type</label>
               <select className="form-input form-input--plain" value={form.type}
                 onChange={e => set('type', e.target.value)}>
-                {TYPE_OPTS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                {typeOptions.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -406,27 +443,28 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
             </div>
           </div>
 
-          <label className="plan-allday-toggle">
-            <input type="checkbox" checked={form.allDay}
-              onChange={e => handleAllDayToggle(e.target.checked)} />
-            <span>Journée entière</span>
-          </label>
-
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Début *</label>
-              <input className="form-input form-input--plain"
-                type={form.allDay ? 'date' : 'datetime-local'}
-                value={form.start}
-                onChange={e => set('start', e.target.value)}
+              <label className="form-label">Date *</label>
+              <input className="form-input form-input--plain" type="date"
+                value={form.date}
+                onChange={e => set('date', e.target.value)}
                 required />
             </div>
             <div className="form-group">
-              <label className="form-label">Fin</label>
-              <input className="form-input form-input--plain"
-                type={form.allDay ? 'date' : 'datetime-local'}
-                value={form.end}
-                onChange={e => set('end', e.target.value)} />
+              <label className="form-label">Heure *</label>
+              <input className="form-input form-input--plain" type="time"
+                value={form.time}
+                onChange={e => set('time', e.target.value)}
+                required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Durée</label>
+              <select className="form-input form-input--plain"
+                value={form.duration}
+                onChange={e => set('duration', Number(e.target.value))}>
+                {durationOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
             </div>
           </div>
 
@@ -485,6 +523,7 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
 /* ── Main page ──────────────────────────────────────────────── */
 
 export default function PlanningPage() {
+  const navigate = useNavigate()
   const calendarRef = useRef(null)
   const [modal,       setModal]       = useState(null)
   const [todayEvents, setTodayEvents] = useState([])
@@ -497,7 +536,21 @@ export default function PlanningPage() {
 
   const fetchToday = useCallback(() => {
     const { start, end } = todayRange()
-    getAppointments({ start, end }).then(setTodayEvents).catch(() => {})
+    Promise.all([
+      getAppointments({ start, end }).catch(() => []),
+      getInterventions({ from: start, to: end }).catch(() => []),
+    ]).then(([appts, intvs]) => {
+      const items = [
+        ...(Array.isArray(appts) ? appts : []).map(a => ({ ...a, _kind: 'appointment' })),
+        ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(i => ({
+          _id: i._id, _kind: 'intervention',
+          title: `Intervention${i.clientName ? ' — ' + i.clientName : ''}`,
+          start: i.scheduledDate, type: 'intervention',
+          clientName: i.clientName, status: i.status,
+        })),
+      ].sort((a, b) => new Date(a.start) - new Date(b.start))
+      setTodayEvents(items)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => { fetchToday() }, [fetchToday])
@@ -508,10 +561,22 @@ export default function PlanningPage() {
   }
 
   const loadEvents = useCallback((info, success, fail) => {
-    const params = { start: info.startStr, end: info.endStr }
-    if (typeFilter) params.type = typeFilter
-    getAppointments(params)
-      .then(data => success(data.map(toFCEvent)))
+    // Le filtre « intervention » n'affiche que les interventions ; un autre filtre
+    // masque les interventions. Sans filtre, on agrège les deux sources.
+    const apptP = (!typeFilter || typeFilter !== 'intervention')
+      ? getAppointments({
+          start: info.startStr, end: info.endStr,
+          ...(typeFilter && typeFilter !== 'intervention' ? { type: typeFilter } : {}),
+        }).catch(() => [])
+      : Promise.resolve([])
+    const intvP = (!typeFilter || typeFilter === 'intervention')
+      ? getInterventions({ from: info.startStr, to: info.endStr }).catch(() => [])
+      : Promise.resolve([])
+    Promise.all([apptP, intvP])
+      .then(([appts, intvs]) => success([
+        ...(Array.isArray(appts) ? appts : []).map(toFCEvent),
+        ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(toInterventionEvent),
+      ]))
       .catch(fail)
   }, [typeFilter])
 
@@ -521,7 +586,9 @@ export default function PlanningPage() {
   }
 
   function handleEventClick(info) {
-    setModal({ mode: 'edit', appt: info.event.extendedProps._raw })
+    const ep = info.event.extendedProps
+    if (ep.kind === 'intervention') { navigate(`/interventions/${ep._intv._id}`); return }
+    setModal({ mode: 'edit', appt: ep._raw })
   }
 
   async function handleEventDrop(info) {
@@ -570,12 +637,17 @@ export default function PlanningPage() {
           ) : (
             <ul className="plan-today-list">
               {todayEvents.map(e => (
-                <li key={e._id} className="plan-today-item"
-                  onClick={() => setModal({ mode: 'edit', appt: e })}>
+                <li key={`${e._kind}-${e._id}`} className="plan-today-item"
+                  onClick={() => e._kind === 'intervention'
+                    ? navigate(`/interventions/${e._id}`)
+                    : setModal({ mode: 'edit', appt: e })}>
                   <span className="plan-today-dot"
                     style={{ background: TYPE_MAP[e.type]?.color || '#6b7280' }} />
                   <div>
-                    <div className="plan-today-title">{e.title}</div>
+                    <div className="plan-today-title">
+                      {e._kind === 'intervention' && <Wrench size={11} style={{ verticalAlign: -1, marginRight: 4 }} />}
+                      {e.title}
+                    </div>
                     {!e.allDay && (
                       <div className="plan-today-time">
                         {formatTime(e.start)}{e.end ? ` → ${formatTime(e.end)}` : ''}
@@ -658,7 +730,7 @@ export default function PlanningPage() {
           eventClassNames={info => {
             const status = info.event.extendedProps.status
             const cls = []
-            if (status === 'fait')   cls.push('fc-event--fait')
+            if (status === 'fait' || status === 'termine') cls.push('fc-event--fait')
             if (status === 'annule') cls.push('fc-event--annule')
             return cls
           }}

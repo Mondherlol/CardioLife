@@ -10,6 +10,10 @@ import ClientDetailPage      from './pages/ClientDetailPage'
 import ClientImportPage     from './pages/ClientImportPage'
 import StockPage           from './pages/StockPage'
 import ProductDetailPage   from './pages/ProductDetailPage'
+import PacksPage           from './pages/PacksPage'
+import ContractsPage       from './pages/ContractsPage'
+import ContractFormPage    from './pages/ContractFormPage'
+import ContractDetailPage  from './pages/ContractDetailPage'
 import SettingsPage             from './pages/SettingsPage'
 import DevicesPage              from './pages/DevicesPage'
 import InstallationDetailPage   from './pages/InstallationDetailPage'
@@ -85,6 +89,11 @@ export default function App() {
                 <Route path="/clients/:id"     element={<ClientDetailPage />} />
                 <Route path="/stock"       element={<StockPage />} />
                 <Route path="/stock/:id"  element={<ProductDetailPage />} />
+                <Route path="/packs"      element={<PacksPage />} />
+                <Route path="/contrats"          element={<ContractsPage />} />
+                <Route path="/contrats/new"      element={<ContractFormPage />} />
+                <Route path="/contrats/:id"      element={<ContractDetailPage />} />
+                <Route path="/contrats/:id/edit" element={<ContractFormPage />} />
                 <Route path="/devices"          element={<DevicesPage />} />
                 <Route path="/devices/new"     element={<InstallationFormPage />} />
                 <Route path="/devices/:id"     element={<InstallationDetailPage />} />

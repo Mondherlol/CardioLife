@@ -11,7 +11,10 @@ import {
 import { getClient, updateClientDocs } from '../api/clients'
 import { getInstallations } from '../api/installations'
 import { getContents, getFolderTree } from '../api/documents'
-import { getControlsByClient } from '../api/controls'
+import { getInterventions } from '../api/interventions'
+
+/* Type de contrôle → libellé */
+const CD_CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat' }
 import { ImageThumbnail, PdfThumbnail } from '../components/FileThumbnail'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ClientModal from '../components/ClientModal'
@@ -301,8 +304,8 @@ function ControlsClientTab({ clientId, installations }) {
   const [loading,  setLoading]  = useState(true)
 
   useEffect(() => {
-    getControlsByClient(clientId)
-      .then(setControls)
+    getInterventions({ client: clientId })
+      .then(data => setControls(Array.isArray(data) ? data : []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [clientId])
@@ -312,14 +315,7 @@ function ControlsClientTab({ clientId, installations }) {
   const instMap = {}
   installations.forEach(i => { instMap[i._id] = i })
 
-  const byInstall = {}
-  controls.forEach(c => {
-    const key = c.installation?._id || c.installation || 'unknown'
-    if (!byInstall[key]) byInstall[key] = []
-    byInstall[key].push(c)
-  })
-
-  const upcoming  = controls.filter(c => c.status === 'a_venir')
+  const upcoming  = controls.filter(c => c.status !== 'termine')
   const completed = controls.filter(c => c.status === 'termine')
 
   if (controls.length === 0) {
@@ -352,13 +348,15 @@ function ControlsClientTab({ clientId, installations }) {
       : days < 0 ? 'ctrl-card--overdue'
       : days <= 30 ? 'ctrl-card--soon' : ''
     const instId  = c.installation?._id || c.installation
-    const inst    = instMap[instId]
+    const inst     = instMap[instId]
+    const instAddr = inst?.location || inst?.address || c.installationSnap?.location || c.installationSnap?.address
 
     return (
-      <div key={c._id} className={`ctrl-card ${urgCls}`}>
+      <div key={c._id} className={`ctrl-card ctrl-card--clickable ${urgCls}`}
+        onClick={() => navigate(`/interventions/${c._id}`)}>
         <div className="ctrl-card-left">
-          <span className={`ctrl-type-badge ctrl-type-badge--${c.type}`}>
-            {c.type === 'semestriel' ? 'Semestriel' : 'Annuel'}
+          <span className={`ctrl-type-badge ctrl-type-badge--${c.controlType}`}>
+            {CD_CONTROL_TYPE_LABELS[c.controlType] || 'Hors contrat'}
           </span>
           <span className="ctrl-date">
             {isDone ? formatDate(c.completedDate || c.scheduledDate) : formatDate(c.scheduledDate)}
@@ -368,13 +366,13 @@ function ControlsClientTab({ clientId, installations }) {
               {days < 0 ? `Dépassé de ${Math.abs(days)} j` : days === 0 ? "Aujourd'hui" : `Dans ${days} j`}
             </span>
           )}
-          {isDone && c.technicienName && (
+          {c.technicienName && (
             <span className="ctrl-tech"><User size={11} /> {c.technicienName}</span>
           )}
-          {showInstallLink && inst && (
+          {showInstallLink && instId && instAddr && (
             <button type="button" className="ctrl-install-link"
-              onClick={() => navigate(`/devices/${inst._id}`)}>
-              <MapPin size={11} /> {inst.location || inst.address}
+              onClick={e => { e.stopPropagation(); navigate(`/devices/${instId}`) }}>
+              <MapPin size={11} /> {instAddr}
             </button>
           )}
         </div>

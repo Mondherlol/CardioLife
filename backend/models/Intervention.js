@@ -50,6 +50,11 @@ const interventionSchema = new Schema({
   technicien:     { type: Schema.Types.ObjectId, ref: 'User' },
   technicienName: { type: String, trim: true },
 
+  // Type de contrôle : issu d'un contrat (semestriel/annuel) ou hors contrat
+  // (planifié manuellement depuis la fiche d'une installation).
+  controlType:   { type: String, enum: ['semestriel','annuel','hors_contrat'], default: 'hors_contrat' },
+  contract:      { type: Schema.Types.ObjectId, ref: 'Contract' },
+
   status:        { type: String, enum: ['planifie','en_cours','termine'], default: 'planifie' },
   scheduledDate: Date,
   completedDate: Date,

@@ -9,6 +9,8 @@ const CATEGORIES = [
   'signaletique',
   'accessoire',
   'kit_secours',
+  'mannequin',
+  'trainer',
   'autre',
 ]
 

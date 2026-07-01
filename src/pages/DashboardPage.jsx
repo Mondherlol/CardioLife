@@ -30,6 +30,25 @@ function formatDateTime(dateStr) {
   })
 }
 
+/* Type colors (alignés sur le planning) */
+const RDV_TYPE_COLORS = {
+  controle: '#f97316', intervention: '#ef4444', installation: '#22c55e',
+  formation: '#a855f7', reunion: '#3b82f6', autre: '#6b7280',
+}
+
+/* Libellé « quand » du RDV : Aujourd'hui / Demain / date courte + heure */
+function formatRdvWhen(dateStr) {
+  if (!dateStr) return '—'
+  const d   = new Date(dateStr)
+  const now = new Date()
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const dayDiff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - startToday) / 86400000)
+  const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  if (dayDiff === 0) return `Aujourd'hui ${time}`
+  if (dayDiff === 1) return `Demain ${time}`
+  return `${d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`
+}
+
 const ACTIVITY_META = {
   stock: {
     icon: Package,
@@ -192,6 +211,40 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {/* ── RDV à venir ── */}
+      {!loading && data?.upcomingAppointments?.length > 0 && (
+        <div className="dash-panel dash-rdv-panel">
+          <div className="dash-panel-header">
+            <div className="dash-panel-title">
+              <CalendarClock size={15} /> RDV à venir
+            </div>
+            <button className="dash-panel-link" onClick={() => navigate('/planning')}>
+              Voir le planning <ArrowRight size={12} />
+            </button>
+          </div>
+          <div className="dash-rdv-list">
+            {data.upcomingAppointments.map(rdv => (
+              <button key={rdv._id} className="dash-rdv-item" onClick={() => navigate('/planning')}>
+                <span className="dash-rdv-dot" style={{ background: RDV_TYPE_COLORS[rdv.type] || '#6b7280' }} />
+                <div className="dash-rdv-body">
+                  <div className="dash-rdv-top">
+                    <span className="dash-rdv-title">{rdv.title}</span>
+                    {rdv.assignedToMe && <span className="dash-rdv-mine">Moi</span>}
+                  </div>
+                  <div className="dash-rdv-meta">
+                    <span className="dash-rdv-when"><Clock size={10} /> {formatRdvWhen(rdv.start)}</span>
+                    {rdv.clientName && <span className="dash-rdv-client">{rdv.clientName}</span>}
+                    {!rdv.assignedToMe && rdv.assignedNames?.length > 0 && (
+                      <span className="dash-rdv-assignee"><User size={10} /> {rdv.assignedNames[0]}{rdv.assignedNames.length > 1 ? ` +${rdv.assignedNames.length - 1}` : ''}</span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom grid: activités ── */}
       <div className="dash-bottom-grid">

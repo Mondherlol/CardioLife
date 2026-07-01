@@ -27,6 +27,7 @@ async function getDashboard(req, res) {
     recentMovements,
     recentInterventions,
     recentAppointments,
+    upcomingAppointmentsRaw,
   ] = await Promise.all([
     Installation.countDocuments(),
     Client.countDocuments({ isActive: true }),
@@ -58,6 +59,15 @@ async function getDashboard(req, res) {
       .limit(5)
       .select('title type clientName createdAt createdBy')
       .populate('createdBy', 'fullName username'),
+    // RDV à venir (non terminés), priorité gérée côté tri ci-dessous
+    Appointment.find({
+      start:  { $gte: now },
+      status: { $in: ['planifie', 'en_cours'] },
+    })
+      .sort({ start: 1 })
+      .limit(15)
+      .select('title type start end clientName assignedTo status')
+      .populate('assignedTo', 'fullName username'),
   ])
 
   /* ── Build activity feed ── */
@@ -98,6 +108,26 @@ async function getDashboard(req, res) {
 
   const stats = productStats[0] || { total: 0, lowStock: 0, outOfStock: 0 }
 
+  /* ── RDV à venir : priorité à ceux qui me sont assignés ── */
+  const uid = String(req.user._id)
+  const upcomingAppointments = upcomingAppointmentsRaw
+    .map(a => ({
+      _id:          a._id,
+      title:        a.title,
+      type:         a.type,
+      start:        a.start,
+      end:          a.end,
+      status:       a.status,
+      clientName:   a.clientName,
+      assignedToMe: (a.assignedTo || []).some(u => String(u._id) === uid),
+      assignedNames:(a.assignedTo || []).map(u => u.fullName || u.username).filter(Boolean),
+    }))
+    .sort((x, y) =>
+      (Number(y.assignedToMe) - Number(x.assignedToMe)) ||
+      (new Date(x.start) - new Date(y.start))
+    )
+    .slice(0, 6)
+
   res.json({
     stats: {
       installations:         installationsTotal,
@@ -109,6 +139,7 @@ async function getDashboard(req, res) {
       totalProducts:         stats.total,
     },
     activities: activities.slice(0, 10),
+    upcomingAppointments,
   })
 }
 
