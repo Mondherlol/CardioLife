@@ -22,11 +22,27 @@ services:
   frontend:
     image: ghcr.io/${IMAGE_NAMESPACE}/cardiotrack-frontend:latest
     restart: unless-stopped
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       - backend
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
 
 volumes:
   mongo_data:
   backend_uploads:
+  caddy_data:
+  caddy_config:

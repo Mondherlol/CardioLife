@@ -1,0 +1,15 @@
+{
+	# Email utilisé par Let's Encrypt pour les notifications d'expiration
+	email technique.cieloo@gmail.com
+}
+
+# Redirige www -> apex
+www.cardiotrack.tn {
+	redir https://cardiotrack.tn{uri} permanent
+}
+
+cardiotrack.tn {
+	# TLS automatique (certificat Let's Encrypt obtenu + renouvelé tout seul)
+	encode gzip zstd
+	reverse_proxy frontend:80
+}
