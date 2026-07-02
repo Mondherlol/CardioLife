@@ -5,11 +5,12 @@ import {
   ArrowLeft, Pencil, SlidersHorizontal, X, AlertTriangle, Package,
   TrendingUp, TrendingDown, Clock, CheckCircle2, History,
   Users, ShoppingCart, Info, User, ImagePlus, Trash2,
-  ChevronLeft, ChevronRight, Hash, Layers, FileText, Search,
+  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowUpDown,
+  Hash, Layers, FileText, Search, MapPin, ExternalLink,
   Globe, Plus, Save,
 } from 'lucide-react'
 import {
-  getProduct, getMovements, adjustStock,
+  getProduct, getMovements, adjustStock, assignSerials, getProductInstallations,
   uploadProductImage, deleteProductImage, productImageUrl,
   updateProduct, patchProduct,
 } from '../api/products'
@@ -107,10 +108,11 @@ function ExpirationBadge({ date }) {
 function MovementRow({ mv, onClick }) {
   const isEntree  = mv.type === 'entree'
   const isSortie  = mv.type === 'sortie'
+  const isSerial  = mv.type === 'serialisation'
   const cls       = isEntree ? 'entree' : isSortie ? 'sortie' : 'ajust'
-  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : SlidersHorizontal
-  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : 'Correction'
-  const sign      = isEntree ? '+' : isSortie ? '-' : '→'
+  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : isSerial ? Hash : SlidersHorizontal
+  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : isSerial ? 'Saisie de séries' : 'Correction'
+  const sign      = isEntree ? '+' : isSortie ? '-' : isSerial ? '' : '→'
   const hasTrace  = (mv.serialNumbers?.length ?? 0) > 0 || !!mv.lotNumber
 
   return (
@@ -130,7 +132,7 @@ function MovementRow({ mv, onClick }) {
             <span><User size={10} /> {mv.createdBy.fullName || mv.createdBy.username}</span>
           )}
           <span>{formatDateTime(mv.createdAt)}</span>
-          {mv.previousStock != null && mv.newStock != null && (
+          {!isSerial && mv.previousStock != null && mv.newStock != null && (
             <span className="mv-stocks">{mv.previousStock} → {mv.newStock}</span>
           )}
         </div>
@@ -143,10 +145,11 @@ function MovementRow({ mv, onClick }) {
 function MovementDetailModal({ movement, onClose }) {
   const isEntree  = movement.type === 'entree'
   const isSortie  = movement.type === 'sortie'
+  const isSerial  = movement.type === 'serialisation'
   const cls       = isEntree ? 'entree' : isSortie ? 'sortie' : 'ajust'
-  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : SlidersHorizontal
-  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : 'Correction'
-  const sign      = isEntree ? '+' : isSortie ? '-' : '→'
+  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : isSerial ? Hash : SlidersHorizontal
+  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : isSerial ? 'Saisie de séries' : 'Correction'
+  const sign      = isEntree ? '+' : isSortie ? '-' : isSerial ? '' : '→'
   const hasSerials = (movement.serialNumbers?.length ?? 0) > 0
   const hasLot     = !!movement.lotNumber
 
@@ -170,7 +173,7 @@ function MovementDetailModal({ movement, onClose }) {
                   <span><User size={10} /> {movement.createdBy.fullName || movement.createdBy.username}</span>
                 )}
                 <span>{formatDateTime(movement.createdAt)}</span>
-                {movement.previousStock != null && movement.newStock != null && (
+                {!isSerial && movement.previousStock != null && movement.newStock != null && (
                   <span className="mv-stocks">{movement.previousStock} → {movement.newStock}</span>
                 )}
               </div>
@@ -246,7 +249,7 @@ function StockAdjustModal({ product, onClose, onDone }) {
           const entered = new Set()
           const exited  = new Set()
           mvs.forEach(mv => {
-            if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
+            if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
             if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
           })
           setInStockSerials([...entered].filter(sn => !exited.has(sn)))
@@ -556,6 +559,118 @@ function StockAdjustModal({ product, onClose, onDone }) {
   )
 }
 
+/* ─── Assign serials modal (régularisation, ne touche pas au stock) ─── */
+function AssignSerialsModal({ product, untrackedCount, inStockSerials, onClose, onDone }) {
+  const [serialsText, setSerialsText] = useState('')
+  const [error,       setError]       = useState('')
+  const [loading,     setLoading]     = useState(false)
+
+  const serialLines = serialsText.split('\n').map(s => s.trim()).filter(Boolean)
+
+  const duplicatesInInput = serialLines.filter((sn, i) => serialLines.indexOf(sn) !== i)
+  const alreadyInStock    = serialLines.filter(sn => inStockSerials.includes(sn))
+  const overCount         = serialLines.length > untrackedCount
+  const canSubmit = serialLines.length > 0 && !overCount &&
+    duplicatesInInput.length === 0 && alreadyInStock.length === 0
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (serialLines.length === 0) { setError('Saisissez au moins un numéro de série.'); return }
+    if (overCount) {
+      setError(`Vous ne pouvez saisir que ${untrackedCount} numéro${untrackedCount > 1 ? 's' : ''} maximum.`); return
+    }
+    if (duplicatesInInput.length > 0) {
+      setError(`En double : ${[...new Set(duplicatesInInput)].join(', ')}`); return
+    }
+    if (alreadyInStock.length > 0) {
+      setError(`Déjà en stock : ${alreadyInStock.join(', ')}`); return
+    }
+    setError('')
+    setLoading(true)
+    try {
+      await assignSerials(product._id, { serialNumbers: serialLines })
+      toast.success('Numéros de série enregistrés.')
+      onDone()
+    } catch (err) {
+      setError(formatApiError(err))
+      setLoading(false)
+    }
+  }
+
+  const countOk = serialLines.length > 0 && serialLines.length <= untrackedCount
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--sm">
+        <div className="modal-header">
+          <h2 className="modal-title">Saisir les numéros de série</h2>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <form onSubmit={handleSubmit} className="modal-body">
+          <div className="adjust-product-card">
+            <Package size={16} color="var(--orange-500)" />
+            <div>
+              <div className="adjust-product-name">{product.name}</div>
+              {product.reference && <div className="adjust-product-ref">Réf. {product.reference}</div>}
+            </div>
+            <div className="adjust-current-stock">
+              <span className="adjust-stock-num">{product.stock}</span>
+              <span className="adjust-stock-label">en stock</span>
+            </div>
+          </div>
+
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 12px', lineHeight: 1.5 }}>
+            {untrackedCount} unité{untrackedCount > 1 ? 's' : ''} en stock n'{untrackedCount > 1 ? 'ont' : 'a'} pas
+            de numéro de série. Renseignez-les ci-dessous. <strong>Le stock ne sera pas modifié.</strong>
+          </p>
+
+          <div className="form-group">
+            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Numéros de série <span style={{ color: 'var(--red-500)' }}>*</span></span>
+              <span className={`adj-serial-count${countOk ? ' adj-serial-count--ok' : serialLines.length > 0 ? ' adj-serial-count--err' : ''}`}>
+                {serialLines.length} / {untrackedCount}
+              </span>
+            </label>
+            <textarea
+              className="form-input form-input--plain form-textarea"
+              rows={Math.max(3, Math.min(untrackedCount, 8))}
+              value={serialsText}
+              onChange={e => setSerialsText(e.target.value)}
+              placeholder={"Un numéro de série par ligne\nex. SN-001\nSN-002"}
+              autoFocus
+            />
+            <p className="adj-serial-hint">Un numéro par ligne — vous pouvez coller depuis un scanner</p>
+            {overCount && (
+              <div className="adj-serial-warn">
+                <AlertTriangle size={12} /> Trop de numéros : {untrackedCount} maximum.
+              </div>
+            )}
+            {duplicatesInInput.length > 0 && (
+              <div className="adj-serial-warn">
+                <AlertTriangle size={12} /> En double : {[...new Set(duplicatesInInput)].join(', ')}
+              </div>
+            )}
+            {alreadyInStock.length > 0 && (
+              <div className="adj-serial-warn">
+                <AlertTriangle size={12} /> Déjà en stock : {alreadyInStock.join(', ')}
+              </div>
+            )}
+          </div>
+
+          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
+            <button type="submit" className="btn btn--primary" disabled={loading || !canSubmit}>
+              {loading ? <span className="login-btn-spinner" /> : 'Enregistrer les séries'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 /* ─── WebCardTab ─── */
 function WebCardTab({ product, onSaved }) {
   const wc = product.webCard || {}
@@ -731,13 +846,196 @@ function WebCardTab({ product, onSaved }) {
   )
 }
 
+/* ─── Numéros de série en stock : liste filtrable ─── */
+function SerialStockList({ serials }) {
+  const [search, setSearch] = useState('')
+  const filtered = serials.filter(sn => !search || sn.toLowerCase().includes(search.toLowerCase()))
+  return (
+    <>
+      {serials.length > 5 && (
+        <div className="adj-serial-search-wrap" style={{ marginTop: 8 }}>
+          <Search size={13} className="adj-serial-search-icon" />
+          <input
+            className="form-input form-input--plain"
+            style={{ paddingLeft: 30 }}
+            placeholder="Rechercher un numéro de série…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      )}
+      {filtered.length === 0 ? (
+        <p className="pd-trace-empty">Aucun numéro ne correspond.</p>
+      ) : (
+        <div className="mv-serials-list" style={{ marginTop: 8 }}>
+          {filtered.map((sn, i) => <span key={i} className="mv-serial-chip">{sn}</span>)}
+        </div>
+      )}
+    </>
+  )
+}
+
+/* ─── Lots en stock : mini-tableau triable & filtrable ─── */
+function LotStockTable({ lots }) {
+  const [search,  setSearch]  = useState('')
+  const [sortBy,  setSortBy]  = useState('expiration')
+  const [sortDir, setSortDir] = useState('asc')
+
+  function toggleSort(col) {
+    if (sortBy === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortBy(col); setSortDir('asc') }
+  }
+
+  const filtered = lots
+    .filter(l => !search || l.lotNumber.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      let cmp
+      if (sortBy === 'lot')      cmp = a.lotNumber.localeCompare(b.lotNumber, 'fr', { numeric: true })
+      else if (sortBy === 'qty') cmp = a.quantity - b.quantity
+      else {
+        const da = a.expirationDate ? new Date(a.expirationDate).getTime() : Infinity
+        const db = b.expirationDate ? new Date(b.expirationDate).getTime() : Infinity
+        cmp = da - db
+      }
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+
+  const Sort = ({ col }) => (
+    sortBy === col
+      ? (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
+      : <ArrowUpDown size={11} className="pd-lot-sort-idle" />
+  )
+
+  return (
+    <>
+      {lots.length > 3 && (
+        <div className="adj-serial-search-wrap" style={{ marginTop: 8, marginBottom: 8 }}>
+          <Search size={13} className="adj-serial-search-icon" />
+          <input
+            className="form-input form-input--plain"
+            style={{ paddingLeft: 30 }}
+            placeholder="Rechercher un lot…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      )}
+      <table className="pd-lot-table">
+        <thead>
+          <tr>
+            <th className="pd-lot-th--qty" onClick={() => toggleSort('qty')}><span>Qté <Sort col="qty" /></span></th>
+            <th onClick={() => toggleSort('lot')}><span>N° Lot <Sort col="lot" /></span></th>
+            <th onClick={() => toggleSort('expiration')}><span>Expiration <Sort col="expiration" /></span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.length === 0 ? (
+            <tr><td colSpan={3} className="pd-lot-empty">Aucun lot ne correspond.</td></tr>
+          ) : (
+            filtered.map(l => (
+              <tr key={l.lotNumber}>
+                <td><span className="pd-lot-qty-badge">{l.quantity}</span></td>
+                <td><span className="mv-lot-chip">{l.lotNumber}</span></td>
+                <td>{l.expirationDate ? <ExpirationBadge date={l.expirationDate} /> : <span className="cell-muted">—</span>}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </>
+  )
+}
+
+/* ─── Stock chez les clients (unités posées, identifiées par n° de série) ─── */
+function ClientStockSection({ productId }) {
+  const navigate = useNavigate()
+  const [installs, setInstalls] = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [search,   setSearch]   = useState('')
+
+  useEffect(() => {
+    let alive = true
+    getProductInstallations(productId)
+      .then(data => { if (alive) setInstalls(Array.isArray(data) ? data : (data.data || [])) })
+      .catch(() => { if (alive) setInstalls([]) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [productId])
+
+  const filtered = installs.filter(i => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return (i.serialNumber || '').toLowerCase().includes(q)
+      || (i.client?.name || i.clientName || '').toLowerCase().includes(q)
+  })
+
+  return (
+    <div className="pd-section">
+      <div className="pd-section-title">
+        <Users size={14} /> Stock chez les clients
+        {!loading && <span className="pd-count">{installs.length}</span>}
+      </div>
+      {loading ? (
+        <div className="table-loading" style={{ padding: '24px 0' }}><span className="spinner" /></div>
+      ) : installs.length === 0 ? (
+        <p className="pd-trace-empty" style={{ padding: '4px 2px' }}>
+          Aucune unité de ce produit n'est actuellement posée chez un client.
+        </p>
+      ) : (
+        <>
+          {installs.length > 5 && (
+            <div className="adj-serial-search-wrap" style={{ marginBottom: 10 }}>
+              <Search size={13} className="adj-serial-search-icon" />
+              <input
+                className="form-input form-input--plain"
+                style={{ paddingLeft: 30 }}
+                placeholder="Rechercher un n° de série ou un client…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="pd-client-stock-list">
+            {filtered.length === 0 ? (
+              <p className="pd-trace-empty">Aucun résultat.</p>
+            ) : (
+              filtered.map(i => (
+                <button
+                  key={i._id}
+                  type="button"
+                  className="pd-client-stock-row"
+                  onClick={() => navigate(`/devices/${i._id}`)}
+                  title="Voir l'installation"
+                >
+                  <span className="mv-serial-chip">{i.serialNumber}</span>
+                  <span className="pd-client-stock-name">
+                    <Users size={12} /> {i.client?.name || i.clientName || '—'}
+                  </span>
+                  {(i.location || i.address) && (
+                    <span className="pd-client-stock-loc">
+                      <MapPin size={11} /> {i.location || i.address}
+                    </span>
+                  )}
+                  {i.installationDate && (
+                    <span className="pd-client-stock-date">{formatDate(i.installationDate)}</span>
+                  )}
+                  <ExternalLink size={13} className="pd-client-stock-go" />
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ─── Page principale ─── */
 const TABS = [
-  { key: 'info',      label: 'Informations', icon: Info         },
-  { key: 'stock',     label: 'Stock',        icon: History      },
-  { key: 'commandes', label: 'Commandes',    icon: ShoppingCart },
-  { key: 'clients',   label: 'Clients',      icon: Users        },
-  { key: 'site-web',  label: 'Site Web',     icon: Globe        },
+  { key: 'info',      label: 'Informations', icon: Info    },
+  { key: 'stock',     label: 'Stock',        icon: History },
+  { key: 'clients',   label: 'Clients',      icon: Users   },
+  { key: 'site-web',  label: 'Site Web',     icon: Globe   },
 ]
 
 export default function ProductDetailPage() {
@@ -750,6 +1048,7 @@ export default function ProductDetailPage() {
   const [mvLoading,             setMvLoading]             = useState(true)
   const [editOpen,              setEditOpen]              = useState(false)
   const [adjOpen,               setAdjOpen]               = useState(false)
+  const [serialsOpen,           setSerialsOpen]           = useState(false)
   const [uploading,             setUploading]             = useState(false)
   const [deletingImg,           setDeletingImg]           = useState(null)
   const [lightboxIdx,           setLightbox]              = useState(null)
@@ -838,19 +1137,27 @@ export default function ProductDetailPage() {
     const entered = new Set()
     const exited  = new Set()
     movements.forEach(mv => {
-      if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
+      if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
       if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
     })
     return [...entered].filter(sn => !exited.has(sn))
   })()
 
-  const lotsReceived = movements
-    .filter(mv => mv.type === 'entree' && mv.lotNumber)
-    .map(mv => ({
-      lotNumber:      mv.lotNumber,
-      expirationDate: mv.expirationDate,
-      quantity:       mv.quantity,
-    }))
+  // Lots réellement en stock : quantité nette (entrées − sorties) par n° de lot.
+  const lotsInStock = (() => {
+    const map = {}
+    movements.forEach(mv => {
+      if (!mv.lotNumber) return
+      const l = map[mv.lotNumber] || (map[mv.lotNumber] = { lotNumber: mv.lotNumber, quantity: 0, expirationDate: null })
+      if (mv.type === 'entree') {
+        l.quantity += mv.quantity || 0
+        if (mv.expirationDate) l.expirationDate = mv.expirationDate
+      } else if (mv.type === 'sortie') {
+        l.quantity -= mv.quantity || 0
+      }
+    })
+    return Object.values(map).filter(l => l.quantity > 0)
+  })()
 
   const unTrackedCount = (!mvLoading && product.requiresSerialNumber)
     ? Math.max(0, product.stock - inStockSerials.length)
@@ -1054,34 +1361,20 @@ export default function ProductDetailPage() {
                           {inStockSerials.length === 0 ? (
                             <p className="pd-trace-empty">Aucun numéro de série en stock.</p>
                           ) : (
-                            <div className="mv-serials-list" style={{ marginTop: 8 }}>
-                              {inStockSerials.map((sn, i) => (
-                                <span key={i} className="mv-serial-chip">{sn}</span>
-                              ))}
-                            </div>
+                            <SerialStockList serials={inStockSerials} />
                           )}
                         </div>
                       )}
                       {product.requiresLotNumber && (
                         <div className="pd-trace-block">
                           <div className="pd-trace-label">
-                            <Layers size={12} /> Lots reçus
-                            <span className="pd-count">{lotsReceived.length}</span>
+                            <Layers size={12} /> Lots en stock
+                            <span className="pd-count">{lotsInStock.length}</span>
                           </div>
-                          {lotsReceived.length === 0 ? (
-                            <p className="pd-trace-empty">Aucun lot enregistré.</p>
+                          {lotsInStock.length === 0 ? (
+                            <p className="pd-trace-empty">Aucun lot en stock.</p>
                           ) : (
-                            <div className="mv-lots-list" style={{ marginTop: 8 }}>
-                              {lotsReceived.map((lot, i) => (
-                                <div key={i} className="mv-lot-row">
-                                  <span className="mv-lot-chip">{lot.lotNumber}</span>
-                                  <span className="mv-lot-qty">+{lot.quantity}</span>
-                                  {lot.expirationDate && (
-                                    <span className="mv-lot-expiry">exp. {formatDate(lot.expirationDate)}</span>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
+                            <LotStockTable lots={lotsInStock} />
                           )}
                         </div>
                       )}
@@ -1092,6 +1385,11 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
+          {/* Stock chez les clients (produits sérialisés posés en installation) */}
+          {product.requiresSerialNumber && (
+            <ClientStockSection productId={product._id} />
+          )}
+
           {/* Alerte séries manquantes */}
           {unTrackedCount > 0 && (
             <div className="pd-section">
@@ -1101,7 +1399,7 @@ export default function ProductDetailPage() {
                   <strong>{unTrackedCount} unité{unTrackedCount > 1 ? 's' : ''} sans numéro de série renseigné</strong>
                   <span>Ce produit requiert un numéro de série mais {unTrackedCount} unité{unTrackedCount > 1 ? 's' : ''} en stock n'en ont pas.</span>
                 </div>
-                <button className="btn btn--sm btn--primary" onClick={() => setAdjOpen(true)}>
+                <button className="btn btn--sm btn--primary" onClick={() => setSerialsOpen(true)}>
                   Saisir les séries
                 </button>
               </div>
@@ -1134,20 +1432,6 @@ export default function ProductDetailPage() {
             )}
           </div>
         </>
-      )}
-
-      {/* ── Onglet Commandes ── */}
-      {activeTab === 'commandes' && (
-        <div className="pd-section">
-          <div className="pd-section-title">
-            <ShoppingCart size={14} /> Commandes
-          </div>
-          <div className="pd-empty">
-            <ShoppingCart size={28} color="var(--gray-300)" />
-            <p>Aucune commande enregistrée pour ce produit.</p>
-            <span className="pd-empty-note">La gestion des commandes sera disponible prochainement.</span>
-          </div>
-        </div>
       )}
 
       {/* ── Onglet Clients ── */}
@@ -1190,6 +1474,15 @@ export default function ProductDetailPage() {
           product={product}
           onClose={() => setAdjOpen(false)}
           onDone={() => { setAdjOpen(false); loadProduct(); loadMovements() }}
+        />
+      )}
+      {serialsOpen && (
+        <AssignSerialsModal
+          product={product}
+          untrackedCount={unTrackedCount}
+          inStockSerials={inStockSerials}
+          onClose={() => setSerialsOpen(false)}
+          onDone={() => { setSerialsOpen(false); loadProduct(); loadMovements() }}
         />
       )}
       {viewingMovementDetail && (

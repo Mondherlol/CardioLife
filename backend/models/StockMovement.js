@@ -6,7 +6,7 @@ const stockMovementSchema = new mongoose.Schema({
     ref: 'Product',
     required: true,
   },
-  type:           { type: String, enum: ['entree', 'sortie', 'ajustement'], required: true },
+  type:           { type: String, enum: ['entree', 'sortie', 'ajustement', 'serialisation'], required: true },
   quantity:       { type: Number, required: true },
   previousStock:  { type: Number },
   newStock:       { type: Number },

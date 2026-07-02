@@ -18,7 +18,7 @@ import ProductModal             from '../components/ProductModal'
 function computeInStockSerials(movements) {
   const entered = new Set(), exited = new Set()
   ;(movements || []).forEach(mv => {
-    if (mv.type === 'entree') (mv.serialNumbers || []).forEach(s => entered.add(s))
+    if (mv.type === 'entree' || mv.type === 'serialisation') (mv.serialNumbers || []).forEach(s => entered.add(s))
     if (mv.type === 'sortie') (mv.serialNumbers || []).forEach(s => exited.add(s))
   })
   return [...entered].filter(s => !exited.has(s))

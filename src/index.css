@@ -2711,6 +2711,110 @@ button {
   margin-top: 6px;
 }
 
+/* ─── Mini-tableau des lots en stock ─── */
+.pd-lot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pd-lot-table thead th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.pd-lot-table thead th span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pd-lot-table thead th:hover { color: var(--text-secondary); }
+.pd-lot-th--qty { width: 60px; }
+.pd-lot-sort-idle { opacity: 0.35; }
+.pd-lot-table tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: middle;
+}
+.pd-lot-table tbody tr:last-child td { border-bottom: none; }
+.pd-lot-table tbody tr:hover { background: var(--gray-50); }
+.pd-lot-qty-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 2px 7px;
+  background: var(--green-50);
+  color: var(--green-600);
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.pd-lot-empty {
+  padding: 14px 10px !important;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ─── Stock chez les clients ─── */
+.pd-client-stock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pd-client-stock-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+.pd-client-stock-row:hover {
+  border-color: var(--blue-200, #bfdbfe);
+  background: var(--blue-50);
+}
+.pd-client-stock-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.pd-client-stock-name svg { color: var(--text-muted); }
+.pd-client-stock-loc {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.pd-client-stock-date {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pd-client-stock-go {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.pd-client-stock-row:hover .pd-client-stock-go { color: var(--blue-500); }
+
 .pd-details-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

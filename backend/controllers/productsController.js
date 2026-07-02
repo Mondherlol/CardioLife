@@ -3,6 +3,7 @@ const path          = require('path')
 const fs            = require('fs')
 const Product       = require('../models/Product')
 const StockMovement = require('../models/StockMovement')
+const Installation  = require('../models/Installation')
 
 async function getAll(req, res) {
   const { category, brand, supplier, search, page = 1, limit = 20, archived = 'false', lowStock, expiringSoon, expired } = req.query
@@ -174,6 +175,82 @@ async function adjustStock(req, res) {
   res.json(product)
 }
 
+// Rattache des numéros de série à des unités DÉJÀ en stock (régularisation).
+// N'affecte pas la quantité en stock.
+async function assignSerials(req, res) {
+  const { serialNumbers, reason } = req.body
+
+  const product = await Product.findById(req.params.id)
+  if (!product) return res.status(404).json({ message: 'Produit introuvable.' })
+  if (!product.requiresSerialNumber) {
+    return res.status(400).json({ message: 'Ce produit ne requiert pas de numéro de série.' })
+  }
+
+  const incoming = (Array.isArray(serialNumbers) ? serialNumbers : [])
+    .map(sn => String(sn).trim())
+    .filter(Boolean)
+  if (incoming.length === 0) {
+    return res.status(422).json({ message: 'Saisissez au moins un numéro de série.' })
+  }
+
+  // Doublons dans la saisie
+  const dupes = incoming.filter((sn, i) => incoming.indexOf(sn) !== i)
+  if (dupes.length > 0) {
+    return res.status(422).json({ message: `Numéros en double : ${[...new Set(dupes)].join(', ')}` })
+  }
+
+  // Numéros de série actuellement en stock (entrée + régularisation − sortie)
+  const movements = await StockMovement.find({ product: product._id })
+  const entered = new Set()
+  const exited  = new Set()
+  movements.forEach(mv => {
+    if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
+    if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
+  })
+  const inStock = [...entered].filter(sn => !exited.has(sn))
+
+  // Déjà présents
+  const already = incoming.filter(sn => inStock.includes(sn))
+  if (already.length > 0) {
+    return res.status(409).json({ message: `Déjà en stock : ${already.join(', ')}` })
+  }
+
+  // Ne pas dépasser le nombre d'unités sans série
+  const untracked = Math.max(0, product.stock - inStock.length)
+  if (incoming.length > untracked) {
+    return res.status(400).json({
+      message: `${untracked} unité(s) sans numéro de série. Vous ne pouvez pas en saisir plus.`,
+    })
+  }
+
+  await StockMovement.create({
+    product:       product._id,
+    type:          'serialisation',
+    quantity:      incoming.length,
+    previousStock: product.stock,
+    newStock:      product.stock, // stock inchangé
+    reason:        reason || 'Saisie des numéros de série (régularisation)',
+    serialNumbers: incoming,
+    createdBy:     req.user._id,
+  })
+
+  res.json(product)
+}
+
+// Unités de ce produit (identifiées par n° de série) actuellement posées chez des clients.
+async function getClientStock(req, res) {
+  const installs = await Installation.find({
+    deviceProduct: req.params.id,
+    serialNumber:  { $exists: true, $nin: [null, ''] },
+    status:        'installe',
+  })
+    .select('serialNumber clientName client address location installationDate')
+    .populate('client', 'name')
+    .sort({ installationDate: -1 })
+    .lean()
+  res.json(installs)
+}
+
 async function getMovements(req, res) {
   const movements = await StockMovement.find({ product: req.params.id })
     .sort({ createdAt: -1 })
@@ -254,7 +331,7 @@ async function getBrands(req, res) {
 
 module.exports = {
   getAll, getStats, getById, create, update,
-  adjustStock, getMovements,
+  adjustStock, assignSerials, getMovements, getClientStock,
   uploadImage, deleteImage,
   archive, restore, permanentDelete,
   getSuppliers, getBrands,

@@ -131,7 +131,7 @@ function StockAdjustModal({ product, onClose, onDone }) {
           const entered = new Set()
           const exited  = new Set()
           mvs.forEach(mv => {
-            if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
+            if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
             if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
           })
           setInStockSerials([...entered].filter(sn => !exited.has(sn)))
@@ -558,10 +558,11 @@ function DestroyConfirm({ product, onClose, onDone }) {
 function MovementDetailModal({ movement, onClose }) {
   const isEntree  = movement.type === 'entree'
   const isSortie  = movement.type === 'sortie'
+  const isSerial  = movement.type === 'serialisation'
   const cls       = isEntree ? 'entree' : isSortie ? 'sortie' : 'ajust'
-  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : SlidersHorizontal
-  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : 'Correction'
-  const sign      = isEntree ? '+' : isSortie ? '-' : '→'
+  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : isSerial ? Hash : SlidersHorizontal
+  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : isSerial ? 'Saisie de séries' : 'Correction'
+  const sign      = isEntree ? '+' : isSortie ? '-' : isSerial ? '' : '→'
   const hasSerials = (movement.serialNumbers?.length ?? 0) > 0
   const hasLot     = !!movement.lotNumber
 
@@ -653,7 +654,7 @@ function StockDetailModal({ product, onClose, onAdjust }) {
     const entered = new Set()
     const exited  = new Set()
     movements.forEach(mv => {
-      if (mv.type === 'entree') mv.serialNumbers?.forEach(sn => entered.add(sn))
+      if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
       if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
     })
     return [...entered].filter(sn => !exited.has(sn))
@@ -787,10 +788,11 @@ function MovementsModal({ product, onClose }) {
               {movements.map(mv => {
                 const isEntree = mv.type === 'entree'
                 const isSortie = mv.type === 'sortie'
+                const isSerial = mv.type === 'serialisation'
                 const cls       = isEntree ? 'entree' : isSortie ? 'sortie' : 'ajust'
-                const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : SlidersHorizontal
-                const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : 'Correction'
-                const sign      = isEntree ? '+' : isSortie ? '-' : '→'
+                const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : isSerial ? Hash : SlidersHorizontal
+                const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : isSerial ? 'Saisie de séries' : 'Correction'
+                const sign      = isEntree ? '+' : isSortie ? '-' : isSerial ? '' : '→'
                 return (
                   <div key={mv._id} className="mv-row">
                     <div className={`mv-badge mv-badge--${cls}`}>
@@ -1249,10 +1251,11 @@ export default function StockPage() {
                 {allMovements.map(mv => {
                   const isEntree  = mv.type === 'entree'
                   const isSortie  = mv.type === 'sortie'
+                  const isSerial  = mv.type === 'serialisation'
                   const cls       = isEntree ? 'entree' : isSortie ? 'sortie' : 'ajust'
-                  const sign      = isEntree ? '+' : isSortie ? '-' : '→'
-                  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : SlidersHorizontal
-                  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : 'Correction'
+                  const sign      = isEntree ? '+' : isSortie ? '-' : isSerial ? '' : '→'
+                  const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : isSerial ? Hash : SlidersHorizontal
+                  const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : isSerial ? 'Saisie de séries' : 'Correction'
                   const prod      = mv.product
                   return (
                     <tr key={mv._id} className="mv-row--clickable" onClick={() => setViewingMovementDetail(mv)} title="Voir le détail">
