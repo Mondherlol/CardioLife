@@ -1,125 +1,79 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import {
   HeartPulse, Users, Wrench, Package, ShieldCheck,
   AlertTriangle, CalendarClock, Clock, User, MapPin,
-  ArrowRight, ArrowUpRight, ArrowDownRight, ChevronRight,
+  ArrowRight, ChevronRight,
   ChevronLeft, Plus, Activity, BatteryWarning, Zap,
   CircleDot,
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import { useLoadingBar } from '../hooks/useLoadingBar'
+import { getDashboard } from '../api/dashboard'
+import { getInstallations } from '../api/installations'
 
 /* =====================================================================
  *  CielOo ERP — Dashboard (parc de défibrillateurs / DAE)
- *  Données de démonstration (MOCK). Pour brancher tes API réelles,
- *  remplace simplement les constantes ci-dessous par ce que renvoie
- *  ton backend (voir le bloc "AGENDA" pour l'intégration calendrier).
+ *  Branché sur /api/dashboard (stats, activités, RDV à venir) et
+ *  /api/installations (parc réel : conformité, batteries/électrodes).
  * ===================================================================== */
 
-const now = new Date()
-const at = (dayOffset, h = 9, min = 0) => {
-  const d = new Date(now)
-  d.setDate(d.getDate() + dayOffset)
-  d.setHours(h, min, 0, 0)
-  return d
-}
-
-/* ── Stats (cartes du haut) ── */
-const STATS = [
-  { key: 'parc',  label: 'DAE en parc',            value: '342',  sub: '28 sites équipés', trend: +4.2,  icon: HeartPulse,    tone: 'orange' },
-  { key: 'ctrl',  label: 'Contrôles à planifier',  value: '18',   sub: '3 en retard',      trend: +2.1,  icon: CalendarClock, tone: 'blue', down: true },
-  { key: 'inter', label: 'Interventions du mois',  value: '27',   sub: '5 en attente',     trend: +12.4, icon: Wrench,        tone: 'purple' },
-  { key: 'conf',  label: 'Taux de conformité',     value: '94 %', sub: 'parc réglementaire', trend: +1.8, icon: ShieldCheck,   tone: 'green' },
-]
-
-/* ── Alertes urgentes (bandeau) ── */
-const ALERTS = [
-  { key: 'ctrl', count: 3, label: 'contrôles en retard',   icon: AlertTriangle,  tone: 'red',    to: '/planning' },
-  { key: 'batt', count: 5, label: 'batteries à remplacer', icon: BatteryWarning, tone: 'amber',  to: '/stock' },
-  { key: 'elec', count: 2, label: 'électrodes expirées',   icon: Zap,            tone: 'orange', to: '/stock' },
-]
-
-/* ── Types de contrôle ── */
-const TYPE_META = {
-  controle:     { label: 'Contrôle',     color: '#f97316', soft: '#fff3ea', icon: ShieldCheck },
-  maintenance:  { label: 'Maintenance',  color: '#3b82f6', soft: '#eaf1fe', icon: Wrench },
-  installation: { label: 'Installation', color: '#16a34a', soft: '#e9f7ef', icon: Plus },
-  remplacement: { label: 'Remplacement', color: '#7c5cff', soft: '#f0ecff', icon: BatteryWarning },
-}
-const TECHS = {
-  amine:   { name: 'Amine B.',   color: '#f97316' },
-  sarra:   { name: 'Sarra M.',   color: '#3b82f6' },
-  yassine: { name: 'Yassine T.', color: '#7c5cff' },
-  nadia:   { name: 'Nadia K.',   color: '#16a34a' },
-}
-const STATUS_META = {
-  late:      { label: 'En retard',   cls: 'red' },
-  today:     { label: "Aujourd'hui", cls: 'orange' },
-  planned:   { label: 'Planifié',    cls: 'blue' },
-  toconfirm: { label: 'À confirmer', cls: 'gray' },
-}
-
-/* ── Prochains contrôles planifiés ── */
-const CONTROLES = [
-  { id: 1, type: 'controle',     title: 'Contrôle annuel DAE',        client: 'Mairie de Tunis',        site: 'Hôtel de ville — Hall',  start: at(0, 9, 30),  tech: 'amine',   status: 'late' },
-  { id: 2, type: 'maintenance',  title: 'Maintenance électrodes',     client: 'Clinique El Manar',      site: 'Bloc B — Étage 2',       start: at(0, 14, 0),  tech: 'sarra',   status: 'today' },
-  { id: 3, type: 'controle',     title: 'Vérification trimestrielle', client: 'Lycée Carthage',         site: 'Gymnase',                start: at(1, 10, 0),  tech: 'yassine', status: 'planned' },
-  { id: 4, type: 'remplacement', title: 'Remplacement batterie',      client: 'Centre commercial Azur', site: 'Accueil niveau 0',       start: at(2, 11, 15), tech: 'amine',   status: 'planned' },
-  { id: 5, type: 'installation', title: 'Installation nouveau DAE',    client: 'Aéroport Enfidha',       site: 'Terminal départs',       start: at(3, 8, 45),  tech: 'nadia',   status: 'toconfirm' },
-  { id: 6, type: 'controle',     title: 'Contrôle annuel DAE',        client: 'Hôtel Laico',            site: 'Réception principale',   start: at(4, 15, 30), tech: 'sarra',   status: 'planned' },
-]
-
-/* =====================================================================
- *  AGENDA — source unique du calendrier.
- *  Ici on réutilise les contrôles, mais tu peux brancher n'importe
- *  quelle API (Google Calendar, ton back, iCal…). Il suffit de fournir
- *  un tableau d'objets { date: Date, type: string }.
- *
- *  Exemple d'intégration API :
- *
- *  const [events, setEvents] = useState([])
- *  useEffect(() => {
- *    fetch('/api/agenda?month=' + view.toISOString())
- *      .then(r => r.json())
- *      .then(rows => setEvents(rows.map(mapApiEvent)))
- *  }, [view])
- *
- *  function mapApiEvent(row) {
- *    return { date: new Date(row.start), type: row.type || 'controle' }
- *  }
- * ===================================================================== */
-const AGENDA_EVENTS = CONTROLES.map(c => ({ date: c.start, type: c.type }))
-
-/* ── Échéances critiques (consommables) ── */
-const ECHEANCES = [
-  { id: 1, kind: 'battery',   label: 'Batterie LiMnO₂',   ref: 'Powerheart G5', site: 'Mairie de Tunis',   days: -2, icon: BatteryWarning },
-  { id: 2, kind: 'electrode', label: 'Électrodes adulte', ref: 'HeartStart FRx', site: 'Clinique El Manar', days: 4,  icon: Zap },
-  { id: 3, kind: 'electrode', label: 'Électrodes pédia.', ref: 'Lifepak CR2',    site: 'Lycée Carthage',    days: 9,  icon: Zap },
-  { id: 4, kind: 'battery',   label: 'Batterie Li-ion',   ref: 'Zoll AED Plus',  site: 'Hôtel Laico',       days: 21, icon: BatteryWarning },
-]
-
-/* ── Dernières activités ── */
-const ACTIVITES = [
-  { id: 1, action: 'Contrôle validé',       detail: 'DAE Hall — Mairie de Tunis', user: 'Amine B.',   date: at(0, now.getHours(), -8),  tone: 'green' },
-  { id: 2, action: 'Batterie remplacée',    detail: 'Powerheart G5 — Clinique',   user: 'Sarra M.',   date: at(0, now.getHours() - 3, 0), tone: 'orange' },
-  { id: 3, action: 'Intervention créée',    detail: 'Ticket #INT-2043',           user: 'Yassine T.', date: at(-1, 16, 20),            tone: 'blue' },
-  { id: 4, action: 'Nouveau client',        detail: 'Aéroport Enfidha',           user: 'Nadia K.',   date: at(-1, 11, 5),             tone: 'purple' },
-  { id: 5, action: 'Stock réapprovisionné', detail: '+40 électrodes adulte',      user: 'Système',    date: at(-2, 9, 0),              tone: 'teal' },
-]
-
-/* ── Accès rapides ── */
+/* ── Accès rapides (statique) ── */
 const SHORTCUTS = [
   { label: 'Planifier un contrôle', desc: 'Nouvel événement agenda', icon: CalendarClock, to: '/planning',      tone: 'orange' },
   { label: 'Nouvelle intervention', desc: 'Créer un ticket',          icon: Wrench,        to: '/interventions', tone: 'blue' },
-  { label: 'Ajouter un DAE',        desc: 'Enregistrer un appareil',  icon: HeartPulse,    to: '/installations', tone: 'green' },
+  { label: 'Ajouter un DAE',        desc: 'Enregistrer un appareil',  icon: HeartPulse,    to: '/devices',       tone: 'green' },
   { label: 'Gérer le stock',        desc: 'Consommables & pièces',    icon: Package,       to: '/stock',         tone: 'purple' },
   { label: 'Nouveau client',        desc: 'Site ou collectivité',     icon: Users,         to: '/clients',       tone: 'teal' },
   { label: 'Voir le planning',      desc: 'Vue équipe complète',      icon: Activity,      to: '/planning',      tone: 'red' },
 ]
 
+/* ── Types de rendez-vous (aligné sur Appointment.type côté back) ── */
+const TYPE_META = {
+  controle:     { label: 'Contrôle',     color: '#f97316', soft: '#fff3ea', icon: ShieldCheck },
+  intervention: { label: 'Intervention', color: '#ef4444', soft: '#fdecec', icon: Wrench },
+  installation: { label: 'Installation', color: '#22c55e', soft: '#e9f7ef', icon: Plus },
+  formation:    { label: 'Formation',    color: '#a855f7', soft: '#f3e8ff', icon: Users },
+  reunion:      { label: 'Réunion',      color: '#3b82f6', soft: '#eaf1fe', icon: CalendarClock },
+  autre:        { label: 'Autre',        color: '#6b7280', soft: '#f1f3f6', icon: Activity },
+}
+const STATUS_META = {
+  late:    { label: 'En retard',   cls: 'red' },
+  today:   { label: "Aujourd'hui", cls: 'orange' },
+  planned: { label: 'Planifié',    cls: 'blue' },
+}
+const ACTIVITY_TONE = { stock: 'teal', intervention: 'blue', appointment: 'purple' }
+const AVATAR_PALETTE = ['#f97316', '#3b82f6', '#22c55e', '#a855f7', '#ef4444', '#14b8a6']
+
 /* ── Helpers ── */
 const initials = (name) => name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()
 const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 
+function avatarColor(name = '') {
+  let h = 0
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xff
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length]
+}
+function daysUntil(d) {
+  if (!d) return null
+  return Math.round((new Date(d) - new Date()) / 86400000)
+}
+function apptStatus(start) {
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const endOfToday = new Date(startOfToday.getTime() + 86400000)
+  if (start < now) return 'late'
+  if (start >= startOfToday && start < endOfToday) return 'today'
+  return 'planned'
+}
+function isCompliant(inst) {
+  const now = new Date()
+  const ctrl = inst.nextControl?.scheduledDate ? new Date(inst.nextControl.scheduledDate) : null
+  const batt = inst.batteries?.[0]?.expiryDate ? new Date(inst.batteries[0].expiryDate) : null
+  const elec = inst.electrodes?.[0]?.expiryDate ? new Date(inst.electrodes[0].expiryDate) : null
+  return !((ctrl && ctrl < now) || (batt && batt < now) || (elec && elec < now))
+}
 function formatRelative(d) {
   const m = Math.floor((Date.now() - d.getTime()) / 60000)
   if (m < 1) return "À l'instant"
@@ -134,6 +88,10 @@ function daysBadge(days) {
   if (days <= 7) return { text: `J-${days}`, cls: 'amber' }
   return { text: `J-${days}`, cls: 'gray' }
 }
+function formatApiError(err) {
+  if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
+  return err.message || 'Une erreur est survenue.'
+}
 
 /* ====================== Sous-composants ====================== */
 
@@ -147,7 +105,6 @@ function StatCard({ s, onClick }) {
     el.style.setProperty('--my', `${e.clientY - r.top}px`)
   }
   const Icon = s.icon
-  const TrendIcon = s.down ? ArrowDownRight : ArrowUpRight
   return (
     <button
       ref={ref}
@@ -159,9 +116,6 @@ function StatCard({ s, onClick }) {
       <span className="dfx-stat-border" />
       <div className="dfx-stat-head">
         <span className="dfx-stat-icon"><Icon size={19} /></span>
-        <span className={`dfx-trend ${s.down ? 'is-down' : 'is-up'}`}>
-          <TrendIcon size={12} /> {Math.abs(s.trend)} %
-        </span>
       </div>
       <div className="dfx-stat-value">{s.value}</div>
       <div className="dfx-stat-label">{s.label}</div>
@@ -212,14 +166,14 @@ function ConformityHero({ pct = 94, conformes = 322, total = 342, onClick }) {
 }
 
 function ControlRow({ c, onClick }) {
-  const meta = TYPE_META[c.type]
+  const meta = TYPE_META[c.type] || TYPE_META.autre
   const Icon = meta.icon
-  const tech = TECHS[c.tech]
   const st = STATUS_META[c.status]
   const urgent = c.status === 'late' || c.status === 'today'
   const day = c.start.toLocaleDateString('fr-FR', { day: '2-digit' })
   const month = c.start.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '')
   const time = c.start.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  const techName = c.tech || 'Non assigné'
   return (
     <button className="dfx-ctrl" onClick={onClick} style={{ '--accent': meta.color, '--accent-soft': meta.soft }}>
       <span className="dfx-ctrl-date">
@@ -237,13 +191,13 @@ function ControlRow({ c, onClick }) {
           <span className={`dfx-pill dfx-pill--${st.cls}`}>{st.label}</span>
         </div>
         <div className="dfx-ctrl-meta">
-          <span><MapPin size={12} /> {c.client} · {c.site}</span>
+          <span><MapPin size={12} /> {c.client}</span>
         </div>
         <div className="dfx-ctrl-foot">
           <span className="dfx-ctrl-when"><Clock size={12} /> {time}</span>
           <span className="dfx-ctrl-tech">
-            <span className="dfx-avatar" style={{ background: tech.color }}>{initials(tech.name)}</span>
-            {tech.name}
+            <span className="dfx-avatar" style={{ background: avatarColor(techName) }}>{initials(techName)}</span>
+            {techName}
           </span>
         </div>
       </div>
@@ -276,6 +230,7 @@ function EcheanceRow({ e }) {
 
 /* Calendrier — piloté par `events` (prêt pour ton API agenda) */
 function MiniCalendar({ events = [] }) {
+  const now = new Date()
   const [view, setView] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1))
   const changeMonth = (delta) => setView(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
 
@@ -337,9 +292,143 @@ function ActivityRow({ a }) {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const go = (to) => navigate(to)
+  const { user } = useAuth()
 
+  const [data, setData] = useState(null)
+  const [installations, setInstallations] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useLoadingBar(loading)
+
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      setLoading(true); setError('')
+      try {
+        const [dash, instRes] = await Promise.all([
+          getDashboard(),
+          getInstallations({ limit: 500 }).catch(() => ({ data: [] })),
+        ])
+        if (!alive) return
+        setData(dash)
+        setInstallations(instRes.data || [])
+      } catch (err) {
+        if (!alive) return
+        const msg = formatApiError(err)
+        setError(msg)
+        toast.error(msg)
+      } finally {
+        if (alive) setLoading(false)
+      }
+    }
+    load()
+    return () => { alive = false }
+  }, [])
+
+  const compliance = useMemo(() => {
+    const total = installations.length
+    if (!total) return { pct: 0, conformes: 0, total: 0 }
+    const conformes = installations.filter(isCompliant).length
+    return { pct: Math.round((conformes / total) * 100), conformes, total }
+  }, [installations])
+
+  const STATS = useMemo(() => {
+    if (!data) return []
+    const planned = installations.filter(i => i.nextControl?.scheduledDate).length
+    const late = installations.filter(i => i.nextControl?.scheduledDate && new Date(i.nextControl.scheduledDate) < new Date()).length
+    return [
+      { key: 'parc',  label: 'DAE en parc',           value: String(data.stats.installations), sub: `${data.stats.clients} client${data.stats.clients > 1 ? 's' : ''} actifs`, icon: HeartPulse,    tone: 'orange' },
+      { key: 'ctrl',  label: 'Contrôles à planifier', value: String(planned),                   sub: `${late} en retard`,                                                       icon: CalendarClock, tone: 'blue' },
+      { key: 'inter', label: 'Interventions du mois', value: String(data.stats.interventionsThisMonth), sub: `${data.stats.interventionsPending} en attente`,                    icon: Wrench,        tone: 'purple' },
+      { key: 'conf',  label: 'Taux de conformité',    value: `${compliance.pct} %`,             sub: 'parc réglementaire',                                                      icon: ShieldCheck,   tone: 'green' },
+    ]
+  }, [data, installations, compliance])
+
+  const ALERTS = useMemo(() => {
+    if (!installations.length) return []
+    const now = new Date()
+    const late = installations.filter(i => i.nextControl?.scheduledDate && new Date(i.nextControl.scheduledDate) < now).length
+    let batteries = 0, electrodes = 0
+    installations.forEach(inst => {
+      ;(inst.batteries || []).forEach(b => { const d = daysUntil(b.expiryDate); if (d != null && d <= 30) batteries++ })
+      ;(inst.electrodes || []).forEach(e => { const d = daysUntil(e.expiryDate); if (d != null && d < 0) electrodes++ })
+    })
+    return [
+      { key: 'ctrl', count: late,       label: 'contrôles en retard',   icon: AlertTriangle,  tone: 'red',    to: '/planning' },
+      { key: 'batt', count: batteries,  label: 'batteries à remplacer', icon: BatteryWarning, tone: 'amber',  to: '/devices' },
+      { key: 'elec', count: electrodes, label: 'électrodes expirées',   icon: Zap,            tone: 'orange', to: '/devices' },
+    ].filter(a => a.count > 0)
+  }, [installations])
+
+  const CONTROLES = useMemo(() => {
+    if (!data) return []
+    return data.upcomingAppointments.map(a => {
+      const start = new Date(a.start)
+      return {
+        id: a._id,
+        type: TYPE_META[a.type] ? a.type : 'autre',
+        title: a.title || TYPE_META[a.type]?.label || 'Rendez-vous',
+        client: a.clientName || '—',
+        tech: a.assignedNames?.[0] || null,
+        start,
+        status: apptStatus(start),
+      }
+    })
+  }, [data])
+
+  const AGENDA_EVENTS = useMemo(() => CONTROLES.map(c => ({ date: c.start, type: c.type })), [CONTROLES])
+
+  const ECHEANCES = useMemo(() => {
+    const items = []
+    installations.forEach(inst => {
+      ;(inst.batteries || []).forEach((b, idx) => {
+        const days = daysUntil(b.expiryDate)
+        if (days == null || days > 30) return
+        items.push({ id: `${inst._id}-b-${idx}`, kind: 'battery', label: b.productName || 'Batterie', ref: inst.deviceType || inst.serialNumber || '—', site: inst.clientName || '—', days, icon: BatteryWarning })
+      })
+      ;(inst.electrodes || []).forEach((e, idx) => {
+        const days = daysUntil(e.expiryDate)
+        if (days == null || days > 30) return
+        items.push({ id: `${inst._id}-e-${idx}`, kind: 'electrode', label: e.productName || 'Électrodes', ref: inst.deviceType || inst.serialNumber || '—', site: inst.clientName || '—', days, icon: Zap })
+      })
+    })
+    return items.sort((a, b) => a.days - b.days).slice(0, 6)
+  }, [installations])
+
+  const ACTIVITES = useMemo(() => {
+    if (!data) return []
+    return data.activities.map((a, i) => ({
+      id: i,
+      action: a.action,
+      detail: a.detail,
+      user: a.user || 'Système',
+      date: new Date(a.date),
+      tone: ACTIVITY_TONE[a.type] || 'blue',
+    }))
+  }, [data])
+
+  const now = new Date()
   const greeting = now.getHours() < 12 ? 'Bonjour' : now.getHours() < 18 ? 'Bon après-midi' : 'Bonsoir'
   const dateLabel = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const displayName = user?.fullName || user?.username || ''
+
+  if (loading) {
+    return (
+      <div className="dfx">
+        <DashboardStyles />
+        <div className="table-loading"><span className="spinner" /></div>
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="dfx">
+        <DashboardStyles />
+        <div className="table-error"><AlertTriangle size={15} /> {error}</div>
+      </div>
+    )
+  }
 
   return (
     <div className="dfx">
@@ -348,22 +437,24 @@ export default function DashboardPage() {
       {/* ── Header + alertes ── */}
       <header className="dfx-top">
         <div>
-          <h1 className="dfx-title">{greeting}, Taylor</h1>
+          <h1 className="dfx-title">{greeting}{displayName ? `, ${displayName}` : ''}</h1>
           <p className="dfx-date">{dateLabel}</p>
         </div>
 
-        <div className="dfx-alerts">
-          <span className="dfx-alerts-lead"><AlertTriangle size={15} /> Alertes du jour</span>
-          {ALERTS.map(a => {
-            const Icon = a.icon
-            return (
-              <button key={a.key} className={`dfx-alert dfx-alert--${a.tone}`} onClick={() => go(a.to)}>
-                <Icon size={14} /> <strong>{a.count}</strong> {a.label}
-                <ArrowRight size={13} className="dfx-alert-arrow" />
-              </button>
-            )
-          })}
-        </div>
+        {ALERTS.length > 0 && (
+          <div className="dfx-alerts">
+            <span className="dfx-alerts-lead"><AlertTriangle size={15} /> Alertes du jour</span>
+            {ALERTS.map(a => {
+              const Icon = a.icon
+              return (
+                <button key={a.key} className={`dfx-alert dfx-alert--${a.tone}`} onClick={() => go(a.to)}>
+                  <Icon size={14} /> <strong>{a.count}</strong> {a.label}
+                  <ArrowRight size={13} className="dfx-alert-arrow" />
+                </button>
+              )
+            })}
+          </div>
+        )}
       </header>
 
       {/* ── Cartes stats ── */}
@@ -372,7 +463,7 @@ export default function DashboardPage() {
           <StatCard
             key={s.key}
             s={s}
-            onClick={() => go(s.key === 'ctrl' ? '/planning' : s.key === 'inter' ? '/interventions' : '/installations')}
+            onClick={() => go(s.key === 'ctrl' ? '/planning' : s.key === 'inter' ? '/interventions' : '/devices')}
           />
         ))}
       </section>
@@ -380,7 +471,7 @@ export default function DashboardPage() {
       {/* ── Grille principale ── */}
       <div className="dfx-main">
         <div className="dfx-col">
-          <ConformityHero pct={94} conformes={322} total={342} onClick={() => go('/planning')} />
+          <ConformityHero pct={compliance.pct} conformes={compliance.conformes} total={compliance.total} onClick={() => go('/planning')} />
 
           <section className="dfx-card">
             <div className="dfx-card-head">
@@ -388,7 +479,9 @@ export default function DashboardPage() {
               <button className="dfx-link" onClick={() => go('/planning')}>Voir le planning <ArrowRight size={13} /></button>
             </div>
             <div className="dfx-ctrl-list">
-              {CONTROLES.map(c => <ControlRow key={c.id} c={c} onClick={() => go('/planning')} />)}
+              {CONTROLES.length > 0
+                ? CONTROLES.map(c => <ControlRow key={c.id} c={c} onClick={() => go('/planning')} />)
+                : <p className="dfx-empty">Aucun rendez-vous à venir.</p>}
             </div>
           </section>
         </div>
@@ -412,7 +505,9 @@ export default function DashboardPage() {
               <button className="dfx-link" onClick={() => go('/stock')}>Stock <ArrowRight size={13} /></button>
             </div>
             <div className="dfx-ech-list">
-              {ECHEANCES.map(e => <EcheanceRow key={e.id} e={e} />)}
+              {ECHEANCES.length > 0
+                ? ECHEANCES.map(e => <EcheanceRow key={e.id} e={e} />)
+                : <p className="dfx-empty">Aucune échéance proche.</p>}
             </div>
           </section>
         </div>
@@ -425,11 +520,14 @@ export default function DashboardPage() {
             <div className="dfx-card-title"><Activity size={16} /> Dernières activités</div>
           </div>
           <div className="dfx-act-list">
-            {ACTIVITES.map(a => <ActivityRow key={a.id} a={a} />)}
+            {ACTIVITES.length > 0
+              ? ACTIVITES.map(a => <ActivityRow key={a.id} a={a} />)
+              : <p className="dfx-empty">Aucune activité récente.</p>}
           </div>
         </section>
 
-        <section className="dfx-card">
+        <section className="dfx-card dfx-card--glass">
+          <span className="dfx-glass-blob dfx-glass-blob--d" />
           <div className="dfx-card-head">
             <div className="dfx-card-title"><Zap size={16} /> Accès rapides</div>
           </div>
@@ -470,7 +568,7 @@ function DashboardStyles() {
       --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 28px rgba(16,24,40,.05);
       background:var(--bg); color:var(--ink);
       font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-      padding:24px 28px 40px; display:flex; flex-direction:column; gap:20px;
+      padding: 24px 28px 80px 28px; display:flex; flex-direction:column; gap:20px;
       min-height:100%; box-sizing:border-box; overflow:auto;
     }
     .dfx *{ box-sizing:border-box; }
@@ -537,6 +635,7 @@ function DashboardStyles() {
     .dfx-card-title svg{ color:var(--orange); }
     .dfx-link{ display:flex; align-items:center; gap:4px; font-size:12.5px; font-weight:600; color:var(--orange-d); }
     .dfx-link:hover{ color:var(--orange); }
+    .dfx-empty{ margin:0; padding:20px 4px; text-align:center; font-size:13px; color:var(--ink3); }
 
     /* ── Carte verre (glassmorphism) ── */
     .dfx-card--glass{
@@ -547,11 +646,20 @@ function DashboardStyles() {
       box-shadow:0 1px 1px rgba(255,255,255,.6) inset, 0 18px 40px rgba(16,24,40,.10);
     }
     .dfx-card--glass .dfx-card-head,
-    .dfx-card--glass .dfx-ech-list{ position:relative; z-index:1; }
+    .dfx-card--glass .dfx-ech-list,
+    .dfx-card--glass .dfx-shortcuts{ position:relative; z-index:1; }
     .dfx-glass-blob{ position:absolute; z-index:0; border-radius:50%; filter:blur(46px); pointer-events:none; }
     .dfx-glass-blob--b{
       bottom:-70px; left:-30px; width:200px; height:200px; background:rgba(249,115,22,.28);
       animation:blobRoam 16s ease-in-out infinite;
+    }
+    .dfx-glass-blob--c{
+      top:-60px; left:-40px; width:220px; height:220px; background:rgba(249,115,22,.3);
+      animation:blobRoam 18s ease-in-out infinite;
+    }
+    .dfx-glass-blob--d{
+      bottom:-60px; right:-40px; width:220px; height:220px; background:rgba(124,92,255,.28);
+      animation:blobRoam 20s ease-in-out infinite reverse;
     }
     @keyframes blobRoam{
       0%   { transform:translate(0, 0) scale(1); }
@@ -561,7 +669,7 @@ function DashboardStyles() {
       100% { transform:translate(0, 0) scale(1); }
     }
     @media (prefers-reduced-motion:reduce){
-      .dfx-glass-blob--b{ animation:none; }
+      .dfx-glass-blob--b, .dfx-glass-blob--c, .dfx-glass-blob--d{ animation:none; }
     }
 
     /* ── Hero conformité + animation ── */
@@ -732,33 +840,41 @@ function DashboardStyles() {
     .dfx-act-meta{ display:flex; gap:14px; margin-top:3px; font-size:11.5px; color:var(--ink3); }
     .dfx-act-meta span{ display:inline-flex; align-items:center; gap:4px; }
 
-    /* ── Raccourcis (tuiles colorées type app-launcher) ── */
+    /* ── Raccourcis (tuiles glassmorphism colorées) ── */
     .dfx-shortcuts{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
     .dfx-shortcut{
+      --tone: var(--orange); --tone-soft: rgba(249,115,22,.16); --tone-border: rgba(249,115,22,.32);
       position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:flex-start; gap:10px;
-      text-align:left; padding:16px 14px; border:none; border-radius:18px; color:#fff;
-      transition:transform .18s cubic-bezier(.2,.8,.3,1.2), box-shadow .18s;
+      text-align:left; padding:16px 14px; border-radius:18px; color:var(--ink);
+      background:var(--tone-soft); border:1px solid var(--tone-border);
+      backdrop-filter:blur(14px) saturate(160%); -webkit-backdrop-filter:blur(14px) saturate(160%);
+      box-shadow:0 1px 1px rgba(255,255,255,.5) inset, 0 8px 20px -10px rgba(16,24,40,.12);
+      transition:transform .18s cubic-bezier(.2,.8,.3,1.2), box-shadow .18s, background .18s;
     }
     .dfx-shortcut::before{
-      content:''; position:absolute; top:-30px; right:-30px; width:90px; height:90px; border-radius:50%;
-      background:rgba(255,255,255,.18); transition:transform .3s ease; pointer-events:none;
+      content:''; position:absolute; top:0px; right:0px; width:100%; height:100%;
+      background:var(--tone-soft); filter:blur(4px); transition:transform .3s ease; pointer-events:none;
     }
     .dfx-shortcut:hover::before{ transform:scale(1.3) translate(-6px,6px); }
     .dfx-shortcut > *{ position:relative; z-index:1; }
-    .dfx-shortcut:hover{ transform:translateY(-4px) scale(1.02); }
+    .dfx-shortcut:hover{
+      transform:translateY(-4px) scale(1.02);
+      box-shadow:0 1px 1px rgba(255,255,255,.6) inset, 0 16px 30px -10px rgba(16,24,40,.18);
+    }
     .dfx-shortcut-icon{
       width:36px; height:36px; border-radius:11px; display:grid; place-items:center;
-      background:rgba(255,255,255,.24); transition:transform .18s;
+      background:var(--tone-soft); color:var(--tone); box-shadow:inset 0 0 0 1px rgba(255,255,255,.5);
+      transition:transform .18s;
     }
     .dfx-shortcut:hover .dfx-shortcut-icon{ transform:scale(1.1) rotate(-6deg); }
-    .dfx-shortcut-label{ font-size:12.5px; font-weight:700; line-height:1.25; }
-    .dfx-shortcut-desc{ font-size:10.5px; color:rgba(255,255,255,.8); line-height:1.3; }
-    .dfx-shortcuts .dfx-shortcut--orange{ background:linear-gradient(150deg,#ffb37a,#f97316 65%,#ea580c); box-shadow:0 10px 22px -8px rgba(234,88,12,.55); }
-    .dfx-shortcuts .dfx-shortcut--blue{   background:linear-gradient(150deg,#8fc3ff,#3b82f6 65%,#2563eb); box-shadow:0 10px 22px -8px rgba(37,99,235,.5); }
-    .dfx-shortcuts .dfx-shortcut--green{  background:linear-gradient(150deg,#7de3a8,#16a34a 65%,#15803d); box-shadow:0 10px 22px -8px rgba(21,128,61,.5); }
-    .dfx-shortcuts .dfx-shortcut--purple{ background:linear-gradient(150deg,#c3b3ff,#7c5cff 65%,#6a3dff); box-shadow:0 10px 22px -8px rgba(106,61,255,.5); }
-    .dfx-shortcuts .dfx-shortcut--teal{   background:linear-gradient(150deg,#67e8d4,#0d9488 65%,#0f766e); box-shadow:0 10px 22px -8px rgba(15,118,110,.5); }
-    .dfx-shortcuts .dfx-shortcut--red{    background:linear-gradient(150deg,#ffa3a3,#ef4444 65%,#dc2626); box-shadow:0 10px 22px -8px rgba(220,38,38,.5); }
+    .dfx-shortcut-label{ font-size:12.5px; font-weight:700; line-height:1.25; color:var(--ink); }
+    .dfx-shortcut-desc{ font-size:10.5px; color:var(--ink2); line-height:1.3; }
+    .dfx-shortcuts .dfx-shortcut--orange{ --tone:var(--orange); --tone-soft:rgba(249,115,22,.16); --tone-border:rgba(249,115,22,.32); }
+    .dfx-shortcuts .dfx-shortcut--blue{   --tone:var(--blue);   --tone-soft:rgba(59,130,246,.16);  --tone-border:rgba(59,130,246,.32); }
+    .dfx-shortcuts .dfx-shortcut--green{  --tone:var(--green);  --tone-soft:rgba(22,163,74,.16);   --tone-border:rgba(22,163,74,.32); }
+    .dfx-shortcuts .dfx-shortcut--purple{ --tone:var(--purple); --tone-soft:rgba(124,92,255,.16);  --tone-border:rgba(124,92,255,.32); }
+    .dfx-shortcuts .dfx-shortcut--teal{   --tone:var(--teal);   --tone-soft:rgba(13,148,136,.16);  --tone-border:rgba(13,148,136,.32); }
+    .dfx-shortcuts .dfx-shortcut--red{    --tone:var(--red);    --tone-soft:rgba(239,68,68,.16);   --tone-border:rgba(239,68,68,.32); }
 
     /* ── Responsive ── */
     @media (max-width:1100px){

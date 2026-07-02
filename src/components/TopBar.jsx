@@ -41,7 +41,7 @@ export default function TopBar({ onLogout, user }) {
       </div>
 
       <div className="topbar-right">
-        <button className="topbar-icon-btn" title="Notifications">
+        <button className="topbar-icon-btn" title="Notifications" style={{ display: 'none' }}>
           <Bell size={17} strokeWidth={1.8} />
           <span className="topbar-notif-badge">9</span>
         </button>

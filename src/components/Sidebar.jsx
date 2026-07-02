@@ -19,8 +19,8 @@ const ALL_NAV = [
   { icon: Wrench,          label: 'Contrôles',         to: '/interventions',  roles: null }, // all roles
   { icon: Calendar,        label: 'Planning',          to: '/planning',       roles: null }, // all roles
   { icon: File,            label: 'Documents',         to: '/documents',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: Map,             label: 'Carte Tunisie',     to: '/carte',          roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: Mail,            label: 'Emails & Relances', to: '/emails',         roles: ['superadmin','admin','commercial','assistante'] },
+  // Désactivés pour l'instant : { icon: Map, label: 'Carte Tunisie', to: '/carte', roles: [...] }
+  // Désactivés pour l'instant : { icon: Mail, label: 'Emails & Relances', to: '/emails', roles: [...] }
 ]
 
 const ALL_BOTTOM = [
