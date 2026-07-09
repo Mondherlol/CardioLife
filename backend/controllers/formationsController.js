@@ -26,6 +26,15 @@ function pushHistory(formation, action, userId, details) {
   formation.history.push({ action, by: userId, at: new Date(), details })
 }
 
+async function getAll(req, res) {
+  try {
+    const formations = await Formation.find()
+      .populate(POPULATE_OPTS)
+      .sort({ date: -1 })
+    res.json(formations)
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
 async function getByClient(req, res) {
   try {
     const formations = await Formation.find({ client: req.params.clientId })
@@ -176,4 +185,4 @@ async function remove(req, res) {
   } catch (err) { res.status(500).json({ message: err.message }) }
 }
 
-module.exports = { getByClient, create, update, toggleAttestation, addDocuments, removeDocument, remove }
+module.exports = { getAll, getByClient, create, update, toggleAttestation, addDocuments, removeDocument, remove }

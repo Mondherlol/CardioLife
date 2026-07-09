@@ -12,26 +12,29 @@ import { toast } from 'react-toastify'
 /* ── Sample data ─────────────────────────────────────────── */
 
 const SAMPLE_COLUMNS = [
-  { key: 'nom',              label: 'Nom',                required: true,  example: 'Clinique El Amel' },
-  { key: 'type',             label: 'Type',               required: true,  example: 'Clinique' },
-  { key: 'rue',              label: 'Rue',                required: false, example: '12 Av. Habib Bourguiba' },
-  { key: 'ville',            label: 'Ville',              required: false, example: 'Tunis' },
-  { key: 'gouvernorat',      label: 'Gouvernorat',        required: false, example: 'Tunis' },
-  { key: 'contact nom',      label: 'Contact Nom',        required: false, example: 'Ahmed Ben Ali' },
-  { key: 'téléphone 1',      label: 'Téléphone 1',        required: false, example: '+216 71 000 000' },
-  { key: 'téléphone 2',      label: 'Téléphone 2',        required: false, example: '+216 20 000 000' },
-  { key: 'email 1',          label: 'Email 1',            required: false, example: 'contact@elamel.tn' },
-  { key: 'email 2',          label: 'Email 2',            required: false, example: 'daf@elamel.tn' },
-  { key: 'latitude',         label: 'Latitude GPS',       required: false, example: '36.8065' },
-  { key: 'longitude',        label: 'Longitude GPS',      required: false, example: '10.1815' },
-  { key: 'responsable',      label: 'Responsable interne',required: false, example: 'Sophie Martin' },
-  { key: 'notes',            label: 'Notes',              required: false, example: 'Contrat prioritaire' },
+  { key: 'nom',                   label: 'Nom',                   required: true,  example: 'Clinique El Amel' },
+  { key: 'type',                  label: 'Type',                  required: true,  example: 'Clinique' },
+  { key: 'rue',                   label: 'Rue',                   required: false, example: '12 Av. Habib Bourguiba' },
+  { key: 'ville',                 label: 'Ville',                 required: false, example: 'Tunis' },
+  { key: 'gouvernorat',           label: 'Gouvernorat',           required: false, example: 'Tunis' },
+  { key: 'contact 1 nom',         label: 'Contact 1 Nom',         required: false, example: 'Ahmed Ben Ali' },
+  { key: 'contact 1 téléphone',   label: 'Contact 1 Téléphone',   required: false, example: '+216 71 000 000' },
+  { key: 'contact 1 email',       label: 'Contact 1 Email',       required: false, example: 'contact@elamel.tn' },
+  { key: 'contact 2 nom',         label: 'Contact 2 Nom',         required: false, example: 'Leila Gharbi' },
+  { key: 'contact 2 téléphone',   label: 'Contact 2 Téléphone',   required: false, example: '+216 20 000 000' },
+  { key: 'contact 2 email',       label: 'Contact 2 Email',       required: false, example: 'daf@elamel.tn' },
+  { key: 'latitude',              label: 'Latitude GPS',          required: false, example: '36.8065' },
+  { key: 'longitude',             label: 'Longitude GPS',         required: false, example: '10.1815' },
+  { key: 'responsable nom',       label: 'Responsable Nom',       required: false, example: 'Sophie Martin' },
+  { key: 'responsable téléphone', label: 'Responsable Téléphone', required: false, example: '+216 25 000 000' },
+  { key: 'responsable email',     label: 'Responsable Email',     required: false, example: 'sophie@cardiolife.tn' },
+  { key: 'notes',                 label: 'Notes',                 required: false, example: 'Contrat prioritaire' },
 ]
 
 const SAMPLE_ROWS = [
-  ['Clinique El Amel', 'Clinique', '12 Av. Habib Bourguiba', 'Tunis', 'Tunis', 'Ahmed Ben Ali', '+216 71 100 200', '', 'contact@elamel.tn', '', '36.8065', '10.1815', 'Sophie Martin', 'Contrat prioritaire'],
-  ['Mairie de Sfax', 'Mairie', 'Place de la Liberté', 'Sfax', 'Sfax', 'Fatma Trabelsi', '+216 74 200 300', '+216 74 200 301', 'mairie@sfax.tn', '', '34.7406', '10.7603', 'Pierre Dupont', ''],
-  ['École Secondaire Ibn Khaldoun', 'École', 'Rue de l\'Indépendance', 'Sousse', 'Sousse', '', '+216 73 300 400', '', '', '', '35.8245', '10.6346', '', 'Renouvellement prévu juin'],
+  ['Clinique El Amel', 'Clinique', '12 Av. Habib Bourguiba', 'Tunis', 'Tunis', 'Ahmed Ben Ali', '+216 71 100 200', 'contact@elamel.tn', 'Leila Gharbi', '+216 20 100 200', 'daf@elamel.tn', '36.8065', '10.1815', 'Sophie Martin', '+216 25 000 000', 'sophie@cardiolife.tn', 'Contrat prioritaire'],
+  ['Mairie de Sfax', 'Mairie', 'Place de la Liberté', 'Sfax', 'Sfax', 'Fatma Trabelsi', '+216 74 200 300', 'mairie@sfax.tn', '', '', '', '34.7406', '10.7603', 'Pierre Dupont', '', '', ''],
+  ['École Secondaire Ibn Khaldoun', 'École', 'Rue de l\'Indépendance', 'Sousse', 'Sousse', '', '+216 73 300 400', '', '', '', '', '35.8245', '10.6346', '', '', '', 'Renouvellement prévu juin'],
 ]
 
 function downloadSample() {
@@ -302,9 +305,8 @@ export default function ClientImportPage() {
                     <th>Type</th>
                     <th>Ville</th>
                     <th>Gouvernorat</th>
-                    <th>Contact</th>
-                    <th>Téléphone</th>
-                    <th>Email</th>
+                    <th>Contact 1</th>
+                    <th>Contact 2</th>
                     <th>GPS</th>
                     <th>Responsable</th>
                     <th style={{ width: 60 }}>Statut</th>
@@ -319,16 +321,24 @@ export default function ClientImportPage() {
                       <td>{r.row.type || <em className="ci-cell--empty">—</em>}</td>
                       <td>{r.row.city || <em className="ci-cell--empty">—</em>}</td>
                       <td>{r.row.governorate || <em className="ci-cell--empty">-</em>}</td>
-                      <td>{r.row.contactName || <em className="ci-cell--empty">-</em>}</td>
-                      <td>{r.row.phone1 || <em className="ci-cell--empty">—</em>}</td>
-                      <td>{r.row.email1 || <em className="ci-cell--empty">—</em>}</td>
+                      <td>
+                        {[r.row.contact1Name, r.row.contact1Phone, r.row.contact1Email].filter(Boolean).join(' · ')
+                          || <em className="ci-cell--empty">-</em>}
+                      </td>
+                      <td>
+                        {[r.row.contact2Name, r.row.contact2Phone, r.row.contact2Email].filter(Boolean).join(' · ')
+                          || <em className="ci-cell--empty">-</em>}
+                      </td>
                       <td>
                         {r.row.gpsLat || r.row.gpsLng
                           ? `${r.row.gpsLat || '?'} / ${r.row.gpsLng || '?'}`
                           : <em className="ci-cell--empty">-</em>
                         }
                       </td>
-                      <td>{r.row.internalManager || <em className="ci-cell--empty">-</em>}</td>
+                      <td>
+                        {[r.row.managerName, r.row.managerPhone, r.row.managerEmail].filter(Boolean).join(' · ')
+                          || <em className="ci-cell--empty">-</em>}
+                      </td>
                       <td>
                         {r.valid
                           ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /></span>

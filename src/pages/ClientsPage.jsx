@@ -444,8 +444,8 @@ export default function ClientsPage() {
                   </td>
                   <td><span className="type-badge">{typeMap[c.type] || c.type}</span></td>
                   <td className="cell-muted">{c.address?.governorate || '—'}</td>
-                  <td className="cell-muted">{c.contact?.name  || '—'}</td>
-                  <td className="cell-muted">{c.contact?.phones?.[0] || '—'}</td>
+                  <td className="cell-muted">{c.contacts?.[0]?.name  || '—'}</td>
+                  <td className="cell-muted">{c.contacts?.[0]?.phone || '—'}</td>
                   <td>
                     <div className="row-actions">
                       {isArchived ? (

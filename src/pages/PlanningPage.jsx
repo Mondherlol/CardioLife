@@ -319,7 +319,7 @@ function AssignedToInput({ selected, onChange, users }) {
 
 /* ── Appointment modal ──────────────────────────────────────── */
 
-function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users = [] }) {
+export function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users = [], presetClient = null }) {
   const isEdit = mode === 'edit'
   const raw    = appt || {}
 
@@ -349,8 +349,8 @@ function AppointmentModal({ mode, slot, appt, onClose, onSaved, onDeleted, users
     date:        initDate,
     time:        initTime,
     duration:    initDuration,
-    clientId:    isEdit ? (raw.client?._id || raw.client || null) : null,
-    clientName:  isEdit ? (raw.clientName  || raw.client?.name || '') : '',
+    clientId:    isEdit ? (raw.client?._id || raw.client || null) : (presetClient?.id || null),
+    clientName:  isEdit ? (raw.clientName  || raw.client?.name || '') : (presetClient?.name || ''),
     assignedTo:  isEdit
       ? (raw.assignedTo || []).map(id => {
           const sid = typeof id === 'string' ? id : id?._id || String(id)

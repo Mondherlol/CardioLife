@@ -31,6 +31,7 @@ async function main() {
       canManageInterventions: true,
       canManageUsers:         true,
       canViewReports:         true,
+      canManageFormations:    true,
     },
   })
 

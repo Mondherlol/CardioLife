@@ -25,6 +25,7 @@ router.put('/:id/rename',       ctrl.rename)
 router.put('/:id/move',         ctrl.move)
 router.post('/:id/copy',        ctrl.copyItem)
 router.put('/:id/permissions',  ctrl.updatePermissions)
+router.post('/:id/assign-client', ctrl.assignToClient)
 router.delete('/:id',           ctrl.deleteItem)
 
 module.exports = router

@@ -8,17 +8,17 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
+    const token = sessionStorage.getItem('token')
     if (!token) { setLoading(false); return }
 
     me()
       .then(data => setUser(data.user))
-      .catch(() => localStorage.removeItem('token'))
+      .catch(() => sessionStorage.removeItem('token'))
       .finally(() => setLoading(false))
   }, [])
 
   function storeLogin(token, userData) {
-    localStorage.setItem('token', token)
+    sessionStorage.setItem('token', token)
     setUser(userData)
   }
 
@@ -27,7 +27,7 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
-    localStorage.removeItem('token')
+    sessionStorage.removeItem('token')
     setUser(null)
   }
 

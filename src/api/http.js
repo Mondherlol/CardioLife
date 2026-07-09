@@ -8,7 +8,7 @@ const BASE = import.meta.env.VITE_API_URL || DEFAULT_BASE
 export const STATIC_BASE = BASE.replace(/\/api\/?$/, '')
 
 async function request(path, options = {}) {
-  const token = localStorage.getItem('token')
+  const token = sessionStorage.getItem('token')
   const headers = { 'Content-Type': 'application/json', ...options.headers }
   if (token) headers.Authorization = `Bearer ${token}`
 
@@ -32,7 +32,7 @@ export const del   = (path)        => request(path, { method: 'DELETE' })
 
 // Multipart upload (no Content-Type header — browser sets it with boundary)
 export async function upload(path, formData) {
-  const token = localStorage.getItem('token')
+  const token = sessionStorage.getItem('token')
   const headers = {}
   if (token) headers.Authorization = `Bearer ${token}`
 

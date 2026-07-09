@@ -12,10 +12,11 @@ export const renameDoc     = (id, name)            => put(`/documents/${id}/rena
 export const moveDoc       = (id, targetParent)    => put(`/documents/${id}/move`, { targetParent })
 export const copyDoc       = (id, targetParent)    => post(`/documents/${id}/copy`, { targetParent })
 export const updatePerms   = (id, perms)           => put(`/documents/${id}/permissions`, perms)
+export const assignToClient = (id, clientId)       => post(`/documents/${id}/assign-client`, { clientId })
 export const deleteDoc     = (id)                  => del(`/documents/${id}`)
 
 export async function downloadDoc(id, filename) {
-  const token = localStorage.getItem('token')
+  const token = sessionStorage.getItem('token')
   const res   = await fetch(`${API_BASE}/documents/${id}/download`, {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -40,7 +41,7 @@ export function uploadWithProgress(file, parentId, { onProgress, onSuccess, onEr
   if (parentId) form.append('parent', parentId)
 
   const xhr   = new XMLHttpRequest()
-  const token = localStorage.getItem('token')
+  const token = sessionStorage.getItem('token')
 
   xhr.open('POST', `${API_BASE}/documents/upload`)
   if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)

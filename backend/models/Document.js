@@ -17,6 +17,7 @@ const documentSchema = new mongoose.Schema({
   permissions: { type: permSchema, default: () => ({}) },
   createdBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   isDeleted:   { type: Boolean, default: false },
+  isSystem:    { type: Boolean, default: false },
 }, { timestamps: true })
 
 documentSchema.index({ parent: 1, isDeleted: 1 })

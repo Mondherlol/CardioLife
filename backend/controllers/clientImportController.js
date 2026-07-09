@@ -34,25 +34,34 @@ const COL_MAP = {
   'longitude':        'gpsLng',
   'lng':              'gpsLng',
   'lon':              'gpsLng',
-  'contact nom':      'contactName',
-  'contact name':     'contactName',
-  'contact':          'contactName',
-  'telephone':        'phone1',
-  'téléphone':        'phone1',
-  'phone':            'phone1',
-  'phone 1':          'phone1',
-  'téléphone 1':      'phone1',
-  'telephone 1':      'phone1',
-  'phone 2':          'phone2',
-  'téléphone 2':      'phone2',
-  'telephone 2':      'phone2',
-  'email':            'email1',
-  'email 1':          'email1',
-  'e-mail':           'email1',
-  'email 2':          'email2',
-  'responsable':      'internalManager',
-  'responsable interne': 'internalManager',
-  'internal manager': 'internalManager',
+  // Contacts (nouveaux en-têtes)
+  'contact 1 nom':       'contact1Name',
+  'contact 1 telephone': 'contact1Phone',
+  'contact 1 email':     'contact1Email',
+  'contact 2 nom':       'contact2Name',
+  'contact 2 telephone': 'contact2Phone',
+  'contact 2 email':     'contact2Email',
+  // Responsable interne (nouveaux en-têtes)
+  'responsable nom':       'managerName',
+  'responsable telephone': 'managerPhone',
+  'responsable email':     'managerEmail',
+  // Anciens en-têtes (compatibilité) — mappés sur le contact 1 / contact 2
+  'contact nom':      'contact1Name',
+  'contact name':     'contact1Name',
+  'contact':          'contact1Name',
+  'telephone':        'contact1Phone',
+  'phone':            'contact1Phone',
+  'phone 1':          'contact1Phone',
+  'telephone 1':      'contact1Phone',
+  'phone 2':          'contact2Phone',
+  'telephone 2':      'contact2Phone',
+  'email':            'contact1Email',
+  'email 1':          'contact1Email',
+  'e-mail':           'contact1Email',
+  'email 2':          'contact2Email',
+  'responsable':      'managerName',
+  'responsable interne': 'managerName',
+  'internal manager': 'managerName',
   'notes':            'notes',
   'remarques':        'notes',
 }
@@ -129,8 +138,9 @@ function parseSheet(workbook) {
 function normalizeRow(row, typeMap) {
   const out = { ...row }
   if (out.type) out.type = typeMap.get(normalizeText(out.type)) || slugify(out.type)
-  if (out.email1) out.email1 = out.email1.toLowerCase()
-  if (out.email2) out.email2 = out.email2.toLowerCase()
+  for (const k of ['contact1Email', 'contact2Email', 'managerEmail']) {
+    if (out[k]) out[k] = out[k].toLowerCase()
+  }
   return out
 }
 
@@ -140,17 +150,29 @@ function validateRow(row, idx, typeMap) {
 
   if (!normalized.name) errors.push('Nom obligatoire')
   if (!normalized.type) errors.push('Type obligatoire')
-  if (normalized.email1 && !EMAIL_RE.test(normalized.email1)) errors.push(`Email invalide : ${normalized.email1}`)
-  if (normalized.email2 && !EMAIL_RE.test(normalized.email2)) errors.push(`Email 2 invalide : ${normalized.email2}`)
+  if (normalized.contact1Email && !EMAIL_RE.test(normalized.contact1Email)) errors.push(`Email contact 1 invalide : ${normalized.contact1Email}`)
+  if (normalized.contact2Email && !EMAIL_RE.test(normalized.contact2Email)) errors.push(`Email contact 2 invalide : ${normalized.contact2Email}`)
+  if (normalized.managerEmail && !EMAIL_RE.test(normalized.managerEmail)) errors.push(`Email responsable invalide : ${normalized.managerEmail}`)
   if (normalized.gpsLat && Number.isNaN(Number(normalized.gpsLat))) errors.push(`Latitude invalide : ${normalized.gpsLat}`)
   if (normalized.gpsLng && Number.isNaN(Number(normalized.gpsLng))) errors.push(`Longitude invalide : ${normalized.gpsLng}`)
 
   return { row: normalized, rowNum: idx + 2, errors, valid: errors.length === 0 }
 }
 
+function buildPerson(name, phone, email) {
+  if (!name && !phone && !email) return null
+  return { name: name || '', phone: phone || '', email: email || '' }
+}
+
 function buildClientDoc(row, userId) {
-  const phones = [row.phone1, row.phone2].filter(Boolean)
-  const emails = [row.email1, row.email2].filter(Boolean)
+  const contacts = [
+    buildPerson(row.contact1Name, row.contact1Phone, row.contact1Email),
+    buildPerson(row.contact2Name, row.contact2Phone, row.contact2Email),
+  ].filter(Boolean)
+  const internalManagers = [
+    buildPerson(row.managerName, row.managerPhone, row.managerEmail),
+  ].filter(Boolean)
+
   return {
     name:  row.name,
     type:  row.type,
@@ -163,14 +185,10 @@ function buildClientDoc(row, userId) {
         lng: row.gpsLng ? Number(row.gpsLng) : undefined,
       },
     },
-    contact: {
-      name:   row.contactName || undefined,
-      phones,
-      emails,
-    },
-    internalManager: row.internalManager || undefined,
-    notes:           row.notes           || undefined,
-    createdBy:       userId,
+    contacts,
+    internalManagers,
+    notes:     row.notes || undefined,
+    createdBy: userId,
   }
 }
 

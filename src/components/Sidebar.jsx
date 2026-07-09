@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Users, Zap, Package, Boxes, FileText,
-  Wrench, Calendar, File, Map, Mail,
+  Wrench, Calendar, File, Map, Mail, GraduationCap,
   Settings, UserCircle, Heart, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useSidebar } from '../context/SidebarContext'
@@ -19,6 +19,7 @@ const ALL_NAV = [
   { icon: Wrench,          label: 'Contrôles',         to: '/interventions',  roles: null }, // all roles
   { icon: Calendar,        label: 'Planning',          to: '/planning',       roles: null }, // all roles
   { icon: File,            label: 'Documents',         to: '/documents',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
+  { icon: GraduationCap,   label: 'Formations',        to: '/formations',     roles: null, anyPermission: ['canManageFormations', 'canManageClients'] },
   // Désactivés pour l'instant : { icon: Map, label: 'Carte Tunisie', to: '/carte', roles: [...] }
   // Désactivés pour l'instant : { icon: Mail, label: 'Emails & Relances', to: '/emails', roles: [...] }
 ]
@@ -37,8 +38,12 @@ const ROLE_LABELS = {
   readonly:   'Lecture seule',
 }
 
-function filterByRole(items, role) {
-  return items.filter(item => !item.roles || item.roles.includes(role))
+function filterByRole(items, role, user) {
+  return items.filter(item => {
+    if (item.roles && !item.roles.includes(role)) return false
+    if (item.anyPermission && role !== 'superadmin' && !item.anyPermission.some(p => user?.permissions?.[p])) return false
+    return true
+  })
 }
 
 export default function Sidebar() {
@@ -56,8 +61,8 @@ export default function Sidebar() {
       .catch(() => {})
   }, [user, role])
 
-  const navItems    = filterByRole(ALL_NAV,    role)
-  const bottomItems = filterByRole(ALL_BOTTOM, role)
+  const navItems    = filterByRole(ALL_NAV,    role, user)
+  const bottomItems = filterByRole(ALL_BOTTOM, role, user)
 
   const cls = [
     'sidebar',

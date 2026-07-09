@@ -178,7 +178,7 @@ export default function FormationsClientTab({ clientId, clientName }) {
 }
 
 /* ─── Detail modal ──────────────────────────────────────────── */
-function FormationDetailModal({ formation: f, onClose, onUpdated }) {
+export function FormationDetailModal({ formation: f, onClose, onUpdated }) {
   const [tab,        setTab]        = useState('details')
   const [uploading,  setUploading]  = useState(false)
   const fileRef = useRef()
@@ -365,7 +365,7 @@ function FormationDetailModal({ formation: f, onClose, onUpdated }) {
 }
 
 /* ─── Create modal ──────────────────────────────────────────── */
-function CreateFormationModal({ clientId, clientName, onClose, onCreated }) {
+export function CreateFormationModal({ clientId, clientName, onClose, onCreated }) {
   const [title,       setTitle]       = useState('')
   const [date,        setDate]        = useState('')
   const [description, setDescription] = useState('')

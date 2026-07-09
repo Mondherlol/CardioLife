@@ -2,7 +2,7 @@ const Appointment = require('../models/Appointment')
 
 async function getAll(req, res) {
   try {
-    const { start, end, type, status } = req.query
+    const { start, end, type, status, client } = req.query
     const filter = {}
     if (start || end) {
       filter.start = {}
@@ -11,6 +11,7 @@ async function getAll(req, res) {
     }
     if (type)   filter.type   = type
     if (status) filter.status = status
+    if (client) filter.client = client
 
     const appointments = await Appointment.find(filter)
       .populate('client', 'name')

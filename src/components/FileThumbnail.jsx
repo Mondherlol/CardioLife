@@ -28,7 +28,7 @@ function useBlobUrl(id, enabled) {
     if (!enabled) return
     let cancelled = false
 
-    const token = localStorage.getItem('token')
+    const token = sessionStorage.getItem('token')
     fetch(`${API_BASE}/documents/${id}/download`, {
       headers: { Authorization: `Bearer ${token}` },
     })

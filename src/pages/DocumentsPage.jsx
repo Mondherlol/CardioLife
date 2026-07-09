@@ -6,14 +6,15 @@ import {
   Folder, FolderOpen, File, FileText, Image, Film, Music, Archive, Code,
   Plus, Upload, Download, Trash2, Pencil, Copy, Scissors, ClipboardPaste,
   ChevronRight, Home, Search, X, AlertTriangle, Shield, Users,
-  HardDrive, RotateCcw, MoreVertical, Check, Lock, FolderPlus,
+  HardDrive, RotateCcw, MoreVertical, Check, Lock, FolderPlus, UserPlus, Building2,
 } from 'lucide-react'
 import {
   getContents, getFolderTree, getDocStats, createFolder,
   renameDoc, moveDoc, copyDoc, updatePerms, deleteDoc,
-  downloadDoc, uploadWithProgress,
+  downloadDoc, uploadWithProgress, assignToClient,
 } from '../api/documents'
 import { getUsers } from '../api/users'
+import { lookupClients } from '../api/clients'
 import { useAuth } from '../context/AuthContext'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 
@@ -336,6 +337,84 @@ function DeleteConfirmModal({ item, onClose, onConfirm }) {
   )
 }
 
+/* ── Assign to client modal ───────────────────────────────────── */
+
+function AssignClientModal({ item, onClose, onAssigned }) {
+  const [q,         setQ]         = useState('')
+  const [results,   setResults]   = useState([])
+  const [loading,   setLoading]   = useState(false)
+  const [assigning, setAssigning] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    const timer = setTimeout(() => {
+      lookupClients({ q, limit: 20 })
+        .then(setResults)
+        .catch(() => setResults([]))
+        .finally(() => setLoading(false))
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [q])
+
+  async function handleSelect(client) {
+    setAssigning(true)
+    try {
+      await assignToClient(item._id, client._id)
+      onAssigned(client)
+    } catch (err) {
+      toast.error(err.message || "Erreur lors de l'assignation.")
+      setAssigning(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--sm">
+        <div className="modal-header">
+          <h2 className="modal-title"><UserPlus size={16} /> Assigner « {item.name} » à un client</h2>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <input
+              autoFocus
+              className="form-input form-input--plain"
+              placeholder="Rechercher un client…"
+              value={q}
+              onChange={e => setQ(e.target.value)}
+            />
+          </div>
+          {loading ? (
+            <div className="table-loading"><span className="spinner" /></div>
+          ) : results.length === 0 ? (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Aucun client trouvé.</p>
+          ) : (
+            <div className="perm-users-list">
+              {results.map(c => (
+                <button
+                  key={c._id}
+                  type="button"
+                  className="perm-user-row"
+                  style={{ width: '100%', cursor: assigning ? 'default' : 'pointer', background: 'none', border: 'none' }}
+                  disabled={assigning}
+                  onClick={() => handleSelect(c)}
+                >
+                  <Building2 size={14} />
+                  <span className="perm-user-name">{c.name}</span>
+                  {c.address?.city && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.address.city}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn--ghost" onClick={onClose} disabled={assigning}>Annuler</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── Upload progress panel ───────────────────────────────────── */
 
 function UploadPanel({ uploads, onCancel, onClear }) {
@@ -421,19 +500,30 @@ function ContextMenu({ menu, onAction, onClose, isAdmin }) {
               <ClipboardPaste size={14} /> Coller ici
             </button>
           )}
-          <div className="docs-ctx-sep" />
-          <button className="docs-ctx-item" onClick={() => onAction('rename')}>
-            <Pencil size={14} /> Renommer
-          </button>
+          {!item.isSystem && (
+            <>
+              <div className="docs-ctx-sep" />
+              <button className="docs-ctx-item" onClick={() => onAction('rename')}>
+                <Pencil size={14} /> Renommer
+              </button>
+              <button className="docs-ctx-item" onClick={() => onAction('assignClient')}>
+                <UserPlus size={14} /> Assigner à un client
+              </button>
+            </>
+          )}
           {item.type === 'folder' && isAdmin && (
             <button className="docs-ctx-item" onClick={() => onAction('permissions')}>
               <Shield size={14} /> Permissions
             </button>
           )}
-          <div className="docs-ctx-sep" />
-          <button className="docs-ctx-item docs-ctx-item--danger" onClick={() => onAction('delete')}>
-            <Trash2 size={14} /> Supprimer
-          </button>
+          {!item.isSystem && (
+            <>
+              <div className="docs-ctx-sep" />
+              <button className="docs-ctx-item docs-ctx-item--danger" onClick={() => onAction('delete')}>
+                <Trash2 size={14} /> Supprimer
+              </button>
+            </>
+          )}
         </>
       ) : (
         <>
@@ -477,6 +567,7 @@ export default function DocumentsPage() {
   const [permItem,      setPermItem]      = useState(null)
   const [deleteTarget,  setDeleteTarget]  = useState(null)
   const [previewItem,   setPreviewItem]   = useState(null)
+  const [assignTarget,  setAssignTarget]  = useState(null)
 
   const fileInputRef = useRef(null)
 
@@ -687,6 +778,7 @@ export default function DocumentsPage() {
       case 'copy':        handleCopy(item); break
       case 'paste':       handlePaste(item?.type === 'folder' ? item._id : null); break
       case 'rename':      setRenaming(item); break
+      case 'assignClient': setAssignTarget(item); break
       case 'permissions': setPermItem(item); break
       case 'delete':      setDeleteTarget(item); break
       case 'newFolder':   setNewFolderOpen(true); break
@@ -960,6 +1052,17 @@ export default function DocumentsPage() {
           item={previewItem}
           siblings={previewableSiblings}
           onClose={() => setPreviewItem(null)}
+        />
+      )}
+      {assignTarget && (
+        <AssignClientModal
+          item={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={client => {
+            setAssignTarget(null)
+            toast.success(`${assignTarget.name} assigné à ${client.name}.`)
+            refreshAll()
+          }}
         />
       )}
     </div>

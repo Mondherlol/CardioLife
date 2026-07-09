@@ -1,5 +1,7 @@
 const { validationResult } = require('express-validator')
-const Client = require('../models/Client')
+const Client   = require('../models/Client')
+const Document = require('../models/Document')
+const { getOrCreateClientFolder } = require('../utils/clientDocsFolder')
 
 async function getAll(req, res) {
   const { governorate, type, search, q, page = 1, limit = 20, archived = 'false', sort = 'createdAt', dir = 'desc' } = req.query
@@ -19,8 +21,8 @@ async function getAll(req, res) {
     name:        'name',
     type:        'type',
     governorate: 'address.governorate',
-    contactName: 'contact.name',
-    phone:       'contact.phones.0',
+    contactName: 'contacts.0.name',
+    phone:       'contacts.0.phone',
     createdAt:   'createdAt',
   }
   const sortKey = sortFields[sort] || sortFields.createdAt
@@ -40,24 +42,29 @@ async function getAll(req, res) {
   })
 }
 
+async function lookup(req, res) {
+  const { q, limit = 20 } = req.query
+  const filter = { isActive: true }
+  if (q) filter.name = { $regex: q, $options: 'i' }
+  const clients = await Client.find(filter)
+    .select('name type address.city')
+    .limit(Number(limit))
+    .sort({ name: 1 })
+  res.json(clients)
+}
+
 async function getById(req, res) {
   const client = await Client.findById(req.params.id)
     .populate('createdBy', 'username fullName')
-    .populate('linkedDocuments', 'name mimeType size type storageKey createdAt')
   if (!client) return res.status(404).json({ message: 'Client introuvable.' })
   res.json(client)
 }
 
-async function updateDocuments(req, res) {
-  const { ids } = req.body
-  if (!Array.isArray(ids)) return res.status(422).json({ message: 'ids requis.' })
-  const client = await Client.findByIdAndUpdate(
-    req.params.id,
-    { $set: { linkedDocuments: ids } },
-    { new: true }
-  ).populate('linkedDocuments', 'name mimeType size type storageKey createdAt')
+async function getDocumentsFolder(req, res) {
+  const client = await Client.findById(req.params.id)
   if (!client) return res.status(404).json({ message: 'Client introuvable.' })
-  res.json(client)
+  const folder = await getOrCreateClientFolder(client, req.user._id)
+  res.json({ folderId: folder._id })
 }
 
 async function create(req, res) {
@@ -72,12 +79,19 @@ async function update(req, res) {
   const errors = validationResult(req)
   if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() })
 
+  const before = await Client.findById(req.params.id).select('name documentsFolder')
+  if (!before) return res.status(404).json({ message: 'Client introuvable.' })
+
   const client = await Client.findByIdAndUpdate(
     req.params.id,
     { $set: req.body },
     { new: true, runValidators: true }
   )
-  if (!client) return res.status(404).json({ message: 'Client introuvable.' })
+
+  if (client.documentsFolder && req.body.name && req.body.name !== before.name) {
+    await Document.findByIdAndUpdate(client.documentsFolder, { name: client.name })
+  }
+
   res.json(client)
 }
 
@@ -107,4 +121,4 @@ async function permanentDelete(req, res) {
   res.json({ message: 'Client supprimé définitivement.' })
 }
 
-module.exports = { getAll, getById, create, update, archive, restore, permanentDelete, updateDocuments }
+module.exports = { getAll, getById, create, update, archive, restore, permanentDelete, getDocumentsFolder, lookup }

@@ -1,9 +1,14 @@
 const router = require('express').Router()
 const ctrl   = require('../controllers/formationsController')
 const { protect } = require('../middleware/auth')
+const { requireAnyPermission } = require('../middleware/permissions')
 
 router.use(protect)
+// Accessible avec le droit dédié "Formations" OU l'ancien droit "Clients"
+// (pour ne pas retirer l'accès aux utilisateurs qui l'utilisaient déjà via la fiche client).
+router.use(requireAnyPermission(['canManageFormations', 'canManageClients']))
 
+router.get('/',                          ctrl.getAll)
 router.get('/client/:clientId',          ctrl.getByClient)
 router.post('/',                         ctrl.create)
 router.put('/:id',                       ctrl.update)

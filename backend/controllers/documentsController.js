@@ -6,6 +6,8 @@ const multer = require('multer')
 
 const Document    = require('../models/Document')
 const AppSettings = require('../models/AppSettings')
+const Client      = require('../models/Client')
+const { getOrCreateClientFolder } = require('../utils/clientDocsFolder')
 
 const UPLOAD_DIR = path.join(__dirname, '../uploads/documents')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
@@ -176,6 +178,7 @@ async function rename(req, res) {
 
   const doc = await Document.findById(req.params.id)
   if (!doc || doc.isDeleted) return res.status(404).json({ message: 'Document introuvable.' })
+  if (doc.isSystem) return res.status(403).json({ message: 'Ce dossier est géré automatiquement.' })
   if (!(await canAccess(req.user, doc.toObject()))) return res.status(403).json({ message: 'Accès refusé.' })
 
   doc.name = name.trim()
@@ -187,6 +190,7 @@ async function move(req, res) {
   const { targetParent } = req.body
   const doc = await Document.findById(req.params.id)
   if (!doc || doc.isDeleted) return res.status(404).json({ message: 'Document introuvable.' })
+  if (doc.isSystem) return res.status(403).json({ message: 'Ce dossier est géré automatiquement.' })
   if (!(await canAccess(req.user, doc.toObject()))) return res.status(403).json({ message: 'Accès refusé.' })
 
   if (doc.type === 'folder' && targetParent) {
@@ -260,10 +264,41 @@ async function updatePermissions(req, res) {
 async function deleteItem(req, res) {
   const doc = await Document.findById(req.params.id)
   if (!doc || doc.isDeleted) return res.status(404).json({ message: 'Document introuvable.' })
+  if (doc.isSystem) return res.status(403).json({ message: 'Ce dossier est géré automatiquement.' })
   if (!(await canAccess(req.user, doc.toObject()))) return res.status(403).json({ message: 'Accès refusé.' })
 
   await softDelete(doc)
   res.json({ message: 'Supprimé.' })
+}
+
+async function assignToClient(req, res) {
+  const { clientId } = req.body
+  if (!clientId) return res.status(422).json({ message: 'clientId requis.' })
+
+  const doc = await Document.findById(req.params.id)
+  if (!doc || doc.isDeleted) return res.status(404).json({ message: 'Document introuvable.' })
+  if (doc.isSystem) return res.status(403).json({ message: 'Ce dossier est géré automatiquement.' })
+  if (!(await canAccess(req.user, doc.toObject()))) return res.status(403).json({ message: 'Accès refusé.' })
+
+  const client = await Client.findById(clientId)
+  if (!client) return res.status(404).json({ message: 'Client introuvable.' })
+
+  const folder = await getOrCreateClientFolder(client, req.user._id)
+
+  if (doc.type === 'folder') {
+    let checkId = folder._id
+    while (checkId) {
+      if (checkId.toString() === doc._id.toString()) {
+        return res.status(400).json({ message: 'Impossible de déplacer un dossier dans lui-même.' })
+      }
+      const p = await Document.findById(checkId).select('parent').lean()
+      checkId = p?.parent || null
+    }
+  }
+
+  doc.parent = folder._id
+  await doc.save()
+  res.json(doc)
 }
 
 async function softDelete(doc) {
@@ -280,4 +315,5 @@ module.exports = {
   getContents, getTree, getStats,
   createFolder, uploadFile, downloadFile,
   rename, move, copyItem, updatePermissions, deleteItem,
+  assignToClient,
 }

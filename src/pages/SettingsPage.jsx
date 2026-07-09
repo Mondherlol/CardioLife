@@ -40,6 +40,7 @@ const PERM_KEYS = [
   'canManageInterventions',
   'canManageUsers',
   'canViewReports',
+  'canManageFormations',
 ]
 
 const PERM_LABELS = {
@@ -50,6 +51,7 @@ const PERM_LABELS = {
   canManageInterventions: 'Gérer les interventions',
   canManageUsers:         'Gérer les utilisateurs',
   canViewReports:         'Voir les rapports',
+  canManageFormations:    'Gérer les formations',
 }
 
 const EMPTY_PERMS = Object.fromEntries(PERM_KEYS.map(k => [k, false]))

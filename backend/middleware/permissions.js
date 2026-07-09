@@ -25,4 +25,17 @@ function requirePermission(permission) {
   }
 }
 
-module.exports = { requireSuperAdmin, requireAdminOrSuperAdmin, requirePermission }
+function requireAnyPermission(permissions) {
+  return (req, res, next) => {
+    if (req.user.role === 'superadmin') return next()
+
+    if (!permissions.some(p => req.user.permissions?.[p])) {
+      return res.status(403).json({
+        message: `Permission manquante : ${permissions.join(' ou ')}`,
+      })
+    }
+    next()
+  }
+}
+
+module.exports = { requireSuperAdmin, requireAdminOrSuperAdmin, requirePermission, requireAnyPermission }

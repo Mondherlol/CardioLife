@@ -1,24 +1,22 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   ArrowLeft, Building2, MapPin, Phone, Mail, ChevronRight, Zap,
-  User, FileText, Home, Folder, FolderOpen, ChevronDown, Search,
-  Plus, X, Check, BookOpen, Wrench, Activity, Info,
-  File, Image, Film, Music, Archive, Code, Pencil, Link2, Unlink,
+  User, FileText, Activity, Info, Pencil, Calendar,
   GraduationCap, ClipboardList, Clock, CheckCircle2,
 } from 'lucide-react'
-import { getClient, updateClientDocs } from '../api/clients'
+import { getClient } from '../api/clients'
 import { getInstallations } from '../api/installations'
-import { getContents, getFolderTree } from '../api/documents'
 import { getInterventions } from '../api/interventions'
 
 /* Type de contrôle → libellé */
 const CD_CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat' }
-import { ImageThumbnail, PdfThumbnail } from '../components/FileThumbnail'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ClientModal from '../components/ClientModal'
 import FormationsClientTab from '../components/FormationsClientTab'
+import ClientDocumentsTab from '../components/ClientDocumentsTab'
+import PlanningClientTab from '../components/PlanningClientTab'
 
 /* ── Helpers ──────────────────────────────────────────────── */
 
@@ -56,13 +54,6 @@ function computeStatus(inst) {
 function initials(name) {
   if (!name) return '?'
   return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2)
-}
-
-function formatSize(bytes) {
-  if (!bytes) return '—'
-  if (bytes < 1024) return `${bytes} o`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`
-  return `${(bytes / 1024 / 1024).toFixed(1)} Mo`
 }
 
 /* ── Sub-components ───────────────────────────────────────── */
@@ -105,191 +96,6 @@ function ControlDate({ date }) {
           {days < 0 ? `${Math.abs(days)}j dépassé` : days === 0 ? "Aujourd'hui" : `dans ${days}j`}
         </span>
       )}
-    </div>
-  )
-}
-
-function FileIcon({ mimeType, size = 20 }) {
-  if (!mimeType) return <File size={size} className="doc-icon doc-icon--file" />
-  if (mimeType.startsWith('image/')) return <Image size={size} className="doc-icon doc-icon--image" />
-  if (mimeType.startsWith('video/')) return <Film size={size} className="doc-icon doc-icon--video" />
-  if (mimeType.startsWith('audio/')) return <Music size={size} className="doc-icon doc-icon--audio" />
-  if (mimeType === 'application/pdf') return <FileText size={size} className="doc-icon doc-icon--pdf" />
-  if (mimeType.includes('zip') || mimeType.includes('tar') || mimeType.includes('rar'))
-    return <Archive size={size} className="doc-icon doc-icon--archive" />
-  if (mimeType.includes('text') || mimeType.includes('javascript') || mimeType.includes('json'))
-    return <Code size={size} className="doc-icon doc-icon--code" />
-  return <File size={size} className="doc-icon doc-icon--file" />
-}
-
-/* ── Picker Tree Node ─────────────────────────────────────── */
-
-function PickerTreeNode({ node, allNodes, currentFolder, onSelect, depth = 0 }) {
-  const [open, setOpen] = useState(false)
-  const children = allNodes.filter(n => String(n.parent) === String(node._id))
-  const hasChildren = children.length > 0
-  const isActive = currentFolder === node._id
-
-  return (
-    <>
-      <button
-        className={`docs-tree-item${isActive ? ' docs-tree-item--active' : ''}`}
-        style={{ paddingLeft: 10 + depth * 16 }}
-        onClick={() => {
-          if (hasChildren) setOpen(o => !o)
-          onSelect(node._id)
-        }}
-      >
-        {hasChildren
-          ? <ChevronDown size={13} className={`docs-tree-chevron${open ? ' docs-tree-chevron--open' : ''}`} />
-          : <span style={{ width: 13, flexShrink: 0 }} />
-        }
-        {open
-          ? <FolderOpen size={15} className="docs-tree-icon" />
-          : <Folder size={15} className="docs-tree-icon" />
-        }
-        <span className="docs-tree-label">{node.name}</span>
-      </button>
-      {open && children.map(c => (
-        <PickerTreeNode key={c._id} node={c} allNodes={allNodes}
-          currentFolder={currentFolder} onSelect={onSelect} depth={depth + 1} />
-      ))}
-    </>
-  )
-}
-
-/* ── Document Picker Modal ────────────────────────────────── */
-
-function DocPickerModal({ alreadyLinked, onConfirm, onClose }) {
-  const [tree, setTree] = useState([])
-  const [folder, setFolder] = useState(null)
-  const [items, setItems] = useState([])
-  const [selected, setSelected] = useState(new Set(alreadyLinked.map(d => d._id)))
-  const [loadingTree, setLoadingTree] = useState(true)
-  const [loadingItems, setLoadingItems] = useState(false)
-
-  useEffect(() => {
-    getFolderTree().then(setTree).catch(() => {}).finally(() => setLoadingTree(false))
-  }, [])
-
-  useEffect(() => {
-    setLoadingItems(true)
-    getContents(folder).then(data => setItems(data)).catch(() => {}).finally(() => setLoadingItems(false))
-  }, [folder])
-
-  const rootItems = items.filter(i => !i.parent && folder === null || i.parent === folder || folder !== null)
-  const files = items.filter(i => i.type === 'file')
-  const folders = items.filter(i => i.type === 'folder')
-
-  function toggle(id) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  function handleConfirm() {
-    onConfirm([...selected])
-  }
-
-  const rootFolders = tree.filter(n => !n.parent)
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal picker-modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title-row">
-            <Link2 size={18} />
-            <span>Assigner des documents</span>
-          </div>
-          <button className="modal-close-btn" onClick={onClose}><X size={16} /></button>
-        </div>
-
-        <div className="picker-body">
-          {/* Sidebar tree */}
-          <div className="picker-sidebar">
-            <div className="docs-sidebar-header">Dossiers</div>
-            <div className="docs-tree" style={{ flex: 1 }}>
-              <button
-                className={`docs-tree-item docs-tree-item--root${folder === null ? ' docs-tree-item--active' : ''}`}
-                onClick={() => setFolder(null)}
-              >
-                <Home size={15} className="docs-tree-icon" />
-                <span className="docs-tree-label">Tous les fichiers</span>
-              </button>
-              {loadingTree
-                ? null
-                : rootFolders.map(n => (
-                  <PickerTreeNode key={n._id} node={n} allNodes={tree}
-                    currentFolder={folder} onSelect={setFolder} />
-                ))
-              }
-            </div>
-          </div>
-
-          {/* File grid */}
-          <div className="picker-content">
-            {loadingItems ? (
-              <div className="picker-loading"><span className="spinner" /></div>
-            ) : files.length === 0 && folders.length === 0 ? (
-              <div className="picker-empty">
-                <File size={32} color="var(--gray-300)" />
-                <p>Aucun fichier dans ce dossier</p>
-              </div>
-            ) : (
-              <div className="picker-grid">
-                {folders.map(f => (
-                  <button
-                    key={f._id}
-                    className="picker-folder-card"
-                    onClick={() => setFolder(f._id)}
-                  >
-                    <FolderOpen size={28} className="doc-icon doc-icon--folder" />
-                    <span className="picker-card-name">{f.name}</span>
-                  </button>
-                ))}
-                {files.map(item => {
-                  const checked = selected.has(item._id)
-                  return (
-                    <button
-                      key={item._id}
-                      className={`picker-file-card${checked ? ' picker-file-card--selected' : ''}`}
-                      onClick={() => toggle(item._id)}
-                    >
-                      <div className="picker-card-visual">
-                        {item.mimeType?.startsWith('image/') ? (
-                          <ImageThumbnail id={item._id} />
-                        ) : item.mimeType === 'application/pdf' ? (
-                          <PdfThumbnail id={item._id} />
-                        ) : (
-                          <FileIcon mimeType={item.mimeType} size={32} />
-                        )}
-                        {checked && (
-                          <div className="picker-check-overlay">
-                            <Check size={16} />
-                          </div>
-                        )}
-                      </div>
-                      <span className="picker-card-name">{item.name}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="modal-footer">
-          <span className="picker-count">
-            {selected.size} document{selected.size !== 1 ? 's' : ''} sélectionné{selected.size !== 1 ? 's' : ''}
-          </span>
-          <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
-          <button className="btn btn--primary" onClick={handleConfirm}>
-            <Check size={14} /> Confirmer
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -420,6 +226,7 @@ const TABS = [
   { id: 'installations',label: 'Installations',icon: MapPin },
   { id: 'appareils',    label: 'Appareils',    icon: Activity },
   { id: 'controles',    label: 'Contrôles',    icon: ClipboardList },
+  { id: 'planning',     label: 'Planning',     icon: Calendar },
   { id: 'formations',   label: 'Formations',   icon: GraduationCap },
 ]
 
@@ -432,8 +239,6 @@ export default function ClientDetailPage() {
   const [loading, setLoading]         = useState(true)
   const [activeTab, setActiveTab]     = useState('info')
   const [editOpen, setEditOpen]       = useState(false)
-  const [pickerOpen, setPickerOpen]   = useState(false)
-  const [savingDocs, setSavingDocs]   = useState(false)
 
   useLoadingBar(loading)
 
@@ -456,34 +261,6 @@ export default function ClientDetailPage() {
 
   useEffect(() => { load() }, [load])
 
-  async function handleConfirmDocs(ids) {
-    setSavingDocs(true)
-    try {
-      const updated = await updateClientDocs(id, ids)
-      setClient(updated)
-      setPickerOpen(false)
-      toast.success('Documents mis à jour.')
-    } catch (err) {
-      toast.error(err.message || 'Erreur lors de la mise à jour.')
-    } finally {
-      setSavingDocs(false)
-    }
-  }
-
-  async function handleUnlink(docId) {
-    const current = (client.linkedDocuments || []).map(d => d._id)
-    const next = current.filter(i => i !== docId)
-    setSavingDocs(true)
-    try {
-      const updated = await updateClientDocs(id, next)
-      setClient(updated)
-    } catch (err) {
-      toast.error(err.message || 'Erreur.')
-    } finally {
-      setSavingDocs(false)
-    }
-  }
-
   if (loading || !client) {
     return (
       <div className="page-content">
@@ -496,7 +273,6 @@ export default function ClientDetailPage() {
     .filter(Boolean).join(', ')
 
   const activeInst = installations.filter(i => computeStatus(i) === 'actif').length
-  const linkedDocs = client.linkedDocuments || []
 
   return (
     <div className="page-content cd-root">
@@ -521,11 +297,6 @@ export default function ClientDetailPage() {
             {activeInst > 0 && (
               <span className="cd-stat-chip cd-stat-chip--green">
                 <Activity size={12} /> {activeInst} actif{activeInst !== 1 ? 's' : ''}
-              </span>
-            )}
-            {linkedDocs.length > 0 && (
-              <span className="cd-stat-chip">
-                <FileText size={12} /> {linkedDocs.length} doc{linkedDocs.length !== 1 ? 's' : ''}
               </span>
             )}
             {!client.isActive && (
@@ -563,43 +334,32 @@ export default function ClientDetailPage() {
         {activeTab === 'info' && (
           <div className="cd-info-grid">
 
-            {/* Contact card */}
+            {/* Contacts card */}
             <div className="cd-card">
               <div className="cd-card-title">
-                <User size={15} /> Contact
+                <User size={15} /> Contacts {client.contacts?.length > 1 && `(${client.contacts.length})`}
               </div>
-              {client.contact?.name && (
-                <div className="cd-info-row">
-                  <span className="cd-info-label">Nom</span>
-                  <span className="cd-info-val">{client.contact.name}</span>
-                </div>
-              )}
-              {client.contact?.phones?.filter(Boolean).length > 0 && (
-                <div className="cd-info-row cd-info-row--list">
-                  <span className="cd-info-label">Téléphones</span>
-                  <div className="cd-contact-list">
-                    {client.contact.phones.filter(Boolean).map((ph, i) => (
-                      <a key={i} href={`tel:${ph}`} className="cd-contact-chip cd-contact-chip--phone">
-                        <Phone size={12} /> {ph}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {client.contact?.emails?.filter(Boolean).length > 0 && (
-                <div className="cd-info-row cd-info-row--list">
-                  <span className="cd-info-label">Emails</span>
-                  <div className="cd-contact-list">
-                    {client.contact.emails.filter(Boolean).map((em, i) => (
-                      <a key={i} href={`mailto:${em}`} className="cd-contact-chip cd-contact-chip--mail">
-                        <Mail size={12} /> {em}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {!client.contact?.name && !client.contact?.phones?.filter(Boolean).length && !client.contact?.emails?.filter(Boolean).length && (
+              {(client.contacts || []).length === 0 ? (
                 <p className="cd-empty-hint">Aucune information de contact.</p>
+              ) : (
+                client.contacts.map((p, i) => (
+                  <div key={i} className="cd-person-row">
+                    <span className="cd-person-name">{p.name || <span className="text-muted">Sans nom</span>}</span>
+                    <div className="cd-contact-list">
+                      {p.phone && (
+                        <a href={`tel:${p.phone}`} className="cd-contact-chip cd-contact-chip--phone">
+                          <Phone size={12} /> {p.phone}
+                        </a>
+                      )}
+                      {p.email && (
+                        <a href={`mailto:${p.email}`} className="cd-contact-chip cd-contact-chip--mail">
+                          <Mail size={12} /> {p.email}
+                        </a>
+                      )}
+                      {!p.phone && !p.email && <span className="cd-empty-hint">Aucune coordonnée</span>}
+                    </div>
+                  </div>
+                ))
               )}
             </div>
 
@@ -647,15 +407,35 @@ export default function ClientDetailPage() {
               )}
             </div>
 
-            {/* Manager + Notes */}
+            {/* Responsables + Notes */}
             <div className="cd-card cd-card--wide">
               <div className="cd-card-title">
                 <Info size={15} /> Informations internes
               </div>
-              {client.internalManager && (
-                <div className="cd-info-row">
-                  <span className="cd-info-label">Responsable interne</span>
-                  <span className="cd-info-val">{client.internalManager}</span>
+              {(client.internalManagers || []).length > 0 && (
+                <div className="cd-info-row cd-info-row--list">
+                  <span className="cd-info-label">
+                    Responsable{client.internalManagers.length > 1 ? 's' : ''} interne{client.internalManagers.length > 1 ? 's' : ''}
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                    {client.internalManagers.map((p, i) => (
+                      <div key={i} className="cd-person-row cd-person-row--flat">
+                        <span className="cd-person-name">{p.name || <span className="text-muted">Sans nom</span>}</span>
+                        <div className="cd-contact-list">
+                          {p.phone && (
+                            <a href={`tel:${p.phone}`} className="cd-contact-chip cd-contact-chip--phone">
+                              <Phone size={12} /> {p.phone}
+                            </a>
+                          )}
+                          {p.email && (
+                            <a href={`mailto:${p.email}`} className="cd-contact-chip cd-contact-chip--mail">
+                              <Mail size={12} /> {p.email}
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {client.notes ? (
@@ -663,9 +443,9 @@ export default function ClientDetailPage() {
                   <span className="cd-info-label">Notes</span>
                   <p className="cd-notes-text">{client.notes}</p>
                 </div>
-              ) : (
+              ) : (client.internalManagers || []).length === 0 ? (
                 <p className="cd-empty-hint">Aucune note.</p>
-              )}
+              ) : null}
             </div>
 
           </div>
@@ -673,52 +453,7 @@ export default function ClientDetailPage() {
 
         {/* ── Documents ─────────────────────────── */}
         {activeTab === 'documents' && (
-          <div className="cd-docs-tab">
-            <div className="cd-tab-header">
-              <h3 className="cd-tab-title">Documents liés</h3>
-              <button className="btn btn--primary btn--sm" onClick={() => setPickerOpen(true)} disabled={savingDocs}>
-                <Link2 size={13} /> Assigner des documents
-              </button>
-            </div>
-
-            {linkedDocs.length === 0 ? (
-              <div className="cd-tab-empty">
-                <FileText size={40} color="var(--gray-300)" />
-                <p>Aucun document assigné à ce client.</p>
-                <button className="btn btn--ghost btn--sm" onClick={() => setPickerOpen(true)}>
-                  <Plus size={13} /> Assigner
-                </button>
-              </div>
-            ) : (
-              <div className="cd-docs-grid">
-                {linkedDocs.map(doc => (
-                  <div key={doc._id} className="cd-doc-card">
-                    <div className="cd-doc-visual">
-                      {doc.mimeType?.startsWith('image/') ? (
-                        <ImageThumbnail id={doc._id} />
-                      ) : doc.mimeType === 'application/pdf' ? (
-                        <PdfThumbnail id={doc._id} />
-                      ) : (
-                        <FileIcon mimeType={doc.mimeType} size={28} />
-                      )}
-                    </div>
-                    <div className="cd-doc-info">
-                      <span className="cd-doc-name" title={doc.name}>{doc.name}</span>
-                      <span className="cd-doc-meta">{formatSize(doc.size)}</span>
-                    </div>
-                    <button
-                      className="cd-doc-unlink"
-                      title="Retirer"
-                      onClick={() => handleUnlink(doc._id)}
-                      disabled={savingDocs}
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <ClientDocumentsTab clientId={id} />
         )}
 
         {/* ── Installations ─────────────────────── */}
@@ -868,6 +603,11 @@ export default function ClientDetailPage() {
           <ControlsClientTab clientId={id} installations={installations} />
         )}
 
+        {/* ── Planning ──────────────────────────── */}
+        {activeTab === 'planning' && (
+          <PlanningClientTab clientId={id} clientName={client?.name} />
+        )}
+
         {/* ── Formations ────────────────────────── */}
         {activeTab === 'formations' && (
           <FormationsClientTab clientId={id} clientName={client?.name} />
@@ -881,15 +621,6 @@ export default function ClientDetailPage() {
           client={client}
           onClose={() => setEditOpen(false)}
           onSaved={updated => { setClient(updated); setEditOpen(false) }}
-        />
-      )}
-
-      {/* ── Doc picker modal ──────────────────────── */}
-      {pickerOpen && (
-        <DocPickerModal
-          alreadyLinked={linkedDocs}
-          onConfirm={handleConfirmDocs}
-          onClose={() => setPickerOpen(false)}
         />
       )}
 

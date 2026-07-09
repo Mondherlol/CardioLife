@@ -3,7 +3,7 @@ import { get, post, put, del } from './http'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 async function authFetch(url, opts = {}) {
-  const token = localStorage.getItem('token')
+  const token = sessionStorage.getItem('token')
   const res = await fetch(url, {
     ...opts,
     headers: { Authorization: `Bearer ${token}`, ...opts.headers },
@@ -17,13 +17,17 @@ export const getClients       = (params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return get(`/clients${qs ? `?${qs}` : ''}`)
 }
+export const lookupClients    = (params = {}) => {
+  const qs = new URLSearchParams(params).toString()
+  return get(`/clients/lookup${qs ? `?${qs}` : ''}`)
+}
 export const getClient        = (id)       => get(`/clients/${id}`)
 export const createClient     = (data)     => post('/clients', data)
 export const updateClient     = (id, data) => put(`/clients/${id}`, data)
 export const archiveClient    = (id)       => del(`/clients/${id}`)
 export const restoreClient    = (id)       => put(`/clients/${id}/restore`)
 export const destroyClient    = (id)       => del(`/clients/${id}/permanent`)
-export const updateClientDocs = (id, ids)  => put(`/clients/${id}/documents`, { ids })
+export const getClientDocumentsFolder = (id) => get(`/clients/${id}/documents-folder`)
 
 export function validateImport(file) {
   const form  = new FormData()

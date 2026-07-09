@@ -11,11 +11,18 @@ const GOVERNORATES = [
   'Sousse','Tataouine','Tozeur','Tunis','Zaghouan',
 ]
 
+const EMPTY_PERSON = { name: '', phone: '', email: '' }
+
 const EMPTY_FORM = {
   name: '', type: '', notes: '',
   address: { street: '', city: '', governorate: '' },
-  contact:  { name: '', phones: [''], emails: [''] },
-  internalManager: '',
+  contacts: [{ ...EMPTY_PERSON }],
+  internalManagers: [],
+}
+
+function hydratePersons(list, fallback) {
+  if (!list?.length) return fallback
+  return list.map(p => ({ name: p.name || '', phone: p.phone || '', email: p.email || '' }))
 }
 
 function formatApiError(err) {
@@ -34,20 +41,17 @@ export default function ClientModal({ client, onClose, onSaved }) {
   const isEdit = !!client?._id
 
   const [form, setForm] = useState(isEdit ? {
-    name:            client.name,
-    type:            client.type,
-    notes:           client.notes || '',
-    address:         { ...EMPTY_FORM.address, ...client.address },
-    contact: {
-      name:   client.contact?.name   || '',
-      phones: client.contact?.phones?.length ? client.contact.phones : [''],
-      emails: client.contact?.emails?.length ? client.contact.emails : [''],
-    },
-    internalManager: client.internalManager || '',
+    name:             client.name,
+    type:             client.type,
+    notes:            client.notes || '',
+    address:          { ...EMPTY_FORM.address, ...client.address },
+    contacts:         hydratePersons(client.contacts, [{ ...EMPTY_PERSON }]),
+    internalManagers: hydratePersons(client.internalManagers, []),
   } : {
     ...EMPTY_FORM,
-    address: { ...EMPTY_FORM.address },
-    contact:  { ...EMPTY_FORM.contact },
+    address:  { ...EMPTY_FORM.address },
+    contacts: [{ ...EMPTY_PERSON }],
+    internalManagers: [],
   })
 
   const [types,   setTypes]   = useState([])
@@ -61,21 +65,17 @@ export default function ClientModal({ client, onClose, onSaved }) {
   function set(field, value)               { setForm(f => ({ ...f, [field]: value })) }
   function setNested(parent, field, value) { setForm(f => ({ ...f, [parent]: { ...f[parent], [field]: value } })) }
 
-  function setArrayItem(parent, field, idx, value) {
+  function setPerson(listKey, idx, field, value) {
     setForm(f => {
-      const arr = [...f[parent][field]]
-      arr[idx] = value
-      return { ...f, [parent]: { ...f[parent], [field]: arr } }
+      const list = f[listKey].map((p, i) => i === idx ? { ...p, [field]: value } : p)
+      return { ...f, [listKey]: list }
     })
   }
-  function addArrayItem(parent, field) {
-    setForm(f => ({ ...f, [parent]: { ...f[parent], [field]: [...f[parent][field], ''] } }))
+  function addPerson(listKey) {
+    setForm(f => ({ ...f, [listKey]: [...f[listKey], { ...EMPTY_PERSON }] }))
   }
-  function removeArrayItem(parent, field, idx) {
-    setForm(f => {
-      const arr = f[parent][field].filter((_, i) => i !== idx)
-      return { ...f, [parent]: { ...f[parent], [field]: arr.length ? arr : [''] } }
-    })
+  function removePerson(listKey, idx) {
+    setForm(f => ({ ...f, [listKey]: f[listKey].filter((_, i) => i !== idx) }))
   }
 
   async function handleSubmit(e) {
@@ -83,12 +83,17 @@ export default function ClientModal({ client, onClose, onSaved }) {
     setError('')
     setLoading(true)
     try {
+      const payload = {
+        ...form,
+        contacts:         form.contacts.filter(p => p.name || p.phone || p.email),
+        internalManagers: form.internalManagers.filter(p => p.name || p.phone || p.email),
+      }
       let result
       if (isEdit) {
-        result = await updateClient(client._id, form)
+        result = await updateClient(client._id, payload)
         toast.success('Client mis à jour.')
       } else {
-        result = await createClient(form)
+        result = await createClient(payload)
         toast.success('Client créé avec succès.')
       }
       onSaved(result)
@@ -146,68 +151,82 @@ export default function ClientModal({ client, onClose, onSaved }) {
             </select>
           </div>
 
-          <div className="form-section-title">Contact</div>
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Nom du contact</label>
-              <input className="form-input form-input--plain" value={form.contact.name}
-                onChange={e => setNested('contact', 'name', e.target.value)} placeholder="Prénom Nom" />
+          <div className="form-group">
+            <div className="form-label-row">
+              <div className="form-section-title" style={{ margin: 0 }}>Contacts</div>
+              <button type="button" className="add-field-btn" onClick={() => addPerson('contacts')}>
+                <Plus size={12} /> Ajouter un contact
+              </button>
             </div>
-            <div className="form-group">
-              <label className="form-label">Responsable interne</label>
-              <input className="form-input form-input--plain" value={form.internalManager}
-                onChange={e => set('internalManager', e.target.value)} placeholder="Nom du responsable" />
-            </div>
+            {form.contacts.length === 0 && (
+              <p className="cd-empty-hint" style={{ margin: '4px 0 0' }}>Aucun contact.</p>
+            )}
+            {form.contacts.map((p, i) => (
+              <div key={i} className="person-row">
+                <input
+                  className="form-input form-input--plain"
+                  value={p.name}
+                  onChange={e => setPerson('contacts', i, 'name', e.target.value)}
+                  placeholder="Prénom Nom"
+                />
+                <input
+                  className="form-input form-input--plain"
+                  value={p.phone}
+                  onChange={e => setPerson('contacts', i, 'phone', e.target.value)}
+                  placeholder="+216 xx xxx xxx"
+                />
+                <input
+                  className="form-input form-input--plain"
+                  type="email"
+                  value={p.email}
+                  onChange={e => setPerson('contacts', i, 'email', e.target.value)}
+                  placeholder="contact@entreprise.tn"
+                />
+                <button type="button" className="remove-field-btn" title="Retirer ce contact"
+                  onClick={() => removePerson('contacts', i)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <div className="form-label-row">
-                <label className="form-label">Téléphones</label>
-                <button type="button" className="add-field-btn" onClick={() => addArrayItem('contact', 'phones')}>
-                  <Plus size={12} /> Ajouter
+          <div className="form-group">
+            <div className="form-label-row">
+              <div className="form-section-title" style={{ margin: 0 }}>Responsables internes</div>
+              <button type="button" className="add-field-btn" onClick={() => addPerson('internalManagers')}>
+                <Plus size={12} /> Ajouter un responsable
+              </button>
+            </div>
+            {form.internalManagers.length === 0 && (
+              <p className="cd-empty-hint" style={{ margin: '4px 0 0' }}>Aucun responsable interne.</p>
+            )}
+            {form.internalManagers.map((p, i) => (
+              <div key={i} className="person-row">
+                <input
+                  className="form-input form-input--plain"
+                  value={p.name}
+                  onChange={e => setPerson('internalManagers', i, 'name', e.target.value)}
+                  placeholder="Prénom Nom"
+                />
+                <input
+                  className="form-input form-input--plain"
+                  value={p.phone}
+                  onChange={e => setPerson('internalManagers', i, 'phone', e.target.value)}
+                  placeholder="+216 xx xxx xxx"
+                />
+                <input
+                  className="form-input form-input--plain"
+                  type="email"
+                  value={p.email}
+                  onChange={e => setPerson('internalManagers', i, 'email', e.target.value)}
+                  placeholder="responsable@cardiolife.tn"
+                />
+                <button type="button" className="remove-field-btn" title="Retirer ce responsable"
+                  onClick={() => removePerson('internalManagers', i)}>
+                  <Trash2 size={13} />
                 </button>
               </div>
-              {form.contact.phones.map((ph, i) => (
-                <div key={i} className="array-field-row">
-                  <input
-                    className="form-input form-input--plain"
-                    value={ph}
-                    onChange={e => setArrayItem('contact', 'phones', i, e.target.value)}
-                    placeholder="+216 xx xxx xxx"
-                  />
-                  {form.contact.phones.length > 1 && (
-                    <button type="button" className="remove-field-btn" onClick={() => removeArrayItem('contact', 'phones', i)}>
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="form-group">
-              <div className="form-label-row">
-                <label className="form-label">Emails</label>
-                <button type="button" className="add-field-btn" onClick={() => addArrayItem('contact', 'emails')}>
-                  <Plus size={12} /> Ajouter
-                </button>
-              </div>
-              {form.contact.emails.map((em, i) => (
-                <div key={i} className="array-field-row">
-                  <input
-                    className="form-input form-input--plain"
-                    type="email"
-                    value={em}
-                    onChange={e => setArrayItem('contact', 'emails', i, e.target.value)}
-                    placeholder="contact@entreprise.tn"
-                  />
-                  {form.contact.emails.length > 1 && (
-                    <button type="button" className="remove-field-btn" onClick={() => removeArrayItem('contact', 'emails', i)}>
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
 
           <div className="form-group">

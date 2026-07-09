@@ -1,5 +1,11 @@
 const mongoose = require('mongoose')
 
+const personSchema = new mongoose.Schema({
+  name:  { type: String, trim: true },
+  phone: { type: String, trim: true },
+  email: { type: String, trim: true, lowercase: true },
+}, { _id: false })
+
 const clientSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -20,14 +26,10 @@ const clientSchema = new mongoose.Schema({
       lng: { type: Number },
     },
   },
-  contact: {
-    name:   { type: String, trim: true },
-    phones: [{ type: String, trim: true }],
-    emails: [{ type: String, trim: true, lowercase: true }],
-  },
-  internalManager: { type: String, trim: true },
-  notes:           { type: String, trim: true },
-  linkedDocuments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Document' }],
+  contacts:         [personSchema],
+  internalManagers: [personSchema],
+  notes:            { type: String, trim: true },
+  documentsFolder: { type: mongoose.Schema.Types.ObjectId, ref: 'Document', default: null },
   isActive:        { type: Boolean, default: true },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

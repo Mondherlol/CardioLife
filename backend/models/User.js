@@ -9,6 +9,7 @@ const permissionsSchema = new mongoose.Schema({
   canManageInterventions:{ type: Boolean, default: false },
   canManageUsers:        { type: Boolean, default: false },
   canViewReports:        { type: Boolean, default: false },
+  canManageFormations:   { type: Boolean, default: false },
 }, { _id: false })
 
 const userSchema = new mongoose.Schema({

@@ -19,6 +19,7 @@ import DevicesPage              from './pages/DevicesPage'
 import InstallationDetailPage   from './pages/InstallationDetailPage'
 import InstallationFormPage     from './pages/InstallationFormPage'
 import DocumentsPage            from './pages/DocumentsPage'
+import FormationsPage           from './pages/FormationsPage'
 import PlanningPage             from './pages/PlanningPage'
 import InterventionsPage        from './pages/InterventionsPage'
 import InterventionFichePage    from './pages/InterventionFichePage'
@@ -103,6 +104,7 @@ export default function App() {
                 <Route path="/profil"            element={<ProfilePage />} />
                 <Route path="/planning"  element={<PlanningPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
+                <Route path="/formations" element={<FormationsPage />} />
                 <Route path="/settings"  element={<SettingsPage />} />
               </Route>
             </Route>
