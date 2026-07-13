@@ -8,8 +8,9 @@ import {
   getAllFormations, deleteFormation, toggleAttestation,
 } from '../api/formations'
 import { lookupClients } from '../api/clients'
+import { getUsers } from '../api/users'
 import { useLoadingBar } from '../hooks/useLoadingBar'
-import { FormationDetailModal, CreateFormationModal } from '../components/FormationsClientTab'
+import EventModal from '../components/EventModal'
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -191,6 +192,7 @@ export default function FormationsPage() {
   const [creatingFor, setCreatingFor] = useState(null)  // { id, name }
   const [detailId,    setDetailId]    = useState(null)
   const [openClient,  setOpenClient]  = useState(null)  // clé du groupe client ouvert en modal
+  const [users,       setUsers]       = useState([])
 
   useLoadingBar(loading)
 
@@ -198,6 +200,10 @@ export default function FormationsPage() {
     getAllFormations()
       .then(data => { setFormations(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    getUsers().then(data => setUsers(Array.isArray(data) ? data : [])).catch(() => {})
   }, [])
 
   function update(updated) {
@@ -364,19 +370,28 @@ export default function FormationsPage() {
       )}
 
       {creatingFor && (
-        <CreateFormationModal
-          clientId={creatingFor.id}
-          clientName={creatingFor.name}
+        <EventModal
+          mode="create"
+          entityKind="formation"
+          lockType="formation"
+          presetClient={creatingFor.id ? { id: creatingFor.id, name: creatingFor.name } : null}
+          users={users}
           onClose={() => setCreatingFor(null)}
-          onCreated={handleCreated}
+          onSaved={handleCreated}
         />
       )}
 
       {detail && (
-        <FormationDetailModal
-          formation={detail}
+        <EventModal
+          mode="edit"
+          entity={detail}
+          entityKind="formation"
+          lockType="formation"
+          users={users}
           onClose={() => setDetailId(null)}
-          onUpdated={update}
+          onSaved={f => { update(f); setDetailId(null) }}
+          onChanged={update}
+          onDeleted={id => { setFormations(prev => prev.filter(f => f._id !== id)); setDetailId(null) }}
         />
       )}
     </div>

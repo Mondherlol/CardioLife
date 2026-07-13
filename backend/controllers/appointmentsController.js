@@ -9,7 +9,10 @@ async function getAll(req, res) {
       if (start) filter.start.$gte = new Date(start)
       if (end)   filter.start.$lte = new Date(end)
     }
+    // Les formations vivent désormais dans leur propre collection (Formation) ;
+    // on les exclut ici pour éviter les doublons dans le planning / les fiches client.
     if (type)   filter.type   = type
+    else        filter.type   = { $ne: 'formation' }
     if (status) filter.status = status
     if (client) filter.client = client
 

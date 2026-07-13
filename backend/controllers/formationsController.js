@@ -20,15 +20,34 @@ const POPULATE_OPTS = [
   { path: 'attestationDeliveredBy', select: 'fullName' },
   { path: 'documents.uploadedBy',   select: 'fullName' },
   { path: 'history.by',             select: 'fullName' },
+  { path: 'assignedTo',             select: 'fullName username' },
 ]
 
 function pushHistory(formation, action, userId, details) {
   formation.history.push({ action, by: userId, at: new Date(), details })
 }
 
+// Normalise le champ assignedTo reçu (FormData répété → tableau, unique → string).
+function parseAssignedTo(value) {
+  if (value == null) return undefined
+  const arr = Array.isArray(value) ? value : [value]
+  return arr.filter(Boolean)
+}
+
 async function getAll(req, res) {
   try {
-    const formations = await Formation.find()
+    const { from, to, client, status } = req.query
+    const filter = {}
+    // Plage de dates (utilisée par le planning pour ne charger que la fenêtre visible)
+    if (from || to) {
+      filter.date = {}
+      if (from) filter.date.$gte = new Date(from)
+      if (to)   filter.date.$lte = new Date(to)
+    }
+    if (client) filter.client = client
+    if (status) filter.status = status
+
+    const formations = await Formation.find(filter)
       .populate(POPULATE_OPTS)
       .sort({ date: -1 })
     res.json(formations)
@@ -51,9 +70,11 @@ async function create(req, res) {
     if (err) return res.status(400).json({ message: err.message || 'Erreur upload.' })
 
     try {
-      const { client, clientName, title, date, description } = req.body
+      const { client, clientName, title, date, end, status, description } = req.body
       if (!client || !title || !date)
         return res.status(422).json({ message: 'Client, titre et date requis.' })
+
+      const assignedTo = parseAssignedTo(req.body.assignedTo)
 
       const docs = (req.files || []).map(f => ({
         path:         `formations/${f.filename}`,
@@ -74,6 +95,9 @@ async function create(req, res) {
 
       const formation = await Formation.create({
         client, clientName, title, date, description,
+        end:    end || undefined,
+        status: status || 'planifie',
+        assignedTo,
         documents: docs,
         history,
         createdBy: req.user._id,
@@ -90,13 +114,26 @@ async function create(req, res) {
 
 async function update(req, res) {
   try {
-    const { title, date, description } = req.body
-    const formation = await Formation.findByIdAndUpdate(
-      req.params.id,
-      { title, date, description },
-      { new: true, runValidators: true }
-    ).populate(POPULATE_OPTS)
+    const formation = await Formation.findById(req.params.id)
     if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+
+    const { title, date, end, status, description, client, clientName } = req.body
+
+    if (title       !== undefined) formation.title       = title
+    if (date        !== undefined) formation.date        = date
+    if (end         !== undefined) formation.end         = end || undefined
+    if (status      !== undefined) formation.status      = status
+    if (description !== undefined) formation.description  = description
+    if (client      !== undefined) formation.client      = client
+    if (clientName  !== undefined) formation.clientName  = clientName
+    if (req.body.assignedTo !== undefined) {
+      formation.assignedTo = parseAssignedTo(req.body.assignedTo) || []
+    }
+
+    pushHistory(formation, 'Formation modifiée', req.user._id)
+
+    await formation.save()
+    await formation.populate(POPULATE_OPTS)
     res.json(formation)
   } catch (err) { res.status(500).json({ message: err.message }) }
 }

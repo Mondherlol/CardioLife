@@ -2,6 +2,10 @@ import { get, put, patch, del, upload } from './http'
 export { STATIC_BASE } from './http'
 
 export const getAllFormations       = ()                => get('/formations')
+export const getFormations          = (params = {})    => {
+  const qs = new URLSearchParams(params).toString()
+  return get(`/formations${qs ? `?${qs}` : ''}`)
+}
 export const getFormationsByClient  = (clientId)       => get(`/formations/client/${clientId}`)
 export const createFormation        = (formData)        => upload('/formations', formData)
 export const updateFormation        = (id, data)        => put(`/formations/${id}`, data)

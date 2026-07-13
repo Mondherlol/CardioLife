@@ -18,7 +18,10 @@ const formationSchema = new mongoose.Schema({
   client:                 { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   clientName:             { type: String, trim: true },
   title:                  { type: String, required: true, trim: true },
-  date:                   { type: Date, required: true },
+  date:                   { type: Date, required: true },   // début de la formation
+  end:                    { type: Date },                   // fin (date + durée) — pour le planning
+  status:                 { type: String, enum: ['planifie', 'en_cours', 'fait', 'annule'], default: 'planifie' },
+  assignedTo:             [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   description:            { type: String, trim: true },
   documents:              [documentSchema],
   attestationDelivered:   { type: Boolean, default: false },
@@ -29,5 +32,6 @@ const formationSchema = new mongoose.Schema({
 }, { timestamps: true })
 
 formationSchema.index({ client: 1, date: -1 })
+formationSchema.index({ date: 1 })
 
 module.exports = mongoose.model('Formation', formationSchema)

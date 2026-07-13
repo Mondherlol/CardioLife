@@ -11,12 +11,14 @@ import {
 import {
   getContents, getFolderTree, getDocStats, createFolder,
   renameDoc, moveDoc, copyDoc, updatePerms, deleteDoc,
-  downloadDoc, uploadWithProgress, assignToClient,
+  downloadDoc, assignToClient,
 } from '../api/documents'
 import { getUsers } from '../api/users'
 import { lookupClients } from '../api/clients'
 import { useAuth } from '../context/AuthContext'
 import { useLoadingBar } from '../hooks/useLoadingBar'
+import { useUploads } from '../hooks/useUploads'
+import UploadProgress from '../components/UploadProgress'
 
 /* ── Constants ───────────────────────────────────────────────── */
 
@@ -415,42 +417,6 @@ function AssignClientModal({ item, onClose, onAssigned }) {
   )
 }
 
-/* ── Upload progress panel ───────────────────────────────────── */
-
-function UploadPanel({ uploads, onCancel, onClear }) {
-  const done = uploads.filter(u => u.status !== 'uploading').length
-  const total = uploads.length
-
-  return (
-    <div className="docs-upload-panel">
-      <div className="docs-upload-panel-header">
-        <span>{done < total ? `Envoi en cours… (${done}/${total})` : `${total} fichier${total > 1 ? 's' : ''} envoyé${total > 1 ? 's' : ''}`}</span>
-        {done === total && (
-          <button className="docs-upload-panel-close" onClick={onClear}><X size={14} /></button>
-        )}
-      </div>
-      <div className="docs-upload-list">
-        {uploads.map(u => (
-          <div key={u.id} className="docs-upload-item">
-            <div className="docs-upload-item-info">
-              <span className="docs-upload-item-name">{u.name}</span>
-              <span className={`docs-upload-item-status docs-upload-item-status--${u.status}`}>
-                {u.status === 'uploading' ? `${u.progress}%` : u.status === 'done' ? '✓' : u.error || 'Erreur'}
-              </span>
-            </div>
-            <div className="docs-upload-bar">
-              <div
-                className={`docs-upload-bar-fill docs-upload-bar-fill--${u.status}`}
-                style={{ width: `${u.progress}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /* ── Context menu ────────────────────────────────────────────── */
 
 function ContextMenu({ menu, onAction, onClose, isAdmin }) {
@@ -560,7 +526,6 @@ export default function DocumentsPage() {
   const [dropOver,      setDropOver]      = useState(null)   // folder id being dragged over
 
   const [ctxMenu,       setCtxMenu]       = useState(null)   // { x, y, item, hasClipboard }
-  const [uploads,       setUploads]       = useState([])     // progress items
 
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [renaming,      setRenaming]      = useState(null)
@@ -598,6 +563,8 @@ export default function DocumentsPage() {
   }, [fetchItems])
 
   useEffect(() => { refreshAll() }, [refreshAll])
+
+  const { uploads, startFiles, startDrop, clear: clearUploads } = useUploads(refreshAll)
 
   useEffect(() => {
     if (isAdmin) getUsers().then(setAllUsers).catch(() => {})
@@ -671,8 +638,15 @@ export default function DocumentsPage() {
 
   async function handleDrop(e, targetFolderId) {
     e.preventDefault()
+    e.stopPropagation()
     setDropOver(null)
-    if (!dragging) return
+    if (!dragging) {
+      // Dépôt OS (fichiers/dossiers) directement sur un dossier cible
+      if (e.dataTransfer.items?.length || e.dataTransfer.files?.length) {
+        startDrop(e.dataTransfer, targetFolderId)
+      }
+      return
+    }
     if (dragging._id === targetFolderId) return
     if (dragging.type === 'folder' && dragging._id === targetFolderId) return
 
@@ -726,32 +700,9 @@ export default function DocumentsPage() {
 
   /* ── Upload ────────────────────────────────────────────────── */
 
-  function createUploadId() {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID()
-    }
-    return `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  }
-
   function handleFilesSelected(files) {
     try {
-      Array.from(files).forEach(file => {
-        const id = createUploadId()
-        setUploads(prev => [...prev, { id, name: file.name, progress: 0, status: 'uploading' }])
-
-        uploadWithProgress(file, currentFolder, {
-          onProgress: (pct) => setUploads(prev =>
-            prev.map(u => u.id === id ? { ...u, progress: pct } : u)),
-          onSuccess: () => {
-            setUploads(prev => prev.map(u => u.id === id ? { ...u, progress: 100, status: 'done' } : u))
-            refreshAll()
-          },
-          onError: (msg) => {
-            setUploads(prev => prev.map(u => u.id === id ? { ...u, status: 'error', error: msg } : u))
-            toast.error(`${file.name} : ${msg}`)
-          },
-        })
-      })
+      startFiles(files, currentFolder)
     } catch (err) {
       toast.error(err.message || "Impossible de démarrer l'envoi du fichier.")
     }
@@ -810,17 +761,17 @@ export default function DocumentsPage() {
 
   function handleMainDragOver(e) {
     e.preventDefault()
-    if (dragging) setDropOver('__main__')
+    // Surligne pour un drag interne OU un dépôt de fichiers/dossiers depuis l'OS
+    if (dragging || e.dataTransfer.types?.includes('Files')) setDropOver('__main__')
   }
 
   function handleMainDrop(e) {
     e.preventDefault()
     if (!dragging) {
-      // File drop from OS
-      const files = e.dataTransfer.files
-      if (files.length) handleFilesSelected(files)
+      // Dépôt de fichiers/dossiers depuis l'OS
+      startDrop(e.dataTransfer, currentFolder)
     } else {
-      // Moving item to current folder
+      // Déplacement d'un élément vers le dossier courant
       handleDrop(e, currentFolder)
     }
     setDropOver(null)
@@ -1017,13 +968,9 @@ export default function DocumentsPage() {
         />
       )}
 
-      {/* Upload panel */}
-      {uploads.length > 0 && (
-        <UploadPanel
-          uploads={uploads}
-          onClear={() => setUploads([])}
-        />
-      )}
+      {/* Upload progress */}
+      <UploadProgress uploads={uploads} onClear={clearUploads} />
+
 
       {/* Modals */}
       {newFolderOpen && (

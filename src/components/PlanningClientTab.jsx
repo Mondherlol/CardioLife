@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { Calendar, Plus, Clock, CheckCircle2, User } from 'lucide-react'
 import { getAppointments } from '../api/appointments'
 import { getUsers } from '../api/users'
-import { AppointmentModal, TYPE_OPTS, STATUS_OPTS } from '../pages/PlanningPage'
-
-const TYPE_MAP   = Object.fromEntries(TYPE_OPTS.map(t => [t.value, t]))
-const STATUS_MAP = Object.fromEntries(STATUS_OPTS.map(s => [s.value, s]))
+import EventModal from './EventModal'
+import { TYPE_MAP, STATUS_MAP } from '../lib/appointmentConstants'
 
 function fmtDateTime(d) {
   if (!d) return '—'
@@ -13,10 +11,6 @@ function fmtDateTime(d) {
     weekday: 'short', day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
-}
-
-function initials(name = '') {
-  return name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?'
 }
 
 export default function PlanningClientTab({ clientId, clientName }) {
@@ -53,7 +47,7 @@ export default function PlanningClientTab({ clientId, clientName }) {
       <div
         key={a._id}
         className="ctrl-card ctrl-card--clickable"
-        onClick={() => setModal({ mode: 'edit', appt: a })}
+        onClick={() => setModal({ mode: 'edit', entity: a })}
       >
         <div className="ctrl-card-left">
           <span className="ctrl-type-badge" style={{ background: tc.color + '22', color: tc.color }}>
@@ -122,14 +116,16 @@ export default function PlanningClientTab({ clientId, clientName }) {
       )}
 
       {modal && (
-        <AppointmentModal
+        <EventModal
           mode={modal.mode}
-          appt={modal.appt}
+          entity={modal.entity}
+          entityKind="appointment"
           users={users}
           presetClient={{ id: clientId, name: clientName }}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); load() }}
           onDeleted={() => { setModal(null); load() }}
+          onChanged={() => load()}
         />
       )}
     </div>

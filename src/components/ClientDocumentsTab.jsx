@@ -6,10 +6,12 @@ import {
 } from 'lucide-react'
 import { ImageThumbnail, PdfThumbnail } from './FileThumbnail'
 import DocumentPreviewModal from './DocumentPreviewModal'
+import UploadProgress from './UploadProgress'
 import { getClientDocumentsFolder } from '../api/clients'
 import {
-  getContents, createFolder, renameDoc, moveDoc, deleteDoc, downloadDoc, uploadWithProgress,
+  getContents, createFolder, renameDoc, moveDoc, deleteDoc, downloadDoc,
 } from '../api/documents'
+import { useUploads } from '../hooks/useUploads'
 
 function formatSize(bytes) {
   if (!bytes) return '—'
@@ -124,7 +126,6 @@ export default function ClientDocumentsTab({ clientId }) {
   const [breadcrumb,   setBreadcrumb]   = useState([])   // [{id, name}] sous la racine du client
   const [items,        setItems]        = useState([])
   const [loading,      setLoading]      = useState(true)
-  const [uploadCount,  setUploadCount]  = useState(0)
 
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [renaming,      setRenaming]      = useState(null)
@@ -158,6 +159,8 @@ export default function ClientDocumentsTab({ clientId }) {
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
+  const { uploads, activeCount, startFiles, startDrop, clear: clearUploads } = useUploads(fetchItems)
+
   function openFolder(item) {
     setBreadcrumb(prev => [...prev, { id: item._id, name: item.name }])
   }
@@ -189,13 +192,7 @@ export default function ClientDocumentsTab({ clientId }) {
   }
 
   function handleFilesSelected(files) {
-    Array.from(files).forEach(file => {
-      setUploadCount(c => c + 1)
-      uploadWithProgress(file, currentFolder, {
-        onSuccess: () => { setUploadCount(c => c - 1); fetchItems() },
-        onError: (msg) => { setUploadCount(c => c - 1); toast.error(`${file.name} : ${msg}`) },
-      })
-    })
+    startFiles(files, currentFolder)
   }
 
   function openItem(item) {
@@ -226,7 +223,13 @@ export default function ClientDocumentsTab({ clientId }) {
     e.preventDefault()
     e.stopPropagation()
     setDropOver(null)
-    if (!dragging) return
+    if (!dragging) {
+      // Dépôt OS (fichiers/dossiers) directement sur un dossier cible
+      if (e.dataTransfer.items?.length || e.dataTransfer.files?.length) {
+        startDrop(e.dataTransfer, targetFolderId)
+      }
+      return
+    }
     if (dragging._id === targetFolderId) return
 
     try {
@@ -241,15 +244,15 @@ export default function ClientDocumentsTab({ clientId }) {
 
   function handleMainDragOver(e) {
     e.preventDefault()
-    if (dragging) setDropOver('__main__')
+    // Surligne pour un drag interne OU un dépôt de fichiers/dossiers depuis l'OS
+    if (dragging || e.dataTransfer.types?.includes('Files')) setDropOver('__main__')
   }
 
   function handleMainDrop(e) {
     e.preventDefault()
     if (!dragging) {
-      // Fichiers déposés depuis l'OS → upload dans le dossier courant
-      const files = e.dataTransfer.files
-      if (files.length) handleFilesSelected(files)
+      // Fichiers ou dossiers déposés depuis l'OS → upload dans le dossier courant
+      startDrop(e.dataTransfer, currentFolder)
     } else if (dragging.parent !== currentFolder) {
       handleDrop(e, currentFolder)
     }
@@ -267,7 +270,7 @@ export default function ClientDocumentsTab({ clientId }) {
             <FolderPlus size={13} /> Nouveau dossier
           </button>
           <button className="btn btn--primary btn--sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload size={13} /> {uploadCount > 0 ? `Envoi… (${uploadCount})` : 'Uploader'}
+            <Upload size={13} /> {activeCount > 0 ? `Envoi… (${activeCount})` : 'Uploader'}
           </button>
         </div>
       </div>
@@ -311,7 +314,7 @@ export default function ClientDocumentsTab({ clientId }) {
       ) : items.length === 0 ? (
         <div className="cd-tab-empty">
           <Folder size={40} color="var(--gray-300)" />
-          <p>Ce dossier est vide. Glissez des fichiers ici pour les uploader.</p>
+          <p>Ce dossier est vide. Glissez des fichiers ou des dossiers ici pour les uploader.</p>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button className="btn btn--ghost btn--sm" onClick={() => setNewFolderOpen(true)}>
               <FolderPlus size={13} /> Nouveau dossier
@@ -431,6 +434,8 @@ export default function ClientDocumentsTab({ clientId }) {
           onClose={() => setPreviewItem(null)}
         />
       )}
+
+      <UploadProgress uploads={uploads} onClear={clearUploads} />
     </div>
   )
 }
