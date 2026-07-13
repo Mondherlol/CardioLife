@@ -12,6 +12,8 @@ import { useAuth } from '../context/AuthContext'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { getDashboard } from '../api/dashboard'
 import { getInstallations } from '../api/installations'
+import { fetchPlanningItems } from '../lib/planningData'
+import { TYPE_OPTS, TYPE_MAP } from '../lib/appointmentConstants'
 
 /* =====================================================================
  *  CielOo ERP — Dashboard (parc de défibrillateurs / DAE)
@@ -228,43 +230,145 @@ function EcheanceRow({ e }) {
   )
 }
 
-/* Calendrier — piloté par `events` (prêt pour ton API agenda) */
-function MiniCalendar({ events = [] }) {
+/* Calendrier — mêmes sources que la page Planning (RDV, contrôles, poses,
+ * formations), avec filtre par type et aperçu des événements du jour cliqué. */
+function MiniCalendar({ onOpenItem }) {
   const now = new Date()
-  const [view, setView] = useState(() => new Date(now.getFullYear(), now.getMonth(), 1))
-  const changeMonth = (delta) => setView(v => new Date(v.getFullYear(), v.getMonth() + delta, 1))
+  const [view,        setView]        = useState(() => new Date(now.getFullYear(), now.getMonth(), 1))
+  const [items,       setItems]       = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [typeFilter,  setTypeFilter]  = useState(null)
+  const [selectedDay, setSelectedDay] = useState(null)
 
-  const eventKeys = useMemo(() => new Set(events.map(e => dayKey(e.date))), [events])
   const y = view.getFullYear(), m = view.getMonth()
+
+  useEffect(() => {
+    let alive = true
+    setLoading(true)
+    const from = new Date(y, m, 1, 0, 0, 0).toISOString()
+    const to   = new Date(y, m + 1, 0, 23, 59, 59).toISOString()
+    fetchPlanningItems({ from, to })
+      .then(data => { if (alive) { setItems(data); setLoading(false) } })
+      .catch(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [y, m])
+
+  const changeMonth = (delta) => { setView(v => new Date(v.getFullYear(), v.getMonth() + delta, 1)); setSelectedDay(null) }
+
+  const filtered = useMemo(
+    () => (typeFilter ? items.filter(i => i.type === typeFilter) : items),
+    [items, typeFilter],
+  )
+
+  const byDay = useMemo(() => {
+    const map = new Map()
+    for (const it of filtered) {
+      const k = dayKey(new Date(it.start))
+      if (!map.has(k)) map.set(k, [])
+      map.get(k).push(it)
+    }
+    for (const arr of map.values()) arr.sort((a, b) => new Date(a.start) - new Date(b.start))
+    return map
+  }, [filtered])
+
   const startIdx = (new Date(y, m, 1).getDay() + 6) % 7 // Lundi = 0
   const daysInMonth = new Date(y, m + 1, 0).getDate()
   const cells = []
   for (let i = 0; i < startIdx; i++) cells.push(null)
   for (let d = 1; d <= daysInMonth; d++) cells.push(d)
 
+  const selectedKey   = selectedDay ? dayKey(selectedDay) : null
+  const selectedItems = selectedKey ? (byDay.get(selectedKey) || []) : []
+
+  const FILTERS = [{ value: null, label: 'Tous' }, ...TYPE_OPTS.map(t => ({ value: t.value, label: t.label, color: t.color }))]
+
   return (
     <div className="dfx-cal">
+      {/* Filtres par type (mêmes types que le planning) */}
+      <div className="dfx-cal-filters">
+        {FILTERS.map(f => (
+          <button
+            key={f.value ?? 'all'}
+            className={`dfx-cal-filter${typeFilter === f.value ? ' is-active' : ''}`}
+            style={typeFilter === f.value && f.color ? { background: f.color, borderColor: f.color, color: '#fff' } : undefined}
+            onClick={() => setTypeFilter(f.value)}
+          >
+            {f.color && <i className="dfx-cal-fdot" style={{ background: typeFilter === f.value ? '#fff' : f.color }} />}
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       <div className="dfx-cal-head">
         <button className="dfx-cal-nav" onClick={() => changeMonth(-1)} aria-label="Mois précédent"><ChevronLeft size={15} /></button>
-        <span className="dfx-cal-month">{view.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</span>
+        <span className="dfx-cal-month">
+          {view.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+          {loading && <span className="dfx-cal-spin" />}
+        </span>
         <button className="dfx-cal-nav" onClick={() => changeMonth(1)} aria-label="Mois suivant"><ChevronRight size={15} /></button>
       </div>
+
       <div className="dfx-cal-grid dfx-cal-dow">
         {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((d, i) => <span key={i}>{d}</span>)}
       </div>
+
       <div className="dfx-cal-grid">
         {cells.map((d, i) => {
           if (!d) return <span key={i} className="dfx-cal-cell is-empty" />
           const isToday = d === now.getDate() && m === now.getMonth() && y === now.getFullYear()
-          const hasEvent = eventKeys.has(`${y}-${m}-${d}`)
+          const key = `${y}-${m}-${d}`
+          const dayItems = byDay.get(key) || []
+          const isSel = selectedKey === key
+          const types = [...new Set(dayItems.map(it => it.type))]
           return (
-            <span key={i} className={`dfx-cal-cell${isToday ? ' is-today' : ''}${hasEvent ? ' has-event' : ''}`}>
-              {d}
-              {hasEvent && !isToday && <i className="dfx-cal-dot" />}
-            </span>
+            <button
+              key={i}
+              className={`dfx-cal-cell${isToday ? ' is-today' : ''}${dayItems.length ? ' has-event' : ''}${isSel ? ' is-selected' : ''}`}
+              onClick={() => setSelectedDay(new Date(y, m, d))}
+            >
+              <span className="dfx-cal-num">{d}</span>
+              {dayItems.length > 0 && (
+                <span className="dfx-cal-dots">
+                  {types.slice(0, 3).map((t, k) => (
+                    <i key={k} className="dfx-cal-tdot" style={{ background: TYPE_MAP[t]?.color || '#6b7280' }} />
+                  ))}
+                  {types.length > 3 && <span className="dfx-cal-more">+{types.length - 3}</span>}
+                </span>
+              )}
+            </button>
           )
         })}
       </div>
+
+      {/* Événements du jour sélectionné */}
+      {selectedDay && (
+        <div className="dfx-cal-day">
+          <div className="dfx-cal-day-head">
+            {selectedDay.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </div>
+          {selectedItems.length === 0 ? (
+            <p className="dfx-cal-day-empty">Aucun événement ce jour.</p>
+          ) : (
+            <div className="dfx-cal-day-list">
+              {selectedItems.map(it => (
+                <button key={`${it.kind}-${it.id}`} className="dfx-cal-evt" onClick={() => onOpenItem(it)}>
+                  <span className="dfx-cal-evt-bar" style={{ background: TYPE_MAP[it.type]?.color || '#6b7280' }} />
+                  <span className="dfx-cal-evt-body">
+                    <span className="dfx-cal-evt-title">{it.title}</span>
+                    <span className="dfx-cal-evt-meta">
+                      {!it.allDay && new Date(it.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      {it.clientName && `${!it.allDay ? ' · ' : ''}${it.clientName}`}
+                    </span>
+                  </span>
+                  <span className="dfx-cal-evt-type" style={{ color: TYPE_MAP[it.type]?.color }}>
+                    {TYPE_MAP[it.type]?.label || it.type}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -377,8 +481,6 @@ export default function DashboardPage() {
     })
   }, [data])
 
-  const AGENDA_EVENTS = useMemo(() => CONTROLES.map(c => ({ date: c.start, type: c.type })), [CONTROLES])
-
   const ECHEANCES = useMemo(() => {
     const items = []
     installations.forEach(inst => {
@@ -407,6 +509,12 @@ export default function DashboardPage() {
       tone: ACTIVITY_TONE[a.type] || 'blue',
     }))
   }, [data])
+
+  function openPlanningItem(item) {
+    if (item.kind === 'intervention')      navigate(`/interventions/${item.id}`)
+    else if (item.kind === 'installation') navigate(`/devices/${item.id}`)
+    else                                   navigate('/planning')
+  }
 
   const now = new Date()
   const greeting = now.getHours() < 12 ? 'Bonjour' : now.getHours() < 18 ? 'Bon après-midi' : 'Bonsoir'
@@ -490,12 +598,9 @@ export default function DashboardPage() {
           <section className="dfx-card">
             <div className="dfx-card-head">
               <div className="dfx-card-title"><CalendarClock size={16} /> Calendrier</div>
+              <button className="dfx-link" onClick={() => go('/planning')}>Ouvrir le planning <ArrowRight size={13} /></button>
             </div>
-            <MiniCalendar events={AGENDA_EVENTS} />
-            <div className="dfx-cal-legend">
-              <span><i className="dot dot--today" /> Aujourd'hui</span>
-              <span><i className="dot dot--event" /> Contrôle prévu</span>
-            </div>
+            <MiniCalendar onOpenItem={openPlanningItem} />
           </section>
 
           <section className="dfx-card dfx-card--glass">
@@ -773,22 +878,52 @@ function DashboardStyles() {
     .dfx-pill--gray{ background:var(--gray-soft); color:var(--ink2); }
 
     /* ── Calendar ── */
-    .dfx-cal-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-    .dfx-cal-month{ font-size:13.5px; font-weight:700; text-transform:capitalize; }
+    .dfx-cal-filters{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+    .dfx-cal-filter{
+      display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600;
+      padding:5px 10px; border-radius:999px; color:var(--ink2);
+      background:var(--gray-soft); border:1px solid transparent; transition:transform .12s, background .12s;
+    }
+    .dfx-cal-filter:hover{ transform:translateY(-1px); }
+    .dfx-cal-filter.is-active{ color:#fff; background:var(--ink); border-color:var(--ink); }
+    .dfx-cal-fdot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+
+    .dfx-cal-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .dfx-cal-month{ font-size:13.5px; font-weight:700; text-transform:capitalize; display:inline-flex; align-items:center; gap:8px; }
+    .dfx-cal-spin{ width:11px; height:11px; border-radius:50%; border:2px solid var(--border); border-top-color:var(--orange); animation:dfxSpin .7s linear infinite; }
+    @keyframes dfxSpin{ to{ transform:rotate(360deg); } }
     .dfx-cal-nav{ width:28px; height:28px; border-radius:8px; display:grid; place-items:center; color:var(--ink2); border:1px solid var(--border); transition:background .12s; }
     .dfx-cal-nav:hover{ background:var(--gray-soft); }
-    .dfx-cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:2px; text-align:center; }
+    .dfx-cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:3px; text-align:center; }
     .dfx-cal-dow span{ font-size:11px; font-weight:600; color:var(--ink3); padding:4px 0; }
-    .dfx-cal-cell{ position:relative; height:34px; display:grid; place-items:center; font-size:12.5px; border-radius:9px; transition:background .12s; }
+    .dfx-cal-cell{
+      position:relative; min-height:40px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:3px; padding:4px 0; font-size:12.5px; border-radius:10px; transition:background .12s;
+    }
     .dfx-cal-cell.is-empty{ visibility:hidden; }
-    .dfx-cal-cell.has-event:hover{ background:var(--orange-soft); }
-    .dfx-cal-cell.is-today{ background:var(--orange); color:#fff; font-weight:700; box-shadow:0 4px 12px rgba(249,115,22,.4); }
-    .dfx-cal-cell.has-event{ font-weight:700; }
-    .dfx-cal-dot{ position:absolute; bottom:5px; width:5px; height:5px; border-radius:50%; background:var(--orange); }
-    .dfx-cal-legend{ display:flex; gap:16px; margin-top:12px; font-size:11.5px; color:var(--ink2); }
-    .dfx-cal-legend .dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
-    .dfx-cal-legend .dot--today{ background:var(--orange); }
-    .dfx-cal-legend .dot--event{ background:#fbdcc2; border:2px solid var(--orange); }
+    .dfx-cal-cell:not(.is-empty):hover{ background:var(--gray-soft); }
+    .dfx-cal-cell.has-event{ cursor:pointer; }
+    .dfx-cal-cell.is-selected{ background:var(--orange-soft); box-shadow:inset 0 0 0 1.5px var(--orange); }
+    .dfx-cal-num{ width:24px; height:22px; display:grid; place-items:center; border-radius:8px; }
+    .dfx-cal-cell.is-today .dfx-cal-num{ background:var(--orange); color:#fff; font-weight:700; box-shadow:0 4px 12px rgba(249,115,22,.4); }
+    .dfx-cal-dots{ display:flex; align-items:center; gap:3px; height:6px; }
+    .dfx-cal-tdot{ width:5px; height:5px; border-radius:50%; }
+    .dfx-cal-more{ font-size:8px; font-weight:700; color:var(--ink3); line-height:1; }
+
+    .dfx-cal-day{ margin-top:14px; border-top:1px solid var(--border); padding-top:12px; }
+    .dfx-cal-day-head{ font-size:12.5px; font-weight:700; text-transform:capitalize; margin-bottom:8px; }
+    .dfx-cal-day-empty{ margin:0; padding:6px 0; font-size:12px; color:var(--ink3); }
+    .dfx-cal-day-list{ display:flex; flex-direction:column; gap:6px; max-height:230px; overflow-y:auto; }
+    .dfx-cal-evt{
+      display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+      padding:8px 10px; border-radius:11px; background:var(--gray-soft); transition:transform .12s, background .12s;
+    }
+    .dfx-cal-evt:hover{ transform:translateX(2px); background:#e9ecf1; }
+    .dfx-cal-evt-bar{ width:3px; align-self:stretch; min-height:26px; border-radius:3px; flex-shrink:0; }
+    .dfx-cal-evt-body{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .dfx-cal-evt-title{ font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dfx-cal-evt-meta{ font-size:11px; color:var(--ink3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dfx-cal-evt-type{ font-size:10.5px; font-weight:700; flex-shrink:0; }
 
     /* ── Échéances (blocs verre) ── */
     .dfx-ech-list{ display:flex; flex-direction:column; gap:10px; }

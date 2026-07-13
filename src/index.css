@@ -6656,6 +6656,7 @@ button {
 }
 
 .upl-item-status--uploading { color: var(--brand); }
+.upl-item-status--pending   { color: var(--text-muted); }
 .upl-item-status--done      { color: var(--green-600); }
 .upl-item-status--error     { color: var(--red-500); }
 
@@ -6673,6 +6674,7 @@ button {
 }
 
 .upl-bar-fill--uploading { background: var(--brand); }
+.upl-bar-fill--pending   { background: var(--gray-200); }
 .upl-bar-fill--done      { background: var(--green-500); }
 .upl-bar-fill--error     { background: var(--red-500); }
 

@@ -19,6 +19,11 @@ function readAllEntries(reader) {
   })
 }
 
+/* Récupère le File d'une entrée fichier */
+function entryFile(entry) {
+  return new Promise((res, rej) => entry.file(res, rej))
+}
+
 /**
  * Gère l'état d'avancement des uploads (fichiers + dossiers récursifs).
  * @param {Function} onChange  appelé après chaque complétion pour rafraîchir la vue.
@@ -32,14 +37,10 @@ export function useUploads(onChange) {
     setUploads(prev => prev.map(u => (u.id === id ? { ...u, ...changes } : u)))
   }, [])
 
-  /* Upload d'un fichier unique — renvoie une promesse résolue à la fin */
-  const uploadFile = useCallback((file, parentId, displayName) => {
+  /* Upload d'un fichier déjà inscrit dans la liste (ligne `id` existante). */
+  const runUpload = useCallback((id, file, parentId) => {
     return new Promise(resolve => {
-      const id = uid()
-      setUploads(prev => [
-        ...prev,
-        { id, name: displayName || file.name, type: 'file', size: file.size, progress: 0, status: 'uploading' },
-      ])
+      patch(id, { status: 'uploading', progress: 0 })
       uploadWithProgress(file, parentId, {
         onProgress: pct => patch(id, { progress: pct }),
         onSuccess: () => { patch(id, { progress: 100, status: 'done' }); resolve(true) },
@@ -48,39 +49,21 @@ export function useUploads(onChange) {
     })
   }, [patch])
 
-  /* Upload récursif d'une entrée du système de fichiers */
-  const uploadEntry = useCallback(async (entry, parentId, pathPrefix) => {
-    if (entry.isFile) {
-      const file = await new Promise((res, rej) => entry.file(res, rej))
-      await uploadFile(file, parentId, pathPrefix ? `${pathPrefix}/${file.name}` : file.name)
-    } else if (entry.isDirectory) {
-      const id = uid()
-      const folderPath = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name
-      setUploads(prev => [
-        ...prev,
-        { id, name: folderPath, type: 'folder', progress: 0, status: 'uploading' },
-      ])
-      let folder
-      try {
-        folder = await createFolder({ name: entry.name, parent: parentId })
-      } catch (err) {
-        patch(id, { status: 'error', error: err.message || 'Création du dossier échouée' })
-        return
-      }
-      const children = await readAllEntries(entry.createReader())
-      for (const child of children) {
-        await uploadEntry(child, folder._id, folderPath)
-      }
-      patch(id, { progress: 100, status: 'done' })
-    }
-  }, [uploadFile, patch])
-
-  /* Sélection classique (input file) → upload dans le dossier courant */
+  /* Sélection classique (input file) → tout est connu d'avance, upload en parallèle */
   const startFiles = useCallback((fileList, parentId) => {
-    Array.from(fileList).forEach(file => {
-      uploadFile(file, parentId).then(() => onChangeRef.current?.())
+    const rows = Array.from(fileList).map(file => ({
+      id: uid(), name: file.name, type: 'file', size: file.size, progress: 0, status: 'uploading', _file: file,
+    }))
+    if (!rows.length) return
+    setUploads(prev => [...prev, ...rows])
+    rows.forEach(row => {
+      uploadWithProgress(row._file, parentId, {
+        onProgress: pct => patch(row.id, { progress: pct }),
+        onSuccess: () => { patch(row.id, { progress: 100, status: 'done' }); onChangeRef.current?.() },
+        onError: msg => { patch(row.id, { status: 'error', error: msg }) },
+      })
     })
-  }, [uploadFile])
+  }, [patch])
 
   /* Dépôt OS : gère fichiers ET dossiers (via l'API FileSystem Entry) */
   const startDrop = useCallback(async (dataTransfer, parentId) => {
@@ -89,19 +72,77 @@ export function useUploads(onChange) {
       .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
       .filter(Boolean)
 
-    if (entries.length && entries.some(e => e.isDirectory)) {
-      for (const entry of entries) {
-        await uploadEntry(entry, parentId, '')
-      }
-      onChangeRef.current?.()
-    } else if (dataTransfer.files?.length) {
-      startFiles(dataTransfer.files, parentId)
+    const hasDir = entries.some(e => e.isDirectory)
+    if (!hasDir) {
+      if (dataTransfer.files?.length) startFiles(dataTransfer.files, parentId)
+      return
     }
-  }, [uploadEntry, startFiles])
+
+    // ── Phase 1 : énumération complète de l'arborescence ──────────────
+    // On parcourt tout AVANT d'uploader : le total de fichiers est ainsi
+    // connu dès le départ et la progression globale monte régulièrement.
+    const folders = []   // { name, path, parentPath }  (parents avant enfants)
+    const files   = []   // { entry, name, folderPath }
+
+    async function walk(entry, prefix) {
+      if (entry.isFile) {
+        files.push({ entry, name: entry.name, folderPath: prefix })
+      } else if (entry.isDirectory) {
+        const path = prefix ? `${prefix}/${entry.name}` : entry.name
+        folders.push({ name: entry.name, path, parentPath: prefix })
+        const children = await readAllEntries(entry.createReader())
+        for (const child of children) await walk(child, path)
+      }
+    }
+    for (const entry of entries) await walk(entry, '')
+
+    if (!files.length && !folders.length) return
+
+    // Toutes les lignes de fichiers sont ajoutées d'un coup (statut « en attente »).
+    const rows = files.map(f => ({
+      id: uid(),
+      name: f.folderPath ? `${f.folderPath}/${f.name}` : f.name,
+      type: 'file', progress: 0, status: 'pending',
+    }))
+    setUploads(prev => [...prev, ...rows])
+
+    // ── Phase 2 : création des dossiers (parents avant enfants) ───────
+    const pathToId = { '': parentId }
+    const failedPaths = new Set()
+    for (const folder of folders) {
+      const parent = pathToId[folder.parentPath]
+      if (parent == null && folder.parentPath !== '') { failedPaths.add(folder.path); continue }
+      try {
+        const created = await createFolder({ name: folder.name, parent })
+        pathToId[folder.path] = created._id
+      } catch {
+        failedPaths.add(folder.path)
+      }
+    }
+
+    // ── Phase 3 : upload séquentiel des fichiers vers leur dossier ────
+    for (let i = 0; i < files.length; i++) {
+      const f   = files[i]
+      const row = rows[i]
+      const targetId = pathToId[f.folderPath]
+      if (targetId == null) {
+        patch(row.id, { status: 'error', error: 'Dossier parent introuvable' })
+        continue
+      }
+      try {
+        const file = await entryFile(f.entry)
+        await runUpload(row.id, file, targetId)
+      } catch {
+        patch(row.id, { status: 'error', error: 'Lecture du fichier échouée' })
+      }
+    }
+
+    onChangeRef.current?.()
+  }, [startFiles, runUpload, patch])
 
   const clear = useCallback(() => setUploads([]), [])
 
-  const activeCount = uploads.filter(u => u.status === 'uploading').length
+  const activeCount = uploads.filter(u => u.status === 'uploading' || u.status === 'pending').length
 
   return { uploads, activeCount, startFiles, startDrop, clear }
 }

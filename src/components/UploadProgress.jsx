@@ -13,19 +13,23 @@ export default function UploadProgress({ uploads, onClear }) {
   const total   = uploads.length
   const done    = uploads.filter(u => u.status === 'done').length
   const errors  = uploads.filter(u => u.status === 'error').length
-  const active  = uploads.filter(u => u.status === 'uploading').length
+  const active  = uploads.filter(u => u.status === 'uploading' || u.status === 'pending').length
   const allDone = active === 0
 
-  // Avancement global (les dossiers/terminés comptent pour 100 %)
+  // Avancement global : terminé/échec = 100 %, en cours = son %, en attente = 0 %.
   const overall = Math.round(
-    uploads.reduce((sum, u) => sum + (u.status === 'uploading' ? u.progress : 100), 0) / total,
+    uploads.reduce((sum, u) => {
+      if (u.status === 'done' || u.status === 'error') return sum + 100
+      if (u.status === 'uploading') return sum + u.progress
+      return sum   // pending → 0 %
+    }, 0) / total,
   )
 
   const title = allDone
     ? errors > 0
       ? `${done} terminé${done > 1 ? 's' : ''}${errors ? `, ${errors} échec${errors > 1 ? 's' : ''}` : ''}`
       : `${total} élément${total > 1 ? 's' : ''} envoyé${total > 1 ? 's' : ''}`
-    : `Envoi en cours… ${overall}%`
+    : `Envoi en cours… ${overall}% (${done}/${total})`
 
   return (
     <div className="upl-panel">
@@ -74,16 +78,18 @@ export default function UploadProgress({ uploads, onClear }) {
                   <span className="upl-item-name" title={u.name}>{u.name}</span>
                   <span className={`upl-item-status upl-item-status--${u.status}`}>
                     {u.status === 'uploading'
-                      ? (u.type === 'folder' ? '…' : `${u.progress}%`)
+                      ? `${u.progress}%`
                       : u.status === 'done'
                         ? <Check size={13} />
-                        : <span title={u.error}>Échec</span>}
+                        : u.status === 'pending'
+                          ? 'En attente'
+                          : <span title={u.error}>Échec</span>}
                   </span>
                 </div>
                 <div className="upl-bar">
                   <div
-                    className={`upl-bar-fill upl-bar-fill--${u.status}${u.status === 'uploading' && u.type === 'folder' ? ' upl-bar-fill--indeterminate' : ''}`}
-                    style={u.type === 'folder' && u.status === 'uploading' ? undefined : { width: `${u.status === 'error' ? 100 : u.progress}%` }}
+                    className={`upl-bar-fill upl-bar-fill--${u.status}`}
+                    style={{ width: `${u.status === 'error' || u.status === 'done' ? 100 : u.progress}%` }}
                   />
                 </div>
               </div>
