@@ -602,7 +602,12 @@ export default function DashboardPage() {
             </div>
             <MiniCalendar onOpenItem={openPlanningItem} />
           </section>
+        </div>
+      </div>
 
+      {/* ── Bas de page ── */}
+      <div className="dfx-bottom">
+        <div className="dfx-col">
           <section className="dfx-card dfx-card--glass">
             <span className="dfx-glass-blob dfx-glass-blob--b" />
             <div className="dfx-card-head">
@@ -615,21 +620,18 @@ export default function DashboardPage() {
                 : <p className="dfx-empty">Aucune échéance proche.</p>}
             </div>
           </section>
-        </div>
-      </div>
 
-      {/* ── Bas de page ── */}
-      <div className="dfx-bottom">
-        <section className="dfx-card">
-          <div className="dfx-card-head">
-            <div className="dfx-card-title"><Activity size={16} /> Dernières activités</div>
-          </div>
-          <div className="dfx-act-list">
-            {ACTIVITES.length > 0
-              ? ACTIVITES.map(a => <ActivityRow key={a.id} a={a} />)
-              : <p className="dfx-empty">Aucune activité récente.</p>}
-          </div>
-        </section>
+          <section className="dfx-card">
+            <div className="dfx-card-head">
+              <div className="dfx-card-title"><Activity size={16} /> Dernières activités</div>
+            </div>
+            <div className="dfx-act-list">
+              {ACTIVITES.length > 0
+                ? ACTIVITES.map(a => <ActivityRow key={a.id} a={a} />)
+                : <p className="dfx-empty">Aucune activité récente.</p>}
+            </div>
+          </section>
+        </div>
 
         <section className="dfx-card dfx-card--glass">
           <span className="dfx-glass-blob dfx-glass-blob--d" />
