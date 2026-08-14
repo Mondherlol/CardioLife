@@ -1,4 +1,5 @@
 const Control = require('../models/Control')
+const { mapDeas } = require('../utils/deaParc')
 
 function dateRange() {
   const from = new Date(); from.setFullYear(from.getFullYear() - 1)
@@ -25,9 +26,15 @@ async function getByClient(req, res) {
       scheduledDate: dateRange(),
     })
       .populate('technicien', 'fullName')
-      .populate('installation', 'address location deviceType serialNumber')
       .sort({ scheduledDate: 1 })
-    res.json(controls)
+      .lean()
+
+    // Le DAE n'est plus une collection : on rattache la fiche du DEA à la main.
+    const deas = await mapDeas(controls.map(c => c.installation))
+    res.json(controls.map(c => ({
+      ...c,
+      installation: deas[String(c.installation)] || null,
+    })))
   } catch (err) { res.status(500).json({ message: err.message }) }
 }
 

@@ -1,28 +1,16 @@
 const mongoose = require('mongoose')
 
-const CATEGORIES = [
-  'defibrillateur',
-  'batterie',
-  'electrodes_adulte',
-  'electrodes_enfant',
-  'boitier',
-  'signaletique',
-  'accessoire',
-  'kit_secours',
-  'mannequin',
-  'trainer',
-  'autre',
-]
-
 const productSchema = new mongoose.Schema({
   name:      { type: String, required: true, trim: true },
   reference: { type: String, trim: true },
   brand:     { type: String, trim: true },
   description: { type: String },
+  // slug d'une ProductCategory — les catégories sont configurables (Paramètres)
   category: {
     type: String,
-    enum: CATEGORIES,
     required: true,
+    trim: true,
+    index: true,
   },
   deviceMode:           { type: String, enum: ['automatique', 'semi-automatique'] },
   requiresSerialNumber: { type: Boolean, default: false },
@@ -55,4 +43,3 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ name: 'text', reference: 'text', brand: 'text' })
 
 module.exports = mongoose.model('Product', productSchema)
-module.exports.CATEGORIES = CATEGORIES

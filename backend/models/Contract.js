@@ -1,31 +1,29 @@
 const mongoose = require('mongoose')
 
+// Les anciens contrats peuvent porter d'autres types : la liste reste ouverte
+// pour ne pas invalider ces documents, mais tout nouveau contrat est un
+// contrat de maintenance.
 const TYPES    = ['maintenance', 'location', 'vente', 'autre']
 const STATUSES = ['brouillon', 'actif', 'expire', 'resilie']
 
-// Ligne de contrat : un produit couvert (issu d'un pack ou ajouté seul).
-const lineItemSchema = new mongoose.Schema({
-  product:     { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
-  productName: { type: String, trim: true },
-  category:    { type: String, trim: true },
-  quantity:    { type: Number, default: 1, min: 1 },
-  unitPrice:   { type: Number, min: 0, default: 0 },
-  fromPack:    { type: String, trim: true },   // nom du pack d'origine, le cas échéant
-}, { _id: false })
-
-const serviceSchema = new mongoose.Schema({
-  name:     { type: String, required: true, trim: true },
-  price:    { type: Number, min: 0, default: 0 },
-  fromPack: { type: String, trim: true },
-}, { _id: false })
-
-const packRefSchema = new mongoose.Schema({
-  pack: { type: mongoose.Schema.Types.ObjectId, ref: 'Pack' },
-  name: { type: String, trim: true },
-}, { _id: false })
-
+/**
+ * Contrat de maintenance d'un site.
+ *
+ * Un client peut avoir plusieurs sites, chacun avec son parc et son propre
+ * calendrier de visites : le contrat est donc rattaché au site. Le client reste
+ * dénormalisé pour filtrer et regrouper sans jointure.
+ *
+ * Le contrat ne décrit pas son contenu : les DAE couverts sont, par définition,
+ * ceux installés sur le site. Ils sont calculés à la lecture depuis
+ * `Site.deas`, jamais stockés ici.
+ *
+ * La périodicité n'est pas non plus un réglage : les contrôles sont toujours
+ * semestriels, le second de chaque année valant contrôle annuel.
+ */
 const contractSchema = new mongoose.Schema({
   contractNumber: { type: String, trim: true },
+  site:       { type: mongoose.Schema.Types.ObjectId, ref: 'Site', required: true, index: true },
+  siteName:   { type: String, trim: true },
   client:     { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   clientName: { type: String, trim: true },
 
@@ -34,24 +32,13 @@ const contractSchema = new mongoose.Schema({
 
   startDate: { type: Date },
   endDate:   { type: Date },
-  controlPeriodicity: { type: String, enum: ['semestriel', 'annuel', ''], default: '' },
-
-  // Installations couvertes (créées depuis les packs/produits ou rattachées)
-  installations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Installation' }],
-
-  packs:     [packRefSchema],
-  lineItems: [lineItemSchema],
-  services:  [serviceSchema],
-
-  // Valeur estimée = Σ (lignes produits × quantité) + Σ services. Calculée à l'enregistrement.
-  estimatedValue: { type: Number, min: 0, default: 0 },
 
   notes:     { type: String, trim: true },
   isActive:  { type: Boolean, default: true },   // archivage doux
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true })
 
-contractSchema.index({ contractNumber: 'text', clientName: 'text' })
+contractSchema.index({ contractNumber: 'text', clientName: 'text', siteName: 'text' })
 contractSchema.index({ client: 1, createdAt: -1 })
 
 module.exports = mongoose.model('Contract', contractSchema)

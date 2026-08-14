@@ -4,16 +4,19 @@ const ctrl       = require('../controllers/clientsController')
 const importCtrl = require('../controllers/clientImportController')
 const { protect }           = require('../middleware/auth')
 const { requirePermission } = require('../middleware/permissions')
+const uploadClientLogo      = require('../middleware/uploadClientLogo')
 
 const createValidation = [
   body('name').trim().notEmpty().withMessage('Le nom du client est requis.'),
-  body('type').trim().notEmpty().withMessage('Le type de client est requis.'),
   body('contacts.*.email')
     .optional({ checkFalsy: true })
     .isEmail().withMessage('Email de contact invalide.'),
   body('internalManagers.*.email')
     .optional({ checkFalsy: true })
     .isEmail().withMessage('Email de responsable invalide.'),
+  body('underContract')
+    .optional()
+    .isBoolean().withMessage('Statut de contrat invalide.'),
 ]
 
 router.use(protect)
@@ -33,6 +36,8 @@ router.put('/:id',  createValidation,  ctrl.update)
 router.delete('/:id',                  ctrl.archive)
 router.put('/:id/restore',             ctrl.restore)
 router.get('/:id/documents-folder',    ctrl.getDocumentsFolder)
+router.post('/:id/logo',   uploadClientLogo.single('logo'), ctrl.uploadLogo)
+router.delete('/:id/logo',                                  ctrl.deleteLogo)
 router.delete('/:id/permanent',        ctrl.permanentDelete)
 
 module.exports = router

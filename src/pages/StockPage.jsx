@@ -1,20 +1,24 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
-  Plus, Search, Pencil, Trash2, X, AlertTriangle,
+  Plus, Search, Pencil, Trash2, X, AlertTriangle, ArrowLeft,
   Package, ChevronLeft, ChevronRight, RotateCcw, Trash, Archive,
   TrendingUp, TrendingDown, SlidersHorizontal,
-  Clock, AlertCircle, CheckCircle2, History, User, Hash, Layers,
+  History, User, Hash, Layers, Boxes, Clock,
+  MoreVertical, Eye, PackageOpen, LayoutGrid, List,
 } from 'lucide-react'
 import {
-  getProducts, getProductStats, getAllMovements,
+  getProducts, getAllMovements,
   adjustStock, archiveProduct, restoreProduct, destroyProduct, getMovements,
-  productImageUrl, getSuppliers, getBrands,
+  productImageUrl,
 } from '../api/products'
+import { getProductCategories } from '../api/productCategories'
+import { getStockModels } from '../api/productItems'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
-import { PRODUCT_CATEGORIES as CATEGORIES, CATEGORY_MAP as CAT_MAP } from '../constants/categories'
+import ParcExpiryTab from '../components/ParcExpiryTab'
+import { categoryIcon } from '../constants/categoryIcons'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -42,62 +46,6 @@ function getExpirationStatus(dateStr) {
 function formatDate(dateStr) {
   if (!dateStr) return null
   return new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-function formatPrice(val) {
-  if (val == null || val === '') return '—'
-  return `${Number(val).toLocaleString('fr-FR')} DT`
-}
-
-/* ─── Sort icon ─── */
-function SortIcon({ field, sortField, sortDir }) {
-  if (sortField !== field) return <span style={{ opacity: .25, fontSize: 10, marginLeft: 3 }}>⇅</span>
-  return <span style={{ fontSize: 10, marginLeft: 3, color: 'var(--orange-500)' }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
-}
-
-/* ─── Composant badge catégorie ─── */
-function CategoryBadge({ category }) {
-  const cat = CAT_MAP[category]
-  if (!cat) return <span className="type-badge">{category}</span>
-  return <span className={`cat-badge ${cat.color}`}>{cat.label}</span>
-}
-
-/* ─── Composant indicateur stock ─── */
-function StockIndicator({ stock, threshold }) {
-  const status = getStockStatus(stock, threshold)
-  const pct    = threshold > 0 ? Math.min((stock / (threshold * 2)) * 100, 100) : (stock > 0 ? 100 : 0)
-
-  return (
-    <div className="stock-cell">
-      <div className="stock-cell-top">
-        <span className={`stock-qty-label stock-qty-label--${status}`}>{stock}</span>
-        <span className="stock-threshold-label">/ min {threshold}</span>
-      </div>
-      <div className="stock-mini-bar">
-        <div className={`stock-mini-fill stock-mini-fill--${status}`} style={{ width: `${pct}%` }} />
-      </div>
-      {status === 'out' && <span className="stock-status-chip stock-status-chip--out">Épuisé</span>}
-      {status === 'low' && <span className="stock-status-chip stock-status-chip--low">Stock faible</span>}
-    </div>
-  )
-}
-
-/* ─── Composant badge péremption ─── */
-function ExpirationBadge({ date }) {
-  const exp = getExpirationStatus(date)
-  if (!exp) return <span className="cell-muted">—</span>
-  return (
-    <div className="exp-cell">
-      <span className="exp-date">{formatDate(date)}</span>
-      <span className={`exp-badge exp-badge--${exp.level}`}>
-        {exp.level === 'expired' && <AlertTriangle size={10} />}
-        {exp.level === 'urgent'  && <Clock size={10} />}
-        {exp.level === 'soon'    && <Clock size={10} />}
-        {exp.level === 'ok'      && <CheckCircle2 size={10} />}
-        {exp.level === 'expired' ? 'Expiré' : exp.level === 'ok' ? 'OK' : `${exp.days}j`}
-      </span>
-    </div>
-  )
 }
 
 /* ─── Modal ajustement de stock ─── */
@@ -638,113 +586,6 @@ function MovementDetailModal({ movement, onClose }) {
   )
 }
 
-/* ─── Modal stock détaillé d'un produit ─── */
-function StockDetailModal({ product, onClose, onAdjust }) {
-  const [movements, setMovements] = useState([])
-  const [loading,   setLoading]   = useState(true)
-
-  useEffect(() => {
-    getMovements(product._id)
-      .then(raw => setMovements(Array.isArray(raw) ? raw : (raw.data || [])))
-      .catch(() => setMovements([]))
-      .finally(() => setLoading(false))
-  }, [product._id])
-
-  const inStockSerials = (() => {
-    const entered = new Set()
-    const exited  = new Set()
-    movements.forEach(mv => {
-      if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
-      if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
-    })
-    return [...entered].filter(sn => !exited.has(sn))
-  })()
-
-  const lotsReceived = movements
-    .filter(mv => mv.type === 'entree' && mv.lotNumber)
-    .map(mv => ({ lotNumber: mv.lotNumber, expirationDate: mv.expirationDate, quantity: mv.quantity }))
-
-  const showSerials = product.requiresSerialNumber
-  const showLots    = product.requiresLotNumber
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--md">
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">Stock détaillé</h2>
-            <div className="modal-subtitle">{product.name}</div>
-          </div>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        <div className="modal-body">
-          <div className="sd-summary">
-            <div className="sd-stock-num">{product.stock}</div>
-            <div className="sd-stock-label">unité{product.stock !== 1 ? 's' : ''} en stock</div>
-          </div>
-
-          {loading ? (
-            <div className="table-loading" style={{ padding: 32 }}><span className="spinner" /></div>
-          ) : (
-            <>
-              {showSerials && (
-                <div className="mv-detail-section">
-                  <div className="mv-detail-section-title">
-                    <Hash size={13} /> Numéros de série en stock ({inStockSerials.length})
-                  </div>
-                  {inStockSerials.length === 0 ? (
-                    <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Aucun numéro de série en stock.</p>
-                  ) : (
-                    <div className="mv-serials-list">
-                      {inStockSerials.map((sn, i) => <span key={i} className="mv-serial-chip">{sn}</span>)}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {showLots && (
-                <div className="mv-detail-section">
-                  <div className="mv-detail-section-title">
-                    <Layers size={13} /> Lots reçus ({lotsReceived.length})
-                  </div>
-                  {lotsReceived.length === 0 ? (
-                    <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Aucun lot enregistré.</p>
-                  ) : (
-                    <div className="mv-lots-list">
-                      {lotsReceived.map((lot, i) => (
-                        <div key={i} className="mv-lot-row">
-                          <span className="mv-lot-chip">{lot.lotNumber}</span>
-                          <span className="mv-lot-qty">+{lot.quantity}</span>
-                          {lot.expirationDate && (
-                            <span className="mv-lot-expiry">exp. {formatDate(lot.expirationDate)}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {!showSerials && !showLots && (
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '12px 0' }}>
-                  Ce produit n'a pas de traçabilité par numéro de série ou de lot.
-                </p>
-              )}
-            </>
-          )}
-
-          <div className="modal-footer">
-            <button type="button" className="btn btn--ghost" onClick={onClose}>Fermer</button>
-            <button type="button" className="btn btn--primary" onClick={onAdjust}>
-              <SlidersHorizontal size={14} /> Ajuster le stock
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ─── Modal mouvements de stock ─── */
 function MovementsModal({ product, onClose }) {
   const [movements, setMovements] = useState([])
@@ -825,102 +666,329 @@ function MovementsModal({ product, onClose }) {
   )
 }
 
+/* ─── Vue « catégories » : une carte par catégorie configurée ─── */
+function CategoryGrid({ categories, onPick }) {
+  if (categories.length === 0) {
+    return (
+      <div className="table-empty">
+        <Package size={36} color="var(--gray-300)" />
+        <p>Aucune catégorie configurée. Ajoutez-en dans Paramètres → Catégories produits.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="cat-grid">
+      {categories.map(c => {
+        const Icon = categoryIcon(c.icon)
+        const st   = c.stats || {}
+        return (
+          <button key={c._id} className={`cat-card cat-card--${c.color}`} onClick={() => onPick(c)}>
+            {/* Icône en filigrane : donne du volume à la carte sans charger le contenu */}
+            <Icon className="cat-card-ghost" size={132} strokeWidth={0.9} />
+
+            <div className="cat-card-top">
+              <span className="cat-card-media">
+                {c.image
+                  ? <img src={c.image} alt="" className="cat-card-img" />
+                  : <Icon size={24} strokeWidth={1.9} />}
+              </span>
+              {st.lowStock > 0 && (
+                <span className="cat-card-alert">{st.lowStock} en alerte</span>
+              )}
+            </div>
+
+            <div className="cat-card-name">{c.name}</div>
+
+            <div className="cat-card-figures">
+              <span className="cat-card-units">{st.units ?? 0}</span>
+              <span className="cat-card-units-label">
+                article{(st.units ?? 0) !== 1 ? 's' : ''} en stock
+              </span>
+            </div>
+
+            <div className="cat-card-foot">
+              <span className="cat-card-ref">
+                {st.products ?? 0} référence{(st.products ?? 0) !== 1 ? 's' : ''}
+              </span>
+              <span className="cat-card-go">
+                Ouvrir <ChevronRight size={14} />
+              </span>
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ─── Vue « modèles » (catégories à suivi unitaire) ───────────────────────
+   On n'ouvre pas la liste des appareils d'emblée : un parc de défibrillateurs
+   se lit d'abord modèle par modèle (ZOLL AED Plus — 18), le détail exemplaire
+   par exemplaire venant au cran suivant. */
+function ModelRow({ model, category, onOpen, onMenu }) {
+  const s = model.summary || {}
+  const hasImage = model.images?.length > 0
+
+  return (
+    <div
+      className={`model-row prod-tile--${category?.color || 'gray'}`}
+      onClick={onOpen}
+      onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY, model) }}
+    >
+      <div className={`prod-row-thumb${hasImage ? ' prod-row-thumb--photo' : ''}`}>
+        {hasImage
+          ? <img src={productImageUrl(model.images[0])} alt="" />
+          : <span className="prod-noimg"><PackageOpen size={18} strokeWidth={1.5} /></span>}
+      </div>
+
+      <div className="model-row-main">
+        <div className="model-row-name" title={model.name}>{model.name}</div>
+        <div className="prod-row-sub">
+          {model.brand && <span className="prod-row-brand">{model.brand}</span>}
+          {model.reference && <span>Réf. {model.reference}</span>}
+        </div>
+      </div>
+
+      <div className="model-row-figures">
+        {[
+          { key: 'total',       label: 'Total',       value: s.total       ?? 0, tone: 'slate' },
+          { key: 'disponible',  label: 'Disponible',  value: s.disponible  ?? 0, tone: 'mint'  },
+          { key: 'reserve',     label: 'Réservé',     value: s.reserve     ?? 0, tone: 'sky'   },
+          { key: 'maintenance', label: 'Maintenance', value: s.maintenance ?? 0, tone: 'sun'   },
+          ...(category?.tracksLot
+            ? [{ key: 'expired', label: 'DLC dépassée', value: s.expired ?? 0, tone: 'ember' }]
+            : []),
+        ].map(f => (
+          <div key={f.key} className={`model-figure model-figure--${f.tone}${f.value === 0 ? ' model-figure--zero' : ''}`}>
+            <span className="model-figure-value">{f.value}</span>
+            <span className="model-figure-label">{f.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <ChevronRight size={16} className="model-row-go" />
+    </div>
+  )
+}
+/* ─── Tuile produit ─── */
+function ProductTile({ product: p, category, onOpen, onMenu }) {
+  const status = getStockStatus(p.stock, p.alertThreshold)
+  const exp    = category?.tracksLot ? getExpirationStatus(p.expirationDate) : null
+  const ratio  = p.alertThreshold > 0
+    ? Math.min((p.stock / (p.alertThreshold * 2)) * 100, 100)
+    : (p.stock > 0 ? 100 : 0)
+  const hasImage = p.images?.length > 0
+
+  return (
+    <div
+      className={`prod-tile prod-tile--${category?.color || 'gray'}`}
+      onClick={onOpen}
+      onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY, p) }}
+    >
+      {/* Sans photo : un repli neutre « produit sans visuel », identique pour
+          toutes les catégories — pas de filigrane coloré. */}
+      <div className={`prod-tile-media${hasImage ? ' prod-tile-media--photo' : ' prod-tile-media--empty'}`}>
+        {hasImage
+          ? <img src={productImageUrl(p.images[0])} alt="" />
+          : <span className="prod-noimg"><PackageOpen size={26} strokeWidth={1.5} /></span>}
+
+        <span className={`prod-tile-stockbadge prod-tile-stockbadge--${status}`}>
+          <i className="prod-tile-dot" />
+          {status === 'out' ? 'Épuisé' : status === 'low' ? 'Stock faible' : 'En stock'}
+        </span>
+
+        {/* Les actions vivent dans le menu contextuel — ce bouton l'ouvre aussi
+            au clic gauche, pour rester atteignable au clavier et au tactile. */}
+        <button
+          type="button"
+          className="prod-tile-more"
+          title="Actions"
+          onClick={e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onMenu(r.right, r.bottom + 4, p) }}
+        >
+          <MoreVertical size={15} />
+        </button>
+      </div>
+
+      <div className="prod-tile-body">
+        <div className="prod-tile-head">
+          {p.brand && <span className="prod-tile-brand">{p.brand}</span>}
+          {exp && (
+            <span className={`prod-tile-exp prod-tile-exp--${exp.level}`}>
+              {exp.level === 'expired' ? 'Expiré' : exp.level === 'ok' ? formatDate(p.expirationDate) : `${exp.days} j`}
+            </span>
+          )}
+        </div>
+
+        <div className="prod-tile-name" title={p.name}>{p.name}</div>
+
+        <div className="prod-tile-foot">
+          <div className="prod-tile-stock">
+            <span className={`prod-tile-qty prod-tile-qty--${status}`}>{p.stock}</span>
+            <span className="prod-tile-min">/ min {p.alertThreshold}</span>
+          </div>
+          <div className="prod-tile-bar">
+            <span className={`prod-tile-bar-fill prod-tile-bar-fill--${status}`} style={{ width: `${ratio}%` }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Menu contextuel produit ─── */
+function ProductMenu({ menu, onClose, actions }) {
+  useEffect(() => {
+    function close() { onClose() }
+    function onKey(e) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('click', close)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [onClose])
+
+  // On garde le menu dans la fenêtre quel que soit l'endroit du clic.
+  const width  = 210
+  const height = 44 + actions.length * 34
+  const left = Math.min(menu.x, window.innerWidth  - width  - 10)
+  const top  = Math.min(menu.y, window.innerHeight - height - 10)
+
+  return (
+    <div className="ctx-menu" style={{ left, top }} onClick={e => e.stopPropagation()}>
+      <div className="ctx-menu-head">{menu.product.name}</div>
+      {actions.map(a => {
+        const Icon = a.icon
+        return (
+          <button
+            key={a.label}
+            type="button"
+            className={`ctx-menu-item${a.danger ? ' ctx-menu-item--danger' : ''}`}
+            onClick={() => { onClose(); a.onClick(menu.product) }}
+          >
+            <Icon size={14} /> {a.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+
 /* ─── Page principale ─── */
-const LIMIT = 50
+const LIMIT = 500
+
+const STOCK_STATES = [
+  { value: '',    label: 'Tout le stock' },
+  { value: 'ok',  label: 'En stock' },
+  { value: 'low', label: 'Stock faible' },
+  { value: 'out', label: 'Épuisé' },
+]
+
+const EXPIRY_FILTERS = [
+  { value: '',        label: 'Toutes péremptions' },
+  { value: 'expired', label: 'Expirés' },
+  { value: '30',      label: 'Expire sous 30 j' },
+  { value: '60',      label: 'Expire sous 60 j' },
+  { value: '90',      label: 'Expire sous 90 j' },
+]
 
 export default function StockPage() {
   const navigate = useNavigate()
 
-  const [tab,              setTab]              = useState('active')
-  const [category,         setCategory]         = useState('')
-  const [brandFilter,      setBrandFilter]      = useState('')
-  const [supplierFilter,   setSupplierFilter]   = useState('')
-  const [products,         setProducts]         = useState([])
-  const [stats,            setStats]            = useState(null)
-  const [total,            setTotal]            = useState(0)
-  const [page,             setPage]             = useState(1)
-  const [search,           setSearch]           = useState('')
-  const [loading,          setLoading]          = useState(true)
-  const [error,            setError]            = useState('')
-  const [modal,            setModal]            = useState(null)
-  const [adjusting,        setAdjusting]        = useState(null)
-  const [archiving,        setArchiving]        = useState(null)
-  const [destroying,       setDestroying]       = useState(null)
+  // La vue courante vit dans l'URL (?tab=…&cat=…) pour que la navigation
+  // arrière du navigateur revienne à la catégorie ou à l'onglet précédent.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab      = searchParams.get('tab')  || 'categories'
+  const catSlug  = searchParams.get('cat')  || ''
+  // Le dashboard pointe ici avec un type déjà choisi (batteries / électrodes).
+  const parcType = searchParams.get('type') || ''
+
+  const [categories, setCategories] = useState([])
+  const [menu,       setMenu]       = useState(null)   // { x, y, product }
+
+  // Grille ou liste : préférence d'affichage retenue d'une visite à l'autre.
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('stockViewMode') || 'grid')
+  function changeViewMode(mode) {
+    setViewMode(mode)
+    localStorage.setItem('stockViewMode', mode)
+  }
+
+  const [products, setProducts] = useState([])
+  // Les catégories à suivi unitaire s'ouvrent sur leurs modèles, chacun avec
+  // ses compteurs d'articles — pas sur la grille de produits.
+  const [models,   setModels]   = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [error,    setError]    = useState('')
+
+  // Filtres de la vue catégorie
+  const [search,         setSearch]         = useState('')
+  const [brandFilter,    setBrandFilter]    = useState('')
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [stockState,     setStockState]     = useState('')
+  const [expiryFilter,   setExpiryFilter]   = useState('')
+
+  const [modal,      setModal]      = useState(null)
+  const [adjusting,  setAdjusting]  = useState(null)
+  const [archiving,  setArchiving]  = useState(null)
+  const [destroying, setDestroying] = useState(null)
   const [viewingMovements,      setViewingMovements]      = useState(null)
   const [viewingMovementDetail, setViewingMovementDetail] = useState(null)
-  const [viewingStockDetail,    setViewingStockDetail]    = useState(null)
-  const [allMovements,     setAllMovements]     = useState([])
-  const [mvTotal,          setMvTotal]          = useState(0)
-  const [mvPage,           setMvPage]           = useState(1)
-  const [mvLoading,        setMvLoading]        = useState(false)
-  const [allBrands,        setAllBrands]        = useState([])
-  const [allSuppliers,     setAllSuppliers]     = useState([])
-  const [statFilter,       setStatFilter]       = useState(null)
 
-  // Tri colonnes
-  const [sortField, setSortField] = useState(null)
-  const [sortDir,   setSortDir]   = useState('asc')
+  const [allMovements, setAllMovements] = useState([])
+  const [mvTotal,      setMvTotal]      = useState(0)
+  const [mvPage,       setMvPage]       = useState(1)
+  const [mvLoading,    setMvLoading]    = useState(false)
 
   useLoadingBar(loading)
 
-  const isArchived   = tab === 'archived'
   const isMovements  = tab === 'movements'
-  const totalPages   = Math.ceil(total / LIMIT)
-  const mvTotalPages = Math.ceil(mvTotal / LIMIT)
+  const isArchived   = tab === 'archived'
+  const isParc       = tab === 'parc'
+  const mvTotalPages = Math.ceil(mvTotal / 50)
 
-  function toggleSort(field) {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortField(field); setSortDir('asc') }
-  }
+  const catBySlug = useMemo(
+    () => Object.fromEntries(categories.map(c => [c.slug, c])),
+    [categories]
+  )
+  const activeCat = catSlug ? catBySlug[catSlug] || null : null
 
-  const sortedProducts = useMemo(() => {
-    if (!sortField) return products
-    return [...products].sort((a, b) => {
-      let va, vb
-      if      (sortField === 'name')       { va = (a.name || '').toLowerCase();       vb = (b.name || '').toLowerCase() }
-      else if (sortField === 'category')   { va = a.category || '';                   vb = b.category || '' }
-      else if (sortField === 'stock')      { va = a.stock ?? 0;                       vb = b.stock ?? 0 }
-      else if (sortField === 'expiration') {
-        va = a.expirationDate ? new Date(a.expirationDate).getTime() : Infinity
-        vb = b.expirationDate ? new Date(b.expirationDate).getTime() : Infinity
-      }
-      else if (sortField === 'brand')        { va = (a.brand || '').toLowerCase();      vb = (b.brand || '').toLowerCase() }
-      else if (sortField === 'tracabilite') {
-        va = a.requiresSerialNumber ? 2 : a.requiresLotNumber ? 1 : 0
-        vb = b.requiresSerialNumber ? 2 : b.requiresLotNumber ? 1 : 0
-      }
-      else if (sortField === 'price')      { va = a.salePrice ?? -Infinity;           vb = b.salePrice ?? -Infinity }
-      else return 0
-      if (va < vb) return sortDir === 'asc' ? -1 : 1
-      if (va > vb) return sortDir === 'asc' ? 1 : -1
-      return 0
-    })
-  }, [products, sortField, sortDir])
-
-  useEffect(() => {
-    getBrands().then(setAllBrands).catch(() => {})
-    getSuppliers().then(setAllSuppliers).catch(() => {})
+  const fetchCategories = useCallback(async () => {
+    try {
+      const data = await getProductCategories({ withStats: 'true' })
+      setCategories(Array.isArray(data) ? data : [])
+    } catch (err) { toast.error(formatApiError(err)) }
   }, [])
 
-  const fetchStats = useCallback(async () => {
-    try { setStats(await getProductStats()) } catch (_) {}
-  }, [])
+  useEffect(() => { fetchCategories() }, [fetchCategories])
 
+  /* Rien n'est chargé tant qu'on est sur l'accueil : les cartes de catégories
+     se contentent des compteurs agrégés.
+
+     Dans une catégorie, une seule requête sert les deux affichages — chaque
+     produit arrive avec le décompte de ses articles, que les cartes ignorent et
+     que la liste met en avant. Les archives restent sur l'ancien endpoint :
+     elles n'ont pas d'articles à compter. */
   const fetchProducts = useCallback(async () => {
+    if (catSlug && !activeCat) return           // catégories pas encore chargées
+    if (!activeCat && !isArchived) { setProducts([]); setModels([]); setLoading(false); return }
     setLoading(true)
     setError('')
     try {
-      const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false' }
-      if (search)                        params.search       = search
-      if (category)                      params.category     = category
-      if (brandFilter)                   params.brand        = brandFilter
-      if (supplierFilter)                params.supplier     = supplierFilter
-      if (statFilter === 'lowStock')     params.lowStock     = 'true'
-      if (statFilter === 'expiringSoon') params.expiringSoon = 'true'
-      if (statFilter === 'expired')      params.expired      = 'true'
-      const res = await getProducts(params)
-      setProducts(res.data)
-      setTotal(res.total)
+      if (isArchived) {
+        const res = await getProducts({ limit: LIMIT, archived: 'true' })
+        setProducts(Array.isArray(res.data) ? res.data : [])
+        setModels([])
+        return
+      }
+      const rows = await getStockModels({ category: activeCat.slug })
+      setModels(Array.isArray(rows) ? rows : [])
+      setProducts([])
     } catch (err) {
       const msg = formatApiError(err)
       setError(msg)
@@ -928,303 +996,337 @@ export default function StockPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search, isArchived, category, brandFilter, supplierFilter, statFilter])
+  }, [activeCat, catSlug, isArchived])
+
+  useEffect(() => { fetchProducts() }, [fetchProducts])
 
   const fetchAllMovements = useCallback(async () => {
     setMvLoading(true)
     try {
-      const res = await getAllMovements({ page: mvPage, limit: LIMIT })
+      const res = await getAllMovements({ page: mvPage, limit: 50 })
       setAllMovements(Array.isArray(res) ? res : (res.data || []))
       setMvTotal(res.total || 0)
-    } catch (_) {
-      setAllMovements([])
-    } finally {
-      setMvLoading(false)
-    }
+    } catch { setAllMovements([]) } finally { setMvLoading(false) }
   }, [mvPage])
 
-  useEffect(() => { fetchStats() },    [fetchStats])
-  useEffect(() => { if (!isMovements) fetchProducts() }, [fetchProducts, isMovements])
-  useEffect(() => { if (isMovements)  fetchAllMovements() }, [isMovements, fetchAllMovements])
-  useEffect(() => { setPage(1) },   [search, tab, category, statFilter])
-  useEffect(() => { setMvPage(1) }, [tab])
+  useEffect(() => { if (isMovements) fetchAllMovements() }, [isMovements, fetchAllMovements])
+
+  /* Marques et fournisseurs proposés : ceux réellement présents dans la vue. */
+  const brands    = useMemo(() => [...new Set(models.map(p => p.brand).filter(Boolean))].sort(), [models])
+  const suppliers = useMemo(() => [...new Set(models.map(p => p.supplier).filter(Boolean))].sort(), [models])
+
+  const visibleModels = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return models.filter(m => {
+      if (q && ![m.name, m.reference, m.brand, m.supplier].some(v => v?.toLowerCase().includes(q))) return false
+      if (brandFilter    && m.brand    !== brandFilter)    return false
+      if (supplierFilter && m.supplier !== supplierFilter) return false
+      // Un modèle est « épuisé » quand plus aucun exemplaire n'est disponible.
+      if (stockState) {
+        const s = m.summary || {}
+        const state = s.disponible === 0 ? 'out'
+          : s.disponible <= (m.alertThreshold || 0) ? 'low' : 'ok'
+        if (state !== stockState) return false
+      }
+      if (expiryFilter) {
+        const s = m.summary || {}
+        if (expiryFilter === 'expired') return (s.expired ?? 0) > 0
+        return (s.expiringSoon ?? 0) > 0
+      }
+      return true
+    })
+  }, [models, search, brandFilter, supplierFilter, stockState, expiryFilter])
+
+  function resetFilters() {
+    setSearch(''); setBrandFilter(''); setSupplierFilter('')
+    setStockState(''); setExpiryFilter('')
+  }
+
+  // Chaque changement de vue empile une entrée d'historique.
+  function openCategory(cat) {
+    setSearchParams({ tab: 'categories', cat: cat.slug })
+  }
+
+  function backToCategories() {
+    setSearchParams({ tab: 'categories' })
+  }
+
+  function switchTab(next) {
+    setSearchParams({ tab: next })
+  }
+
+  // Les filtres sont propres à une vue : ils repartent à zéro quand elle change.
+  useEffect(() => { resetFilters() }, [tab, catSlug]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Chaque catégorie ouvre sur son affichage par défaut : la liste à compteurs
+     pour celles réglées en « vue par modèles », les cartes sinon. Le bouton de
+     bascule reste maître pour la visite en cours. */
+  useEffect(() => {
+    if (!activeCat) return
+    setViewMode(activeCat.tracksItems ? 'list' : (localStorage.getItem('stockViewMode') || 'grid'))
+  }, [activeCat])
 
   async function handleRestore(product) {
     try {
       await restoreProduct(product._id)
       toast.success(`${product.name} restauré.`)
-      fetchProducts()
-      fetchStats()
+      fetchProducts(); fetchCategories()
     } catch (err) { toast.error(formatApiError(err)) }
   }
 
-  function handleSaved()     { setModal(null);      fetchProducts(); fetchStats() }
-  function handleAdjusted()  { setAdjusting(null);  fetchProducts(); fetchStats() }
-  function handleArchived()  { setArchiving(null);  fetchProducts(); fetchStats() }
-  function handleDestroyed() { setDestroying(null); fetchProducts(); fetchStats() }
+  function refresh() { fetchProducts(); fetchCategories() }
+  function handleSaved()     { setModal(null);      refresh() }
+  function handleAdjusted()  { setAdjusting(null);  refresh() }
+  function handleArchived()  { setArchiving(null);  refresh() }
+  function handleDestroyed() { setDestroying(null); refresh() }
 
-  /* ── Stats cards ── */
-  const statCards = stats ? [
-    { icon: Package,       label: 'Total produits',    value: stats.total,        sub: 'en catalogue',              color: 'var(--orange-500)', bg: 'var(--orange-50)', filter: null },
-    { icon: AlertCircle,   label: 'Stock critique',    value: stats.lowStock,     sub: 'en dessous du seuil',       color: 'var(--amber-600)',  bg: 'var(--amber-50)',  alert: stats.lowStock > 0,    filter: 'lowStock' },
-    { icon: Clock,         label: 'Expirent bientôt', value: stats.expiringSoon, sub: 'dans les 60 prochains jours', color: 'var(--blue-600)', bg: 'var(--blue-50)',   alert: stats.expiringSoon > 0, filter: 'expiringSoon' },
-    { icon: AlertTriangle, label: 'Produits expirés', value: stats.expired,      sub: 'à retirer du stock',         color: 'var(--red-600)',   bg: 'var(--red-50)',    alert: stats.expired > 0,     filter: 'expired' },
-  ] : []
+  /* Indicateurs de la catégorie ouverte. Ils viennent des articles, seuls à
+     connaître réservations, maintenance et DLC — la péremption n'apparaît que
+     pour les catégories suivies par lot. */
+  const catStats = useMemo(() => {
+    if (!activeCat) return []
 
-  const thSort = (field, label, extraStyle = {}) => (
-    <th onClick={() => toggleSort(field)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...extraStyle }}>
-      {label}<SortIcon field={field} sortField={sortField} sortDir={sortDir} />
-    </th>
-  )
+    const agg = models.reduce((a, m) => {
+      const s = m.summary || {}
+      a.total       += s.total       || 0
+      a.disponible  += s.disponible  || 0
+      a.reserve     += s.reserve     || 0
+      a.maintenance += s.maintenance || 0
+      a.expired     += s.expired     || 0
+      return a
+    }, { total: 0, disponible: 0, reserve: 0, maintenance: 0, expired: 0 })
+
+    const cards = [
+      { key: 'models', tone: 'slate', icon: Layers,           label: 'Références',     value: models.length },
+      { key: 'total',  tone: 'slate', icon: Boxes,            label: 'Stock actuel',   value: agg.total },
+      { key: 'dispo',  tone: 'mint',  icon: PackageOpen,      label: 'Disponibles',    value: agg.disponible },
+      { key: 'resa',   tone: 'sky',   icon: Clock,            label: 'Réservés',       value: agg.reserve },
+      // Les compteurs d'alerte ne se colorent que s'ils ont quelque chose à dire.
+      { key: 'maint',  tone: 'sun',   icon: SlidersHorizontal, label: 'En maintenance', alert: true, value: agg.maintenance },
+    ]
+    if (activeCat.tracksLot) {
+      cards.push({ key: 'expired', tone: 'ember', icon: AlertTriangle, label: 'DLC dépassée', alert: true, value: agg.expired })
+    }
+    return cards
+  }, [activeCat, models])
 
   return (
-    <div className="page-content page-content--table-scroll">
+    <div className="page-content">
 
       {/* ── En-tête ── */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">Stock & Produits</h1>
+          <h1 className="page-title">
+            {activeCat && (
+              <button className="back-btn" onClick={backToCategories}><ArrowLeft size={16} /></button>
+            )}
+            {activeCat ? activeCat.name : 'Stock & Produits'}
+          </h1>
           <p className="page-subtitle">
-            {isMovements
+            {isParc
+              ? 'Batteries et électrodes posées chez les clients, par échéance'
+              : isMovements
               ? `${mvTotal} mouvement${mvTotal !== 1 ? 's' : ''} enregistré${mvTotal !== 1 ? 's' : ''}`
-              : `${total} produit${total !== 1 ? 's' : ''} ${isArchived ? 'archivés' : 'en catalogue'}`
+              : isArchived
+                ? `${products.length} produit${products.length !== 1 ? 's' : ''} archivé${products.length !== 1 ? 's' : ''}`
+                : activeCat
+                  ? `${visibleModels.length} référence${visibleModels.length !== 1 ? 's' : ''} affichée${visibleModels.length !== 1 ? 's' : ''}`
+                  : `${categories.length} catégorie${categories.length !== 1 ? 's' : ''} de produits`
             }
           </p>
         </div>
-        {!isMovements && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              className={`btn btn--ghost${isArchived ? ' btn--ghost-active' : ''}`}
-              onClick={() => { setTab(isArchived ? 'active' : 'archived'); setCategory(''); setBrandFilter(''); setSupplierFilter(''); setSearch(''); setStatFilter(null) }}
-            >
-              <Archive size={14} /> {isArchived ? '← Stock actif' : 'Archivés'}
-            </button>
-            {!isArchived && (
-              <button className="btn btn--primary" onClick={() => setModal('create')}>
-                <Plus size={15} /> Nouveau produit
-              </button>
-            )}
-          </div>
+        {!isMovements && !isArchived && !isParc && (
+          <button className="btn btn--primary" onClick={() => setModal('create')}>
+            <Plus size={15} /> Nouveau produit
+          </button>
         )}
       </div>
 
-      {/* ── Onglets navigation ── */}
-      <div className="stock-tabs">
-        {[
-          { value: 'active',    label: 'Stock actif'          },
-          { value: 'movements', label: 'Mouvements de stocks' },
-        ].map(t => (
-          <button
-            key={t.value}
-            className={`stock-tab${tab === t.value ? ' stock-tab--active' : ''}`}
-            onClick={() => { setTab(t.value); setCategory(''); setBrandFilter(''); setSupplierFilter(''); setSearch(''); setStatFilter(null) }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Cartes de statistiques ── */}
-      {tab === 'active' && stats && (
-        <div className="stock-stats-grid">
-          {statCards.map(card => {
-            const Icon = card.icon
-            const isActive = card.filter !== null && statFilter === card.filter
-            return (
-              <div
-                key={card.label}
-                className={`stock-stat-card${card.alert ? ' stock-stat-card--alert' : ''}${isActive ? ' stock-stat-card--active' : ''}`}
-                style={{
-                  ...(card.alert ? { color: card.color } : {}),
-                  ...(isActive ? { background: card.bg, boxShadow: `0 0 0 2px ${card.color}`, borderColor: 'transparent' } : {}),
-                  cursor: 'pointer',
-                }}
-                onClick={() => setStatFilter(statFilter === card.filter ? null : card.filter)}
-              >
-                <div className="stock-stat-icon" style={{ background: card.bg }}>
-                  <Icon size={18} color={card.color} />
-                </div>
-                <div className="stock-stat-body">
-                  <div className="stock-stat-value" style={{ color: card.alert ? card.color : 'var(--text-primary)' }}>
-                    {card.value}
-                  </div>
-                  <div className="stock-stat-label">{card.label}</div>
-                  <div className="stock-stat-sub">{card.sub}</div>
-                </div>
-              </div>
-            )
-          })}
+      {/* ── Onglets ── */}
+      {!activeCat && (
+        <div className="stock-tabs">
+          {[
+            { value: 'categories', label: 'Catégories' },
+            { value: 'parc',       label: 'Échéances parc' },
+            { value: 'movements',  label: 'Mouvements de stocks' },
+            { value: 'archived',   label: 'Archivés' },
+          ].map(t => (
+            <button
+              key={t.value}
+              className={`stock-tab${tab === t.value ? ' stock-tab--active' : ''}`}
+              onClick={() => switchTab(t.value)}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* ── Barre de recherche + filtres ── */}
-      {!isMovements && (
-        <div className="table-toolbar">
-          <div className="search-wrap">
-            <Search size={14} className="search-icon" />
-            <input
-              className="search-input"
-              placeholder="Rechercher par nom, référence, marque…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            {search && (
-              <button className="search-clear" onClick={() => setSearch('')}>
-                <X size={13} />
-              </button>
-            )}
+      {/* ── Accueil : cartes de catégories ── */}
+      {tab === 'categories' && !activeCat && (
+        <CategoryGrid categories={categories} onPick={openCategory} />
+      )}
+
+      {/* ── Échéances du parc ── */}
+      {isParc && <ParcExpiryTab initialType={parcType} />}
+
+      {/* ── Vue catégorie ── */}
+      {activeCat && (
+        <>
+          <div className="cat-stats-row">
+            {catStats.map(c => {
+              const StatIcon = c.icon
+              return (
+                <div key={c.key}
+                  className={`cat-stat cat-stat--${c.tone}${c.alert && c.value > 0 ? ' cat-stat--alert' : ''}`}>
+                  <span className="cat-stat-icon"><StatIcon size={15} strokeWidth={2.2} /></span>
+                  <span className="cat-stat-value">{c.value}</span>
+                  <span className="cat-stat-label">{c.label}</span>
+                </div>
+              )
+            })}
           </div>
-          <select className="cat-filter-select" value={category} onChange={e => setCategory(e.target.value)}>
-            <option value="">Toutes catégories</option>
-            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
-          {allBrands.length > 0 && (
-            <select className="cat-filter-select" value={brandFilter} onChange={e => setBrandFilter(e.target.value)}>
-              <option value="">Toutes marques</option>
-              {allBrands.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
-          )}
-          {allSuppliers.length > 0 && (
-            <select className="cat-filter-select" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
-              <option value="">Tous fournisseurs</option>
-              {allSuppliers.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          )}
-        </div>
-      )}
 
-      {/* ── Tableau produits ── */}
-      {!isMovements && (
-        <div className="table-wrap">
+          <div className="table-toolbar cat-filters">
+            <div className="search-wrap">
+              <Search size={14} className="search-icon" />
+              <input className="search-input" placeholder="Rechercher dans la catégorie…"
+                value={search} onChange={e => setSearch(e.target.value)} />
+              {search && <button className="search-clear" onClick={() => setSearch('')}><X size={13} /></button>}
+            </div>
+
+            <select className="cat-filter-select" value={activeCat.slug}
+              onChange={e => openCategory(catBySlug[e.target.value])}>
+              {categories.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+            </select>
+
+            {brands.length > 0 && (
+              <select className="cat-filter-select" value={brandFilter} onChange={e => setBrandFilter(e.target.value)}>
+                <option value="">Toutes marques</option>
+                {brands.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            )}
+
+            {suppliers.length > 0 && (
+              <select className="cat-filter-select" value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)}>
+                <option value="">Tous fournisseurs</option>
+                {suppliers.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            )}
+
+            <select className="cat-filter-select" value={stockState} onChange={e => setStockState(e.target.value)}>
+              {STOCK_STATES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+
+            {activeCat.tracksLot && (
+              <select className="cat-filter-select" value={expiryFilter} onChange={e => setExpiryFilter(e.target.value)}>
+                {EXPIRY_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+            )}
+
+            <div className="view-toggle">
+              {[
+                { mode: 'grid', icon: LayoutGrid, label: 'Vue cartes' },
+                { mode: 'list', icon: List,       label: 'Vue liste — total, disponible, réservé…' },
+              ].map(({ mode, icon: ModeIcon, label }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={viewMode === mode}
+                  className={`view-toggle-btn${viewMode === mode ? ' view-toggle-btn--active' : ''}`}
+                  onClick={() => changeViewMode(mode)}
+                >
+                  <ModeIcon size={15} />
+                </button>
+              ))}
+            </div>
+          </div>
+
           {error && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
 
           {loading ? (
             <div className="table-loading"><span className="spinner" /></div>
-          ) : products.length === 0 ? (
+          ) : visibleModels.length === 0 ? (
             <div className="table-empty">
               <Package size={36} color="var(--gray-300)" />
-              <p>
-                {search
-                  ? 'Aucun résultat pour cette recherche.'
-                  : isArchived
-                    ? 'Aucun produit archivé.'
-                    : 'Aucun produit en stock.'}
-              </p>
-              {!search && !isArchived && (
+              <p>{models.length === 0 ? 'Aucun produit dans cette catégorie.' : 'Aucun résultat pour ces filtres.'}</p>
+              {models.length === 0 && (
                 <button className="btn btn--primary" onClick={() => setModal('create')}>
-                  <Plus size={14} /> Ajouter le premier produit
+                  <Plus size={14} /> Ajouter un produit
                 </button>
               )}
             </div>
+          ) : viewMode === 'list' ? (
+            /* Liste : chaque référence avec le décompte de ses articles. */
+            <div className="model-list">
+              {visibleModels.map(m => (
+                <ModelRow
+                  key={m._id}
+                  model={m}
+                  category={activeCat}
+                  onOpen={() => navigate(`/stock/${m._id}`)}
+                  onMenu={(x, y, prod) => setMenu({ x, y, product: prod })}
+                />
+              ))}
+            </div>
           ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  {thSort('name',        'Produit',          { minWidth: 320 })}
-                  {thSort('category',   'Catégorie',        { width: 130 })}
-                  {thSort('brand',      'Marque / Modèle',  { width: 160 })}
-                  {thSort('tracabilite','Traçabilité',      { width: 110 })}
-                  {thSort('stock',      'Stock')}
-                  {thSort('expiration', 'Péremption')}
-                  {thSort('price',      'Prix vente')}
-                  <th style={{ width: isArchived ? 100 : 140 }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedProducts.map(p => (
-                  <tr key={p._id} className={isArchived ? 'row--archived' : ''}>
-                    {/* Cellule produit — toute la zone est cliquable */}
-                    <td
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => navigate(`/stock/${p._id}`)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        {p.images?.length > 0
-                          ? <img src={productImageUrl(p.images[0])} alt="" className="product-list-thumb" />
-                          : <div className="product-list-thumb product-list-thumb--empty">
-                              <Package size={14} color="var(--gray-300)" />
-                            </div>
-                        }
-                        <div>
-                          <div className="cell-primary">{p.name}</div>
-                          {p.reference && <div className="cell-secondary">Réf. {p.reference}</div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td><CategoryBadge category={p.category} /></td>
-                    <td>
-                      {p.brand && <div className="cell-primary" style={{ fontSize: 13 }}>{p.brand}</div>}
-                      {p.compatibleModel && <div className="cell-secondary">{p.compatibleModel}</div>}
-                      {!p.brand && !p.compatibleModel && <span className="cell-muted">—</span>}
-                    </td>
-                    <td>
-                      {p.requiresSerialNumber || p.requiresLotNumber ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                          {p.requiresSerialNumber && <span className="track-badge">N° série</span>}
-                          {p.requiresLotNumber    && <span className="track-badge track-badge--lot">N° lot</span>}
-                        </div>
-                      ) : (
-                        <span className="cell-muted">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <div className="stock-cell-clickable" onClick={() => setViewingStockDetail(p)} title="Voir le détail du stock">
-                        <StockIndicator stock={p.stock} threshold={p.alertThreshold} />
-                      </div>
-                    </td>
-                    <td><ExpirationBadge date={p.expirationDate} /></td>
-                    <td className="cell-muted">{formatPrice(p.salePrice)}</td>
-                    <td>
-                      <div className="row-actions">
-                        {isArchived ? (
-                          <>
-                            <button className="action-btn action-btn--restore" title="Restaurer" onClick={() => handleRestore(p)}>
-                              <RotateCcw size={14} />
-                            </button>
-                            <button className="action-btn action-btn--destroy" title="Supprimer définitivement" onClick={() => setDestroying(p)}>
-                              <Trash size={14} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button className="action-btn action-btn--history" title="Mouvements" onClick={() => setViewingMovements(p)}>
-                              <History size={14} />
-                            </button>
-                            <button className="action-btn action-btn--stock" title="Ajuster le stock" onClick={() => setAdjusting(p)}>
-                              <SlidersHorizontal size={14} />
-                            </button>
-                            <button className="action-btn action-btn--edit" title="Modifier" onClick={() => setModal(p)}>
-                              <Pencil size={14} />
-                            </button>
-                            <button className="action-btn action-btn--delete" title="Archiver" onClick={() => setArchiving(p)}>
-                              <Trash2 size={14} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="prod-grid">
+              {visibleModels.map(p => (
+                <ProductTile
+                  key={p._id}
+                  product={p}
+                  category={activeCat}
+                  onOpen={() => navigate(`/stock/${p._id}`)}
+                  onMenu={(x, y, prod) => setMenu({ x, y, product: prod })}
+                />
+              ))}
+            </div>
           )}
-        </div>
+        </>
       )}
 
-      {/* ── Pagination produits ── */}
-      {!isMovements && totalPages > 1 && (
-        <div className="pagination">
-          <button className="pag-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-            <ChevronLeft size={15} />
-          </button>
-          <span className="pag-info">Page {page} / {totalPages}</span>
-          <button className="pag-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
-            <ChevronRight size={15} />
-          </button>
-        </div>
+      {/* ── Archivés ── */}
+      {isArchived && (
+        loading ? (
+          <div className="table-loading"><span className="spinner" /></div>
+        ) : products.length === 0 ? (
+          <div className="table-empty">
+            <Archive size={36} color="var(--gray-300)" />
+            <p>Aucun produit archivé.</p>
+          </div>
+        ) : (
+          <div className="prod-grid">
+            {products.map(p => (
+              <div key={p._id} className="prod-tile prod-tile--archived prod-tile--gray">
+                <div className={`prod-tile-media${p.images?.length > 0 ? ' prod-tile-media--photo' : ' prod-tile-media--empty'}`}>
+                  {p.images?.length > 0
+                    ? <img src={productImageUrl(p.images[0])} alt="" />
+                    : <span className="prod-noimg"><PackageOpen size={26} strokeWidth={1.5} /></span>}
+                </div>
+                <div className="prod-tile-body">
+                  <div className="prod-tile-head">
+                    {catBySlug[p.category] && <span className="prod-tile-brand">{catBySlug[p.category].name}</span>}
+                  </div>
+                  <div className="prod-tile-name">{p.name}</div>
+                  {p.reference && <div className="prod-tile-ref">Réf. {p.reference}</div>}
+                </div>
+                <div className="prod-tile-actions">
+                  <button className="action-btn action-btn--restore" title="Restaurer" onClick={() => handleRestore(p)}>
+                    <RotateCcw size={14} />
+                  </button>
+                  <button className="action-btn action-btn--destroy" title="Supprimer définitivement" onClick={() => setDestroying(p)}>
+                    <Trash size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       )}
 
-      {/* ── Tableau mouvements (tous produits) ── */}
+      {/* ── Mouvements ── */}
       {isMovements && (
         <div className="table-wrap">
           {mvLoading ? (
@@ -1257,8 +1359,9 @@ export default function StockPage() {
                   const TypeIcon  = isEntree ? TrendingUp : isSortie ? TrendingDown : isSerial ? Hash : SlidersHorizontal
                   const typeLabel = isEntree ? 'Entrée' : isSortie ? 'Sortie' : isSerial ? 'Saisie de séries' : 'Correction'
                   const prod      = mv.product
+                  const cat       = prod?.category ? catBySlug[prod.category] : null
                   return (
-                    <tr key={mv._id} className="mv-row--clickable" onClick={() => setViewingMovementDetail(mv)} title="Voir le détail">
+                    <tr key={mv._id} className="mv-row--clickable" onClick={() => setViewingMovementDetail(mv)}>
                       <td>
                         {prod ? (
                           <>
@@ -1270,10 +1373,9 @@ export default function StockPage() {
                         ) : <span className="cell-muted">—</span>}
                       </td>
                       <td>
-                        {prod?.category
-                          ? <CategoryBadge category={prod.category} />
-                          : <span className="cell-muted">—</span>
-                        }
+                        {cat
+                          ? <span className={`cat-badge cat--${cat.color}`}>{cat.name}</span>
+                          : <span className="cell-muted">—</span>}
                       </td>
                       <td>
                         <div className={`mv-badge mv-badge--${cls}`} style={{ marginBottom: 2 }}>
@@ -1284,8 +1386,7 @@ export default function StockPage() {
                       <td>
                         {mv.previousStock != null && mv.newStock != null
                           ? <span className="mv-stocks">{mv.previousStock} → {mv.newStock}</span>
-                          : <span className="cell-muted">—</span>
-                        }
+                          : <span className="cell-muted">—</span>}
                       </td>
                       <td className="cell-muted">{mv.reason || '—'}</td>
                       <td className="cell-muted">{mv.createdBy?.fullName || mv.createdBy?.username || '—'}</td>
@@ -1306,7 +1407,6 @@ export default function StockPage() {
         </div>
       )}
 
-      {/* ── Pagination mouvements ── */}
       {isMovements && mvTotalPages > 1 && (
         <div className="pagination">
           <button className="pag-btn" disabled={mvPage === 1} onClick={() => setMvPage(p => p - 1)}>
@@ -1323,6 +1423,7 @@ export default function StockPage() {
       {(modal === 'create' || modal?._id) && (
         <ProductModal
           product={modal === 'create' ? null : modal}
+          defaultCategory={modal === 'create' ? activeCat?.slug : undefined}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />
@@ -1342,15 +1443,17 @@ export default function StockPage() {
       {viewingMovementDetail && (
         <MovementDetailModal movement={viewingMovementDetail} onClose={() => setViewingMovementDetail(null)} />
       )}
-      {viewingStockDetail && (
-        <StockDetailModal
-          product={viewingStockDetail}
-          onClose={() => setViewingStockDetail(null)}
-          onAdjust={() => {
-            const p = viewingStockDetail
-            setViewingStockDetail(null)
-            setAdjusting(p)
-          }}
+      {menu && (
+        <ProductMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          actions={[
+            { label: 'Voir la fiche',    icon: Eye,               onClick: pr => navigate(`/stock/${pr._id}`) },
+            { label: 'Mouvements',       icon: History,           onClick: pr => setViewingMovements(pr) },
+            { label: 'Ajuster le stock', icon: SlidersHorizontal, onClick: pr => setAdjusting(pr) },
+            { label: 'Modifier',         icon: Pencil,            onClick: pr => setModal(pr) },
+            { label: 'Archiver',         icon: Trash2,            onClick: pr => setArchiving(pr), danger: true },
+          ]}
         />
       )}
     </div>

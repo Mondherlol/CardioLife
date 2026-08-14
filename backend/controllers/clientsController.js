@@ -1,38 +1,84 @@
+const fs   = require('fs')
+const path = require('path')
 const { validationResult } = require('express-validator')
 const Client   = require('../models/Client')
+const Site     = require('../models/Site')
 const Document = require('../models/Document')
 const { getOrCreateClientFolder } = require('../utils/clientDocsFolder')
 
 async function getAll(req, res) {
-  const { governorate, type, search, q, page = 1, limit = 20, archived = 'false', sort = 'createdAt', dir = 'desc' } = req.query
+  const { governorate, search, q, page = 1, limit = 20, archived = 'false', sort = 'createdAt', dir = 'desc' } = req.query
 
   const filter = { isActive: archived === 'true' ? false : true }
   if (governorate) filter['address.governorate'] = governorate
-  if (type) {
-    const types = String(type).split(',').map(t => t.trim()).filter(Boolean)
-    filter.type = types.length > 1 ? { $in: types } : types[0]
-  }
   if (search)      filter.$text = { $search: search }
   if (q)           filter.name  = { $regex: q, $options: 'i' }
 
   const skip  = (Number(page) - 1) * Number(limit)
   const total = await Client.countDocuments(filter)
+  // Les colonnes de la liste (sites, DEA, prochain contrôle) sont dérivées des
+  // sites du client : on les calcule côté base pour rester triables et paginables.
   const sortFields = {
     name:        'name',
-    type:        'type',
-    governorate: 'address.governorate',
-    contactName: 'contacts.0.name',
-    phone:       'contacts.0.phone',
+    sites:       'siteCount',
+    deas:        'deaCount',
+    nextControl: 'nextControlDate',
+    contract:    'underContract',
     createdAt:   'createdAt',
   }
   const sortKey = sortFields[sort] || sortFields.createdAt
   const sortDir = dir === 'asc' ? 1 : -1
-  const clients = await Client.find(filter)
-    .skip(skip)
-    .limit(Number(limit))
-    .sort({ [sortKey]: sortDir, createdAt: -1 })
-    .collation({ locale: 'fr', strength: 1 })
-    .populate('createdBy', 'username fullName')
+
+  const clients = await Client.aggregate([
+    { $match: filter },
+    {
+      $lookup: {
+        from: 'sites',
+        localField: '_id',
+        foreignField: 'client',
+        as: 'clientSites',
+      },
+    },
+    {
+      $addFields: {
+        siteCount: { $size: '$clientSites' },
+        deaCount: {
+          $sum: {
+            $map: {
+              input: '$clientSites',
+              as: 's',
+              in: { $size: { $ifNull: ['$$s.deas', []] } },
+            },
+          },
+        },
+        // Prochain contrôle = la plus proche des échéances de tous les DEA du client.
+        nextControlDate: {
+          $min: {
+            $reduce: {
+              input: '$clientSites',
+              initialValue: [],
+              in: {
+                $concatArrays: [
+                  '$$value',
+                  {
+                    $map: {
+                      input: { $ifNull: ['$$this.deas', []] },
+                      as: 'd',
+                      in: '$$d.nextControlDate',
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    { $project: { clientSites: 0 } },
+    { $sort: { [sortKey]: sortDir, createdAt: -1 } },
+    { $skip: skip },
+    { $limit: Number(limit) },
+  ]).collation({ locale: 'fr', strength: 1 })
 
   res.json({
     data: clients,
@@ -47,7 +93,7 @@ async function lookup(req, res) {
   const filter = { isActive: true }
   if (q) filter.name = { $regex: q, $options: 'i' }
   const clients = await Client.find(filter)
-    .select('name type address.city')
+    .select('name address.city')
     .limit(Number(limit))
     .sort({ name: 1 })
   res.json(clients)
@@ -95,6 +141,43 @@ async function update(req, res) {
   res.json(client)
 }
 
+/* ── Logo du client ────────────────────────────────── */
+
+const LOGO_DIR = path.join(__dirname, '..', 'uploads', 'clients')
+
+function removeLogoFile(filename) {
+  if (filename) fs.unlink(path.join(LOGO_DIR, filename), () => {})
+}
+
+/* POST /api/clients/:id/logo */
+async function uploadLogo(req, res) {
+  if (!req.file) return res.status(400).json({ message: 'Aucun fichier fourni.' })
+
+  const client = await Client.findById(req.params.id)
+  if (!client) {
+    removeLogoFile(req.file.filename)
+    return res.status(404).json({ message: 'Client introuvable.' })
+  }
+
+  removeLogoFile(client.logo)
+  client.logo = req.file.filename
+  await client.save()
+  res.json(client)
+}
+
+/* DELETE /api/clients/:id/logo */
+async function deleteLogo(req, res) {
+  const client = await Client.findById(req.params.id)
+  if (!client) return res.status(404).json({ message: 'Client introuvable.' })
+
+  if (client.logo) {
+    removeLogoFile(client.logo)
+    client.logo = null
+    await client.save()
+  }
+  res.json(client)
+}
+
 async function archive(req, res) {
   const client = await Client.findById(req.params.id)
   if (!client) return res.status(404).json({ message: 'Client introuvable.' })
@@ -117,8 +200,13 @@ async function permanentDelete(req, res) {
   if (client.isActive) {
     return res.status(400).json({ message: 'Archivez d\'abord le client avant de le supprimer définitivement.' })
   }
+  removeLogoFile(client.logo)
+  await Site.deleteMany({ client: client._id })
   await client.deleteOne()
   res.json({ message: 'Client supprimé définitivement.' })
 }
 
-module.exports = { getAll, getById, create, update, archive, restore, permanentDelete, getDocumentsFolder, lookup }
+module.exports = {
+  getAll, getById, create, update, archive, restore, permanentDelete,
+  getDocumentsFolder, lookup, uploadLogo, deleteLogo,
+}

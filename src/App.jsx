@@ -8,20 +8,18 @@ import DashboardPage       from './pages/DashboardPage'
 import ClientsPage         from './pages/ClientsPage'
 import ClientDetailPage      from './pages/ClientDetailPage'
 import ClientImportPage     from './pages/ClientImportPage'
+import SiteDetailPage       from './pages/SiteDetailPage'
 import StockPage           from './pages/StockPage'
 import ProductDetailPage   from './pages/ProductDetailPage'
-import PacksPage           from './pages/PacksPage'
+import ProductItemPage     from './pages/ProductItemPage'
 import ContractsPage       from './pages/ContractsPage'
-import ContractFormPage    from './pages/ContractFormPage'
 import ContractDetailPage  from './pages/ContractDetailPage'
 import SettingsPage             from './pages/SettingsPage'
-import DevicesPage              from './pages/DevicesPage'
 import InstallationDetailPage   from './pages/InstallationDetailPage'
 import InstallationFormPage     from './pages/InstallationFormPage'
 import DocumentsPage            from './pages/DocumentsPage'
-import FormationsPage           from './pages/FormationsPage'
 import PlanningPage             from './pages/PlanningPage'
-import InterventionsPage        from './pages/InterventionsPage'
+import MaintenancePage          from './pages/MaintenancePage'
 import InterventionFichePage    from './pages/InterventionFichePage'
 import InterventionPrintPage    from './pages/InterventionPrintPage'
 import ProfilePage              from './pages/ProfilePage'
@@ -70,7 +68,7 @@ function ProtectedRoute() {
 
 function DashboardGate() {
   const { user } = useAuth()
-  if (user?.role === 'technicien') return <Navigate to="/interventions" replace />
+  if (user?.role === 'technicien') return <Navigate to="/maintenance/controles" replace />
   return <DashboardPage />
 }
 
@@ -88,23 +86,28 @@ export default function App() {
                 <Route path="/clients"          element={<ClientsPage />} />
                 <Route path="/clients/import"  element={<ClientImportPage />} />
                 <Route path="/clients/:id"     element={<ClientDetailPage />} />
+                <Route path="/sites/:id"       element={<SiteDetailPage />} />
                 <Route path="/stock"       element={<StockPage />} />
+                {/* Avant /stock/:id — sinon « articles » serait pris pour un id de modèle. */}
+                <Route path="/stock/articles/:id" element={<ProductItemPage />} />
                 <Route path="/stock/:id"  element={<ProductDetailPage />} />
-                <Route path="/packs"      element={<PacksPage />} />
                 <Route path="/contrats"          element={<ContractsPage />} />
-                <Route path="/contrats/new"      element={<ContractFormPage />} />
                 <Route path="/contrats/:id"      element={<ContractDetailPage />} />
-                <Route path="/contrats/:id/edit" element={<ContractFormPage />} />
-                <Route path="/devices"          element={<DevicesPage />} />
                 <Route path="/devices/new"     element={<InstallationFormPage />} />
                 <Route path="/devices/:id"     element={<InstallationDetailPage />} />
                 <Route path="/devices/:id/edit" element={<InstallationFormPage />} />
-                <Route path="/interventions"     element={<InterventionsPage />} />
+                {/* Contrôles, installations, formations et remplacements sont
+                    les quatre volets d'un même suivi : une seule page à onglets. */}
+                <Route path="/maintenance"      element={<Navigate to="/maintenance/controles" replace />} />
+                <Route path="/maintenance/:tab" element={<MaintenancePage />} />
                 <Route path="/interventions/:id" element={<InterventionFichePage />} />
+                {/* Anciennes entrées de menu — les liens en circulation restent valides. */}
+                <Route path="/interventions"   element={<Navigate to="/maintenance/controles" replace />} />
+                <Route path="/remplacements"   element={<Navigate to="/maintenance/remplacements" replace />} />
+                <Route path="/formations"      element={<Navigate to="/maintenance/formations" replace />} />
                 <Route path="/profil"            element={<ProfilePage />} />
                 <Route path="/planning"  element={<PlanningPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
-                <Route path="/formations" element={<FormationsPage />} />
                 <Route path="/settings"  element={<SettingsPage />} />
               </Route>
             </Route>

@@ -10,6 +10,7 @@ router.use(requireAnyPermission(['canManageFormations', 'canManageClients']))
 
 router.get('/',                          ctrl.getAll)
 router.get('/client/:clientId',          ctrl.getByClient)
+router.get('/site/:siteId',              ctrl.getBySite)
 router.post('/',                         ctrl.create)
 router.put('/:id',                       ctrl.update)
 router.patch('/:id/attestation',         ctrl.toggleAttestation)

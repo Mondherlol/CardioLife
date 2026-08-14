@@ -11,8 +11,12 @@ import { Search, Plus, X, Check } from 'lucide-react'
  *  displayFn    - (item) => string  — main display text
  *  subtextFn    - (item) => string  — secondary text (optional)
  *  placeholder  - input placeholder
- *  onCreateNew  - () => void  — shows [+] button if provided
+ *  onCreateNew  - (query) => void  — shows [+] button if provided ; reçoit la
+ *                 saisie en cours, ce qui permet de proposer « créer « X » »
  *  emptyText    - text when no results
+ *  emptyCtaLabel- (query) => string — libellé du bouton de création
+ *  onQueryChange- (query) => void — remonte la saisie au parent, pour les cas
+ *                 où une valeur absente de la liste doit être traitée
  *  disabled     - boolean
  */
 export default function ComboSearch({
@@ -25,6 +29,8 @@ export default function ComboSearch({
   placeholder = 'Rechercher…',
   onCreateNew,
   emptyText = 'Aucun résultat',
+  emptyCtaLabel,
+  onQueryChange,
   disabled = false,
 }) {
   const [query, setQuery] = useState('')
@@ -48,10 +54,15 @@ export default function ComboSearch({
       })
     : items
 
+  function setSearch(q) {
+    setQuery(q)
+    onQueryChange?.(q)
+  }
+
   function select(item) {
     onChange(item)
     setOpen(false)
-    setQuery('')
+    setSearch('')
   }
 
   /* ── Selected state ── */
@@ -82,7 +93,7 @@ export default function ComboSearch({
             className="combo-input"
             placeholder={placeholder}
             value={query}
-            onChange={e => { setQuery(e.target.value); setOpen(true) }}
+            onChange={e => { setSearch(e.target.value); setOpen(true) }}
             onFocus={() => setOpen(true)}
             disabled={disabled}
             autoComplete="off"
@@ -92,7 +103,7 @@ export default function ComboSearch({
           <button
             type="button"
             className="combo-new-btn"
-            onClick={onCreateNew}
+            onClick={() => onCreateNew(query)}
             title="Créer nouveau"
           >
             <Plus size={15} />
@@ -109,9 +120,9 @@ export default function ComboSearch({
                 <button
                   type="button"
                   className="combo-empty-cta"
-                  onClick={() => { setOpen(false); onCreateNew() }}
+                  onClick={() => { setOpen(false); onCreateNew(query) }}
                 >
-                  <Plus size={12} /> Créer nouveau
+                  <Plus size={12} /> {emptyCtaLabel ? emptyCtaLabel(query) : 'Créer nouveau'}
                 </button>
               )}
             </div>

@@ -408,7 +408,7 @@ export default function InstallationFormPage() {
       {/* Header */}
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="back-btn" onClick={() => navigate(isEdit ? `/devices/${id}` : '/devices')}>
+          <button className="back-btn" onClick={() => isEdit ? navigate(`/devices/${id}`) : navigate(-1)}>
             <ArrowLeft size={16} />
           </button>
           <div>
@@ -628,7 +628,7 @@ export default function InstallationFormPage() {
         {/* Footer */}
         <div className="ifc-footer">
           <button type="button" className="btn btn--ghost"
-            onClick={() => navigate(isEdit ? `/devices/${id}` : '/devices')}>
+            onClick={() => isEdit ? navigate(`/devices/${id}`) : navigate(-1)}>
             Annuler
           </button>
           <button type="submit" className="btn btn--primary" disabled={saving || !dataReady}>

@@ -1,7 +1,18 @@
-const multer = require('multer')
-const XLSX   = require('xlsx')
-const Client = require('../models/Client')
-const ClientType = require('../models/ClientType')
+const multer  = require('multer')
+const XLSX    = require('xlsx')
+const Client  = require('../models/Client')
+const Site    = require('../models/Site')
+const Product = require('../models/Product')
+const { syncDeaWithItem } = require('../utils/productItems')
+
+/**
+ * Import Excel du parc, aligné sur la structure Client → Site → DAE.
+ *
+ * Une ligne = un DAE. Les colonnes client et site se répètent d'une ligne à
+ * l'autre : les lignes sont regroupées à l'import, si bien qu'un client avec
+ * trois sites de deux DAE tient en six lignes. Une ligne sans colonne DAE crée
+ * simplement le client et son site.
+ */
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -14,108 +25,185 @@ const upload = multer({
   },
 }).single('file')
 
-/* ── Column map: Excel header → internal key ── */
+/* ── En-tête Excel → clé interne ────────────────────────────────
+   Les colonnes reprennent exactement ce que l'application affiche : client,
+   site (adresse + responsables), DAE et consommables. Rien de plus.
+   Les anciens en-têtes (« rue », import d'avant les sites) restent reconnus :
+   l'adresse du client sert alors de repli pour le site principal. */
 const COL_MAP = {
-  'nom':              'name',
-  'name':             'name',
-  'type':             'type',
-  'rue':              'street',
-  'street':           'street',
-  'adresse':          'street',
-  'ville':            'city',
-  'city':             'city',
-  'gouvernorat':      'governorate',
-  'governorate':      'governorate',
-  'gps lat':          'gpsLat',
-  'latitude':         'gpsLat',
-  'lat':              'gpsLat',
-  'gps lng':          'gpsLng',
-  'gps lon':          'gpsLng',
-  'longitude':        'gpsLng',
-  'lng':              'gpsLng',
-  'lon':              'gpsLng',
-  // Contacts (nouveaux en-têtes)
-  'contact 1 nom':       'contact1Name',
-  'contact 1 telephone': 'contact1Phone',
-  'contact 1 email':     'contact1Email',
-  'contact 2 nom':       'contact2Name',
-  'contact 2 telephone': 'contact2Phone',
-  'contact 2 email':     'contact2Email',
-  // Responsable interne (nouveaux en-têtes)
-  'responsable nom':       'managerName',
-  'responsable telephone': 'managerPhone',
-  'responsable email':     'managerEmail',
-  // Anciens en-têtes (compatibilité) — mappés sur le contact 1 / contact 2
-  'contact nom':      'contact1Name',
-  'contact name':     'contact1Name',
-  'contact':          'contact1Name',
-  'telephone':        'contact1Phone',
-  'phone':            'contact1Phone',
-  'phone 1':          'contact1Phone',
-  'telephone 1':      'contact1Phone',
-  'phone 2':          'contact2Phone',
-  'telephone 2':      'contact2Phone',
-  'email':            'contact1Email',
-  'email 1':          'contact1Email',
-  'e-mail':           'contact1Email',
-  'email 2':          'contact2Email',
-  'responsable':      'managerName',
-  'responsable interne': 'managerName',
-  'internal manager': 'managerName',
-  'notes':            'notes',
-  'remarques':        'notes',
+  /* Client */
+  'client':                'name',
+  'nom':                   'name',
+  'nom du client':         'name',
+  'name':                  'name',
+  'client adresse':        'clientStreet',
+  'client rue':            'clientStreet',
+  'client ville':          'clientCity',
+  'sous contrat':          'underContract',
+  'contrat':               'underContract',
+  'notes':                 'notes',
+  'remarques':             'notes',
+
+  /* Site */
+  'site':                  'siteName',
+  'nom du site':           'siteName',
+  'site adresse':          'siteStreet',
+  'site rue':              'siteStreet',
+  'site ville':            'siteCity',
+  'site notes':            'siteNotes',
+  'responsable':           'siteContactName',
+  'responsable nom':       'siteContactName',
+  'responsable telephone': 'siteContactPhone',
+  'responsable email':     'siteContactEmail',
+  'site responsable':           'siteContactName',
+  'site responsable nom':       'siteContactName',
+  'site responsable telephone': 'siteContactPhone',
+  'site responsable email':     'siteContactEmail',
+
+  /* DAE */
+  'dae type':               'deaType',
+  'dae modele':             'deaType',
+  'type de dae':            'deaType',
+  'dae numero de serie':    'deaSerial',
+  'dae n serie':            'deaSerial',
+  'numero de serie':        'deaSerial',
+  'dae emplacement':        'deaLocation',
+  'emplacement':            'deaLocation',
+  'dae date installation':  'deaInstallDate',
+  'date installation':      'deaInstallDate',
+  'dae statut':             'deaStatus',
+  'dae type de controle':   'deaControlType',
+  'type de controle':       'deaControlType',
+  'dae prochain controle':  'deaNextControl',
+  'prochain controle':      'deaNextControl',
+  'dae notes':              'deaNotes',
+
+  /* Consommables du DAE */
+  'batterie numero de serie': 'battSerial',
+  'batterie n serie':         'battSerial',
+  'batterie modele':          'battProductName',
+  'batterie date expiration': 'battExpiry',
+  'batterie expiration':      'battExpiry',
+  'batterie niveau':          'battLevel',
+  'electrodes type':          'elecKind',
+  'electrodes modele':        'elecProductName',
+  'electrodes lot':           'elecLot',
+  'electrodes numero de lot': 'elecLot',
+  'electrodes date expiration': 'elecExpiry',
+  'electrodes expiration':      'elecExpiry',
+
+  /* Anciens en-têtes — adresse du client et responsable sans préfixe */
+  'rue':       'clientStreet',
+  'street':    'clientStreet',
+  'adresse':   'clientStreet',
+  'ville':     'clientCity',
+  'city':      'clientCity',
+  'telephone': 'siteContactPhone',
+  'phone':     'siteContactPhone',
+  'email':     'siteContactEmail',
+  'e-mail':    'siteContactEmail',
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+/* Colonnes qui, dès qu'elles sont remplies, décrivent un DAE. */
+const DEA_KEYS = [
+  'deaType', 'deaSerial', 'deaLocation', 'deaInstallDate', 'deaStatus',
+  'deaControlType', 'deaNextControl', 'deaNotes',
+  'battSerial', 'battProductName', 'battExpiry', 'battLevel',
+  'elecKind', 'elecProductName', 'elecLot', 'elecExpiry',
+]
+
+const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const DEFAULT_SITE_NAME = 'Site principal'
 
 function normalizeText(str) {
   return String(str || '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-}
-
-function slugify(str) {
-  return normalizeText(str)
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_|_$/g, '')
+    .replace(/\p{M}/gu, '')   // accents décomposés par NFD
 }
 
 function normalizeHeader(h) {
-  return normalizeText(h).replace(/\s+/g, ' ')
+  return normalizeText(h).replace(/[°.]/g, '').replace(/\s+/g, ' ')
 }
 
 function escapeRegex(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-async function getTypeMap() {
-  const types = await ClientType.find()
-  const map = new Map()
-  types.forEach(t => {
-    map.set(normalizeText(t.slug), t.slug)
-    map.set(normalizeText(t.name), t.slug)
-  })
-  return map
+/** Regex d'égalité insensible à la casse et aux espaces de bord. */
+function exactRe(value) {
+  return { $regex: `^${escapeRegex(String(value).trim())}$`, $options: 'i' }
 }
 
-async function ensureClientType(rawType, typeMap) {
-  const label = String(rawType || '').trim()
-  const normalized = normalizeText(label)
-  if (!label) return ''
-  if (typeMap.has(normalized)) return typeMap.get(normalized)
+/* ── Conversions de cellules ─────────────────────────────────── */
 
-  const slug = slugify(label)
-  const type = await ClientType.findOneAndUpdate(
-    { slug },
-    { $setOnInsert: { name: label, slug } },
-    { upsert: true, new: true }
-  )
-  typeMap.set(normalized, type.slug)
-  typeMap.set(normalizeText(type.slug), type.slug)
-  return type.slug
+/**
+ * Date d'une cellule : objet Date (Excel lu avec cellDates), 'jj/mm/aaaa',
+ * 'aaaa-mm-jj' ou numéro de série Excel. Retourne 'aaaa-mm-jj' ou ''.
+ */
+function toISODate(value) {
+  if (value == null || value === '') return ''
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10)
+  }
+  const str = String(value).trim()
+  if (!str) return ''
+
+  const fr = str.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/)
+  if (fr) {
+    const [, d, m, y] = fr
+    const year = y.length === 2 ? `20${y}` : y
+    return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+
+  const iso = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
+
+  // Numéro de série Excel (jours depuis le 30/12/1899).
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const serial = Number(str)
+    if (serial > 20000 && serial < 80000) {
+      return new Date(Math.round((serial - 25569) * 86400000)).toISOString().slice(0, 10)
+    }
+  }
+
+  const parsed = new Date(str)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10)
 }
+
+function toBool(value) {
+  const v = normalizeText(value)
+  if (!v) return undefined
+  return ['oui', 'yes', 'true', 'vrai', '1', 'x', 'sous contrat'].includes(v)
+}
+
+/** Statut de pose : « installé » par défaut, l'import décrivant l'existant. */
+function toDeaStatus(value) {
+  const v = normalizeText(value)
+  if (!v) return ''
+  if (['installe', 'pose', 'posee', 'actif', 'en service', 'ok'].includes(v)) return 'installe'
+  if (['a installer', 'a poser', 'planifie', 'planifiee', 'en attente'].includes(v)) return 'a_installer'
+  return null   // valeur non reconnue
+}
+
+function toControlType(value) {
+  const v = normalizeText(value)
+  if (!v) return ''
+  if (v.startsWith('semestr')) return 'semestriel'
+  if (v.startsWith('annuel') || v === 'an') return 'annuel'
+  return null
+}
+
+function toElectrodeKind(value) {
+  const v = normalizeText(value)
+  if (!v) return ''
+  if (v.startsWith('adulte') || v === 'adult') return 'adulte'
+  if (v.startsWith('enfant') || v.startsWith('pedia') || v === 'child') return 'enfant'
+  return null
+}
+
+/* ── Lecture de la feuille ───────────────────────────────────── */
 
 function parseSheet(workbook) {
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
@@ -127,72 +215,196 @@ function parseSheet(workbook) {
     const obj = {}
     headers.forEach((h, i) => {
       const key = COL_MAP[h]
-      if (key) obj[key] = String(r[i] ?? '').trim()
+      if (!key) return
+      const cell = r[i]
+      obj[key] = cell instanceof Date ? cell : String(cell ?? '').trim()
     })
     return obj
-  }).filter(r => Object.values(r).some(v => v !== ''))
+  }).filter(r => Object.values(r).some(v => v !== '' && v != null))
 
   return { headers, rows }
 }
 
-function normalizeRow(row, typeMap) {
-  const out = { ...row }
-  if (out.type) out.type = typeMap.get(normalizeText(out.type)) || slugify(out.type)
-  for (const k of ['contact1Email', 'contact2Email', 'managerEmail']) {
-    if (out[k]) out[k] = out[k].toLowerCase()
+/* ── Normalisation et validation d'une ligne ─────────────────── */
+
+const DATE_FIELDS = ['deaInstallDate', 'deaNextControl', 'battExpiry', 'elecExpiry']
+
+function normalizeRow(row) {
+  const out = {}
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = v instanceof Date ? v : String(v ?? '').trim()
+  }
+  if (out.siteContactEmail) out.siteContactEmail = String(out.siteContactEmail).toLowerCase()
+  // Les dates sont figées en 'aaaa-mm-jj' dès la validation : la ligne
+  // renvoyée au client puis rejouée à l'import ne dépend plus d'Excel.
+  for (const k of DATE_FIELDS) {
+    if (out[k] !== undefined && out[k] !== '') {
+      const iso = toISODate(out[k])
+      out[k] = iso === null ? `__INVALID__${out[k]}` : iso
+    }
   }
   return out
 }
 
-function validateRow(row, idx, typeMap) {
-  const normalized = normalizeRow(row, typeMap)
-  const errors = []
-
-  if (!normalized.name) errors.push('Nom obligatoire')
-  if (!normalized.type) errors.push('Type obligatoire')
-  if (normalized.contact1Email && !EMAIL_RE.test(normalized.contact1Email)) errors.push(`Email contact 1 invalide : ${normalized.contact1Email}`)
-  if (normalized.contact2Email && !EMAIL_RE.test(normalized.contact2Email)) errors.push(`Email contact 2 invalide : ${normalized.contact2Email}`)
-  if (normalized.managerEmail && !EMAIL_RE.test(normalized.managerEmail)) errors.push(`Email responsable invalide : ${normalized.managerEmail}`)
-  if (normalized.gpsLat && Number.isNaN(Number(normalized.gpsLat))) errors.push(`Latitude invalide : ${normalized.gpsLat}`)
-  if (normalized.gpsLng && Number.isNaN(Number(normalized.gpsLng))) errors.push(`Longitude invalide : ${normalized.gpsLng}`)
-
-  return { row: normalized, rowNum: idx + 2, errors, valid: errors.length === 0 }
+function hasDea(row) {
+  return DEA_KEYS.some(k => row[k])
 }
 
+function validateRow(row, idx) {
+  const r      = normalizeRow(row)
+  const errors = []
+
+  if (!r.name) errors.push('Nom du client obligatoire')
+
+  if (r.siteContactEmail && !EMAIL_RE.test(r.siteContactEmail)) {
+    errors.push(`Email du responsable invalide : ${r.siteContactEmail}`)
+  }
+
+  for (const [key, label] of [
+    ['deaInstallDate', "Date d'installation"], ['deaNextControl', 'Date du prochain contrôle'],
+    ['battExpiry', "Date d'expiration de la batterie"], ['elecExpiry', "Date d'expiration des électrodes"],
+  ]) {
+    if (String(r[key] || '').startsWith('__INVALID__')) {
+      errors.push(`${label} illisible : ${String(r[key]).replace('__INVALID__', '')} (format attendu jj/mm/aaaa)`)
+    }
+  }
+
+  if (toDeaStatus(r.deaStatus) === null)      errors.push(`Statut DAE inconnu : ${r.deaStatus} (attendu « installé » ou « à installer »)`)
+  if (toControlType(r.deaControlType) === null) errors.push(`Type de contrôle inconnu : ${r.deaControlType} (attendu « semestriel » ou « annuel »)`)
+  if (toElectrodeKind(r.elecKind) === null)   errors.push(`Type d'électrodes inconnu : ${r.elecKind} (attendu « adulte » ou « enfant »)`)
+
+  if (r.battLevel) {
+    const lvl = Number(r.battLevel)
+    if (Number.isNaN(lvl) || lvl < 0 || lvl > 100) errors.push(`Niveau de batterie invalide : ${r.battLevel} (0 à 100)`)
+  }
+
+  // Un DAE décrit sans type ni numéro de série ne serait pas identifiable.
+  if (hasDea(r) && !r.deaType && !r.deaSerial) {
+    errors.push('DAE incomplet : renseignez au moins le type ou le numéro de série')
+  }
+
+  return {
+    row: r,
+    rowNum: idx + 2,
+    errors,
+    // Non bloquants : signalés dans l'aperçu, ils n'empêchent pas l'import.
+    warnings: [],
+    valid: errors.length === 0,
+    // Repris tel quel par l'aperçu de l'écran d'import.
+    siteName: r.siteName || DEFAULT_SITE_NAME,
+    hasDea: hasDea(r),
+  }
+}
+
+/* ── Construction des documents ──────────────────────────────── */
+
+/** Responsable du site : nom, téléphone, email — rien d'autre. */
 function buildPerson(name, phone, email) {
   if (!name && !phone && !email) return null
   return { name: name || '', phone: phone || '', email: email || '' }
 }
 
-function buildClientDoc(row, userId) {
-  const contacts = [
-    buildPerson(row.contact1Name, row.contact1Phone, row.contact1Email),
-    buildPerson(row.contact2Name, row.contact2Phone, row.contact2Email),
-  ].filter(Boolean)
-  const internalManagers = [
-    buildPerson(row.managerName, row.managerPhone, row.managerEmail),
-  ].filter(Boolean)
-
-  return {
-    name:  row.name,
-    type:  row.type,
-    address: {
-      street:      row.street      || undefined,
-      city:        row.city        || undefined,
-      governorate: row.governorate || undefined,
-      gps: {
-        lat: row.gpsLat ? Number(row.gpsLat) : undefined,
-        lng: row.gpsLng ? Number(row.gpsLng) : undefined,
-      },
-    },
-    contacts,
-    internalManagers,
-    notes:     row.notes || undefined,
-    createdBy: userId,
-  }
+/** Champs client, sans les valeurs vides : un import partiel n'efface rien. */
+function clientPatch(row) {
+  const set = { name: row.name }
+  if (row.clientStreet) set['address.street'] = row.clientStreet
+  if (row.clientCity)   set['address.city']   = row.clientCity
+  if (row.notes)        set.notes             = row.notes
+  const contract = toBool(row.underContract)
+  if (contract !== undefined) set.underContract = contract
+  return set
 }
 
-/* ── Validate endpoint (dry-run) ── */
+/** Deux personnes se valent si nom, téléphone et email coïncident. */
+function samePerson(a, b) {
+  return normalizeText(a.name)  === normalizeText(b.name) &&
+         normalizeText(a.phone) === normalizeText(b.phone) &&
+         normalizeText(a.email) === normalizeText(b.email)
+}
+
+function mergePeople(existing = [], incoming = []) {
+  const out = [...existing]
+  for (const p of incoming) {
+    if (!out.some(e => samePerson(e, p))) out.push(p)
+  }
+  return out
+}
+
+/**
+ * Applique une ligne à un DAE du site : création s'il n'existe pas, mise à
+ * jour sinon. Le DAE est reconnu par son numéro de série, à défaut par le
+ * couple type + emplacement.
+ */
+function upsertDea(site, row, productId) {
+  const serial = String(row.deaSerial || '').trim()
+  let dea = serial
+    ? site.deas.find(d => normalizeText(d.serialNumber) === normalizeText(serial))
+    : site.deas.find(d => normalizeText(d.deviceType) === normalizeText(row.deaType) &&
+                          normalizeText(d.location)   === normalizeText(row.deaLocation))
+
+  const created = !dea
+  if (created) {
+    site.deas.push({ status: 'installe' })
+    dea = site.deas[site.deas.length - 1]
+  }
+
+  if (row.deaType)       dea.deviceType   = row.deaType
+  if (serial)            dea.serialNumber = serial
+  if (row.deaLocation)   dea.location     = row.deaLocation
+  if (row.deaNotes)      dea.notes        = row.deaNotes
+  if (productId)         dea.product      = productId
+
+  const status = toDeaStatus(row.deaStatus)
+  if (status) dea.status = status
+
+  const controlType = toControlType(row.deaControlType)
+  if (controlType) dea.controlType = controlType
+
+  if (row.deaInstallDate) {
+    dea.installationDate = new Date(row.deaInstallDate)
+    // Une date de pose renseignée signifie un appareil posé, sauf mention contraire.
+    if (!status) dea.status = 'installe'
+  }
+  if (row.deaNextControl) dea.nextControlDate = new Date(row.deaNextControl)
+
+  /* Batterie — reconnue par son numéro de série, sinon la première de la liste. */
+  if (row.battSerial || row.battExpiry || row.battLevel || row.battProductName) {
+    const bSerial = String(row.battSerial || '').trim()
+    let batt = bSerial
+      ? dea.batteries.find(b => normalizeText(b.serialNumber) === normalizeText(bSerial))
+      : dea.batteries[0]
+    if (!batt) {
+      dea.batteries.push({})
+      batt = dea.batteries[dea.batteries.length - 1]
+    }
+    if (bSerial)              batt.serialNumber = bSerial
+    if (row.battProductName)  batt.productName  = row.battProductName
+    if (row.battExpiry)       batt.expiryDate   = new Date(row.battExpiry)
+    if (row.battLevel)        batt.level        = Number(row.battLevel)
+  }
+
+  /* Électrodes — reconnues par leur numéro de lot, sinon par leur type. */
+  if (row.elecLot || row.elecExpiry || row.elecKind || row.elecProductName) {
+    const lot  = String(row.elecLot || '').trim()
+    const kind = toElectrodeKind(row.elecKind) || ''
+    let elec = lot
+      ? dea.electrodes.find(e => normalizeText(e.lotNumber) === normalizeText(lot))
+      : dea.electrodes.find(e => (e.kind || '') === kind)
+    if (!elec) {
+      dea.electrodes.push({})
+      elec = dea.electrodes[dea.electrodes.length - 1]
+    }
+    if (lot)                  elec.lotNumber   = lot
+    if (kind)                 elec.kind        = kind
+    if (row.elecProductName)  elec.productName = row.elecProductName
+    if (row.elecExpiry)       elec.expiryDate  = new Date(row.elecExpiry)
+  }
+
+  return { dea, created }
+}
+
+/* ── Validation (simulation) ─────────────────────────────────── */
+
 async function validate(req, res) {
   await new Promise((resolve, reject) =>
     upload(req, res, err => (err ? reject(err) : resolve()))
@@ -202,7 +414,8 @@ async function validate(req, res) {
 
   let workbook
   try {
-    workbook = XLSX.read(req.file.buffer, { type: 'buffer' })
+    // cellDates : les dates arrivent en objets Date plutôt qu'en numéros de série.
+    workbook = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true })
   } catch {
     return res.status(400).json({ message: 'Fichier Excel invalide ou corrompu.' })
   }
@@ -212,50 +425,184 @@ async function validate(req, res) {
     return res.status(400).json({ message: 'Aucune ligne de données trouvée dans le fichier.' })
   }
 
-  const typeMap = await getTypeMap()
-  const results = rows.map((r, i) => validateRow(r, i, typeMap))
-  const valid   = results.filter(r => r.valid).length
-  const invalid = results.filter(r => !r.valid).length
+  const results = rows.map((r, i) => validateRow(r, i))
 
-  res.json({ results, summary: { total: rows.length, valid, invalid } })
+  // Un même numéro de série ne peut désigner deux appareils : on le signale
+  // sur toutes les lignes concernées plutôt que d'échouer à l'import.
+  const serialRows = {}
+  results.forEach(r => {
+    const sn = normalizeText(r.row.deaSerial)
+    if (sn) (serialRows[sn] ||= []).push(r)
+  })
+  Object.entries(serialRows).forEach(([, group]) => {
+    if (group.length > 1) {
+      group.forEach(r => {
+        r.errors.push(`N° de série en double dans le fichier (lignes ${group.map(g => g.rowNum).join(', ')})`)
+        r.valid = false
+      })
+    }
+  })
+
+  /* Un DAE déjà enregistré ailleurs : l'import le laisserait en double, puisque
+     les appareils sont reconnus site par site. Averti, pas bloqué — déplacer un
+     appareil d'un site à l'autre reste un cas légitime. */
+  const serials = results.map(r => String(r.row.deaSerial || '').trim()).filter(Boolean)
+  if (serials.length) {
+    const known = await Site.find({ 'deas.serialNumber': { $in: serials } })
+      .select('name deas.serialNumber')
+      .lean()
+    const placed = {}
+    known.forEach(s => s.deas.forEach(d => {
+      const sn = normalizeText(d.serialNumber)
+      if (sn) placed[sn] = s.name
+    }))
+    results.forEach(r => {
+      const site = placed[normalizeText(r.row.deaSerial)]
+      if (site && normalizeText(site) !== normalizeText(r.siteName)) {
+        r.warnings.push(`N° de série déjà posé sur le site « ${site} » — il y sera déplacé ou dupliqué`)
+      }
+    })
+  }
+
+  const valid = results.filter(r => r.valid)
+  const uniq  = (list, fn) => new Set(list.map(fn).filter(Boolean)).size
+
+  res.json({
+    results,
+    summary: {
+      total:   rows.length,
+      valid:   valid.length,
+      invalid: results.length - valid.length,
+      clients:  uniq(valid, r => normalizeText(r.row.name)),
+      sites:    uniq(valid, r => `${normalizeText(r.row.name)}|${normalizeText(r.siteName)}`),
+      deas:     valid.filter(r => r.hasDea).length,
+      warnings: results.filter(r => r.warnings.length > 0).length,
+    },
+  })
 }
 
-/* ── Execute endpoint (real import) ── */
+/* ── Import réel ─────────────────────────────────────────────── */
+
+/** Modèle de DAE correspondant au libellé saisi, pour lier le parc au stock. */
+async function resolveProduct(name, cache) {
+  const key = normalizeText(name)
+  if (!key) return null
+  if (key in cache) return cache[key]
+  const product = await Product.findOne({ name: exactRe(name), isActive: { $ne: false } }).select('_id')
+  cache[key] = product?._id || null
+  return cache[key]
+}
+
 async function execute(req, res) {
   const { rows } = req.body
   if (!Array.isArray(rows) || rows.length === 0) {
     return res.status(400).json({ message: 'Aucune ligne à importer.' })
   }
 
+  // Regroupement client → site → lignes : un client réparti sur plusieurs
+  // lignes n'est traité qu'une fois.
+  const clients = new Map()
+  for (const raw of rows) {
+    const row = normalizeRow(raw)
+    if (!row.name) continue
+    const cKey = normalizeText(row.name)
+    if (!clients.has(cKey)) clients.set(cKey, { name: row.name, rows: [], sites: new Map() })
+    const entry = clients.get(cKey)
+    entry.rows.push(row)
+
+    const sName = row.siteName || DEFAULT_SITE_NAME
+    const sKey  = normalizeText(sName)
+    if (!entry.sites.has(sKey)) entry.sites.set(sKey, { name: sName, rows: [] })
+    entry.sites.get(sKey).rows.push(row)
+  }
+
+  const productCache = {}
   const results = []
-  const typeMap = await getTypeMap()
-  for (const row of rows) {
+
+  for (const entry of clients.values()) {
     try {
-      const normalized = normalizeRow(row, typeMap)
-      normalized.type = await ensureClientType(normalized.type, typeMap)
-      const doc = buildClientDoc(normalized, req.user._id)
-      const existing = await Client.findOne({
-        name: { $regex: `^${escapeRegex(normalized.name)}$`, $options: 'i' },
-      })
-      const client = existing
-        ? await Client.findByIdAndUpdate(existing._id, { $set: doc }, { new: true, runValidators: true })
-        : await Client.create(doc)
+      /* ── Client ── */
+      const set = Object.assign({}, ...entry.rows.map(clientPatch))
+
+      let client = await Client.findOne({ name: exactRe(entry.name) })
+      const clientCreated = !client
+      if (!client) {
+        client = await Client.create({ ...set, createdBy: req.user._id })
+      } else {
+        // Mise à jour non destructive : les champs absents du fichier sont conservés.
+        client.set(set)
+        await client.save()
+      }
+
+      /* ── Sites et DAE ── */
+      let sitesCreated = 0, deasCreated = 0, deasUpdated = 0
+      for (const siteEntry of entry.sites.values()) {
+        let site = await Site.findOne({ client: client._id, name: exactRe(siteEntry.name) })
+        if (!site) {
+          site = new Site({ client: client._id, name: siteEntry.name, createdBy: req.user._id })
+          sitesCreated++
+        }
+
+        for (const row of siteEntry.rows) {
+          // Adresse du site : ses propres colonnes, à défaut celles du client.
+          const street = row.siteStreet || row.clientStreet
+          const city   = row.siteCity   || row.clientCity
+          if (street) site.address.street = street
+          if (city)   site.address.city   = city
+          if (row.siteNotes) site.notes = row.siteNotes
+
+          const contact = buildPerson(row.siteContactName, row.siteContactPhone, row.siteContactEmail)
+          if (contact) site.contacts = mergePeople(site.contacts, [contact])
+
+          if (hasDea(row)) {
+            const productId = await resolveProduct(row.deaType, productCache)
+            const { created } = upsertDea(site, row, productId)
+            if (created) deasCreated++; else deasUpdated++
+          }
+        }
+
+        await site.save()
+
+        // Une fois le site enregistré, les DAE ont un _id : le stock peut suivre.
+        for (const row of siteEntry.rows) {
+          if (!hasDea(row)) continue
+          const sn  = normalizeText(row.deaSerial)
+          const dea = sn
+            ? site.deas.find(d => normalizeText(d.serialNumber) === sn)
+            : site.deas.find(d => normalizeText(d.deviceType) === normalizeText(row.deaType) &&
+                                  normalizeText(d.location)   === normalizeText(row.deaLocation))
+          if (dea) await syncDeaWithItem(site, dea).catch(() => {})
+        }
+      }
+
       results.push({
-        name: normalized.name,
+        name: entry.name,
         success: true,
         id: client._id,
-        action: existing ? 'updated' : 'created',
+        action: clientCreated ? 'created' : 'updated',
+        sites: entry.sites.size,
+        sitesCreated,
+        deasCreated,
+        deasUpdated,
       })
     } catch (err) {
-      results.push({ name: row.name, success: false, error: err.message })
+      results.push({ name: entry.name, success: false, error: err.message })
     }
   }
 
-  const imported = results.filter(r => r.success).length
-  const created  = results.filter(r => r.action === 'created').length
-  const updated  = results.filter(r => r.action === 'updated').length
-  const failed   = results.filter(r => !r.success).length
-  res.json({ results, summary: { imported, created, updated, failed } })
+  const sum = (key) => results.reduce((n, r) => n + (r[key] || 0), 0)
+  res.json({
+    results,
+    summary: {
+      imported: results.filter(r => r.success).length,
+      created:  results.filter(r => r.action === 'created').length,
+      updated:  results.filter(r => r.action === 'updated').length,
+      failed:   results.filter(r => !r.success).length,
+      sitesCreated: sum('sitesCreated'),
+      deasCreated:  sum('deasCreated'),
+      deasUpdated:  sum('deasUpdated'),
+    },
+  })
 }
 
 module.exports = { validate, execute }

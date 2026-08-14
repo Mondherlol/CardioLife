@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
-  Plus, Search, X, FileText, AlertTriangle, Archive, RotateCcw, Trash,
-  ChevronLeft, ChevronRight, Users, Calendar, Zap, Tag, Clock, CheckCircle2,
+  Search, X, FileText, AlertTriangle, Archive, RotateCcw, Trash,
+  ChevronLeft, ChevronRight, Users, Building2, Calendar, Zap, Clock, CheckCircle2,
 } from 'lucide-react'
 import {
   getContracts, getContractStats, archiveContract, restoreContract, destroyContract,
@@ -21,10 +21,6 @@ function formatApiError(err) {
 function formatDate(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-function formatPrice(v) {
-  if (v == null || v === '' || Number.isNaN(Number(v))) return '—'
-  return `${Number(v).toLocaleString('fr-FR')} DT`
 }
 function StatusBadge({ status }) {
   const s = STATUS_MAP[status]
@@ -131,9 +127,10 @@ export default function ContractsPage() {
             onClick={() => { setTab(isArchived ? 'active' : 'archived'); setSearch(''); setStatusF('') }}>
             <Archive size={14} /> {isArchived ? '← Contrats actifs' : 'Archivés'}
           </button>
+          {/* Un contrat naît toujours d'un client : la création se fait sur sa fiche. */}
           {!isArchived && (
-            <button className="btn btn--primary" onClick={() => navigate('/contrats/new')}>
-              <Plus size={15} /> Nouveau contrat
+            <button className="btn btn--primary" onClick={() => navigate('/clients')}>
+              <Users size={15} /> Nouveau contrat — choisir un client
             </button>
           )}
         </div>
@@ -163,7 +160,7 @@ export default function ContractsPage() {
       <div className="table-toolbar">
         <div className="search-wrap">
           <Search size={14} className="search-icon" />
-          <input className="search-input" placeholder="Rechercher par n° ou client…"
+          <input className="search-input" placeholder="Rechercher par n°, site ou client…"
             value={search} onChange={e => setSearch(e.target.value)} />
           {search && <button className="search-clear" onClick={() => setSearch('')}><X size={13} /></button>}
         </div>
@@ -185,8 +182,8 @@ export default function ContractsPage() {
             <FileText size={36} color="var(--gray-300)" />
             <p>{search || statusF ? 'Aucun contrat pour ces critères.' : isArchived ? 'Aucun contrat archivé.' : 'Aucun contrat enregistré.'}</p>
             {!search && !isArchived && (
-              <button className="btn btn--primary" onClick={() => navigate('/contrats/new')}>
-                <Plus size={14} /> Créer le premier contrat
+              <button className="btn btn--primary" onClick={() => navigate('/clients')}>
+                <Users size={14} /> Créer un contrat depuis la fiche d'un client
               </button>
             )}
           </div>
@@ -195,12 +192,12 @@ export default function ContractsPage() {
             <thead>
               <tr>
                 <th style={{ minWidth: 150 }}>N° de contrat</th>
-                <th style={{ minWidth: 200 }}>Client</th>
+                <th style={{ minWidth: 190 }}>Site couvert</th>
+                <th style={{ minWidth: 170 }}>Client</th>
                 <th>Statut</th>
                 <th>Période</th>
                 <th>Prochain contrôle</th>
-                <th>Installations</th>
-                <th>Valeur estimée</th>
+                <th>DAE couverts</th>
                 <th style={{ width: 100 }}></th>
               </tr>
             </thead>
@@ -215,6 +212,11 @@ export default function ContractsPage() {
                   </td>
                   <td>
                     <div className="cell-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Building2 size={13} color="var(--gray-300)" /> {c.site?.name || c.siteName || '—'}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="cell-muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Users size={13} color="var(--gray-300)" /> {c.client?.name || c.clientName || '—'}
                     </div>
                   </td>
@@ -230,9 +232,8 @@ export default function ContractsPage() {
                     ) : '—'}
                   </td>
                   <td>
-                    <span className="ct-count-chip"><Zap size={11} /> {c.installations?.length || 0}</span>
+                    <span className="ct-count-chip"><Zap size={11} /> {c.deaCount || 0}</span>
                   </td>
-                  <td className="cell-primary" style={{ fontWeight: 700 }}>{formatPrice(c.estimatedValue)}</td>
                   <td onClick={e => e.stopPropagation()}>
                     <div className="row-actions">
                       {isArchived ? (

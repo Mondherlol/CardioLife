@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { toast } from 'react-toastify'
 import {
   Calendar, X, AlertTriangle, Trash2, Upload,
@@ -9,6 +9,7 @@ import {
   createFormation, updateFormation, deleteFormation,
   addDocuments, removeDocument, toggleAttestation, STATIC_BASE,
 } from '../api/formations'
+import { getSites } from '../api/sites'
 import { ClientSearchInput, AssignedToInput } from './PlanningInputs'
 import {
   STATUS_OPTS, MODAL_TYPE_OPTS, TYPE_MAP,
@@ -45,6 +46,8 @@ function fileIcon(name) {
  * @param entityKind    (edit) 'appointment' | 'formation'
  * @param slot          (create) créneau FullCalendar { startStr, endStr, allDay }
  * @param presetClient  { id, name } client pré-rempli
+ * @param presetSite    { id, name } site pré-rempli (formation lancée depuis une fiche site)
+ * @param quota         (formation) droit à formation du site — affiche le solde de places
  * @param presetType    (create) type initial
  * @param lockType      'formation' → force le type formation (page/onglet Formations)
  * @param onSaved       (obj|null) après création / enregistrement des champs → ferme
@@ -52,8 +55,9 @@ function fileIcon(name) {
  * @param onChanged     (formation) après maj live (attestation, documents) → garde ouvert
  */
 export default function EventModal({
-  mode, entity, entityKind, slot, presetClient, presetType, lockType,
+  mode, entity, entityKind, slot, presetClient, presetSite, quota, presetType, lockType,
   users = [], onClose, onSaved, onDeleted, onChanged,
+  onSwitchToFormation, onSwitchToControl,
 }) {
   const isEdit = mode === 'edit'
   const raw    = entity || {}
@@ -102,6 +106,9 @@ export default function EventModal({
     clientName:  isEdit ? (raw.clientName || raw.client?.name || '') : (presetClient?.name || ''),
     assignedTo:  initAssigned,
     description: isEdit ? (raw.description || '') : '',
+    siteId:      isEdit ? (raw.site?._id || raw.site || null) : (presetSite?.id || null),
+    siteName:    isEdit ? (raw.siteName || raw.site?.name || '') : (presetSite?.name || ''),
+    participantsCount: isEdit ? (raw.participantsCount ?? '') : '',
   })
 
   // État live de la formation (documents / attestation / historique) en édition.
@@ -116,15 +123,40 @@ export default function EventModal({
 
   const isFormation = formationLocked || form.type === 'formation'
 
+  // Sites du client : une formation se rattache au site formé, ce qui décompte
+  // ses places sur le droit du site (16 par DAE).
+  const [siteOptions, setSiteOptions] = useState([])
+  useEffect(() => {
+    if (!isFormation || !form.clientId) { setSiteOptions([]); return }
+    let alive = true
+    getSites({ client: form.clientId })
+      .then(d => { if (alive) setSiteOptions(Array.isArray(d) ? d : []) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [isFormation, form.clientId])
+
   const typeChoices = (() => {
     if (formationLocked) return []
     // En édition d'un rendez-vous, on ne permet pas de le transformer en formation.
     let base = (isEdit && entityKind === 'appointment')
       ? MODAL_TYPE_OPTS.filter(t => t.value !== 'formation')
       : MODAL_TYPE_OPTS
+    // Un contrôle ne se crée pas comme un rendez-vous : il se rattache à un DAE
+    // et à un technicien. Le type reste proposé ici — c'est là qu'on le cherche
+    // en composant le planning — mais il ouvre la fiche de création dédiée.
+    if (!isEdit && onSwitchToControl) {
+      base = [...base, TYPE_MAP.controle]
+    }
     if (!base.some(t => t.value === form.type)) base = [...base, TYPE_MAP[form.type]].filter(Boolean)
     return base
   })()
+
+  /* Créneau retenu par l'utilisateur, transmis tel quel aux fiches dédiées. */
+  function currentSlot() {
+    return slot || {
+      startStr: new Date(`${form.date}T${form.time || '08:00'}`).toISOString(),
+    }
+  }
 
   const durationOptions = durationOptionsWith(form.duration)
   const typeColor = TYPE_MAP[form.type]?.color || '#6b7280'
@@ -196,6 +228,9 @@ export default function EventModal({
             description: form.description || '',
             client:      form.clientId,
             clientName:  form.clientName || '',
+            site:        form.siteId || '',
+            siteName:    form.siteName || '',
+            participantsCount: Number(form.participantsCount) || 0,
             assignedTo:  form.assignedTo.map(u => u._id),
           })
           toast.success('Formation mise à jour.')
@@ -204,6 +239,9 @@ export default function EventModal({
           const fd = new FormData()
           fd.append('client',      form.clientId)
           fd.append('clientName',  form.clientName || '')
+          if (form.siteId) fd.append('site', form.siteId)
+          fd.append('siteName',    form.siteName || '')
+          fd.append('participantsCount', String(Number(form.participantsCount) || 0))
           fd.append('title',       form.title.trim())
           fd.append('date',        start.toISOString())
           fd.append('end',         end.toISOString())
@@ -285,7 +323,19 @@ export default function EventModal({
               <div className="form-group">
                 <label className="form-label">Type</label>
                 <select className="form-input form-input--plain" value={form.type}
-                  onChange={e => set('type', e.target.value)}>
+                  onChange={e => {
+                    // Formations et contrôles ont leur propre fiche : on y
+                    // bascule sans faire ressaisir le créneau.
+                    if (e.target.value === 'formation' && !isEdit && onSwitchToFormation) {
+                      onSwitchToFormation(currentSlot())
+                      return
+                    }
+                    if (e.target.value === 'controle' && !isEdit && onSwitchToControl) {
+                      onSwitchToControl(currentSlot())
+                      return
+                    }
+                    set('type', e.target.value)
+                  }}>
                   {typeChoices.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </div>
@@ -331,6 +381,53 @@ export default function EventModal({
               }))}
             />
           </div>
+
+          {isFormation && (
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Site formé</label>
+                {siteOptions.length > 0 ? (
+                  <select
+                    className="form-input form-input--plain"
+                    value={form.siteId || ''}
+                    onChange={e => {
+                      const s = siteOptions.find(o => o._id === e.target.value)
+                      setForm(f => ({ ...f, siteId: s?._id || null, siteName: s?.name || '' }))
+                    }}
+                  >
+                    <option value="">— Aucun site précis —</option>
+                    {siteOptions.map(s => <option key={s._id} value={s._id}>{s.name}</option>)}
+                  </select>
+                ) : (
+                  <input className="form-input form-input--plain"
+                    value={form.siteName || '—'} disabled />
+                )}
+              </div>
+              <div className="form-group">
+                <label className="form-label">Personnes formées</label>
+                <input
+                  className="form-input form-input--plain"
+                  type="number" min="0"
+                  value={form.participantsCount}
+                  onChange={e => set('participantsCount', e.target.value)}
+                  placeholder="0"
+                />
+                {quota && (
+                  <p className="fmn-quota-hint">
+                    {(() => {
+                      // Les places de cette formation sont déjà décomptées du solde
+                      // en édition : on les rend avant de retrancher la saisie.
+                      const own  = isEdit ? (raw.participantsCount || 0) : 0
+                      const left = quota.remaining + own - (Number(form.participantsCount) || 0)
+                      return left < 0
+                        ? `Dépassement de ${Math.abs(left)} place${Math.abs(left) > 1 ? 's' : ''} sur le droit du site`
+                        : `${left} place${left > 1 ? 's' : ''} restantes sur ${quota.credit} (${quota.seatsPerDea} par DAE)`
+                    })()}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           {users.length > 0 && (
             <div className="form-group">

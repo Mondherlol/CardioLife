@@ -1,4 +1,4 @@
-import { get, post, put, del } from './http'
+import { get, post, put, del, upload, STATIC_BASE } from './http'
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
@@ -28,6 +28,15 @@ export const archiveClient    = (id)       => del(`/clients/${id}`)
 export const restoreClient    = (id)       => put(`/clients/${id}/restore`)
 export const destroyClient    = (id)       => del(`/clients/${id}/permanent`)
 export const getClientDocumentsFolder = (id) => get(`/clients/${id}/documents-folder`)
+
+/* Logo du client — servi statiquement depuis uploads/clients. */
+export const clientLogoUrl = (filename) => `${STATIC_BASE}/uploads/clients/${filename}`
+export const deleteClientLogo = (id) => del(`/clients/${id}/logo`)
+export function uploadClientLogo(id, file) {
+  const form = new FormData()
+  form.append('logo', file)
+  return upload(`/clients/${id}/logo`, form)
+}
 
 export function validateImport(file) {
   const form  = new FormData()

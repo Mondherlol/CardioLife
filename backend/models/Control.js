@@ -12,7 +12,8 @@ const rapportSchema = new Schema({
 }, { _id: false })
 
 const controlSchema = new Schema({
-  installation:  { type: Schema.Types.ObjectId, ref: 'Installation', required: true },
+  // _id du DEA concerné dans `Site.deas`.
+  installation:  { type: Schema.Types.ObjectId, required: true },
   client:        { type: Schema.Types.ObjectId, ref: 'Client' },
   clientName:    { type: String, trim: true },
   type:          { type: String, enum: ['semestriel','annuel'], required: true },

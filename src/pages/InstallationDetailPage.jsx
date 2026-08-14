@@ -458,7 +458,7 @@ export default function InstallationDetailPage() {
   useEffect(() => {
     getInstallation(id)
       .then(setInst)
-      .catch(err => { toast.error(err.message); navigate('/devices') })
+      .catch(err => { toast.error(err.message); navigate(-1) })
       .finally(() => setLoading(false))
     getUsers().then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {})
   }, [id, navigate])
@@ -466,7 +466,7 @@ export default function InstallationDetailPage() {
   async function handleDelete() {
     await deleteInstallation(id)
     toast.success('Installation supprimée.')
-    navigate('/devices')
+    navigate(-1)
   }
 
   if (loading) return <div className="page-content"><div className="table-loading"><span className="spinner" /></div></div>
@@ -488,7 +488,7 @@ export default function InstallationDetailPage() {
       {/* Header */}
       <div className="page-header">
         <div className="inst-detail-header-main">
-          <button className="back-btn" onClick={() => navigate('/devices')}><ArrowLeft size={16} /></button>
+          <button className="back-btn" onClick={() => navigate(-1)}><ArrowLeft size={16} /></button>
           <button type="button" className="page-title inst-detail-title"
             onClick={() => inst.client?._id && navigate(`/clients/${inst.client._id}`)}
             disabled={!inst.client?._id}>
@@ -514,7 +514,14 @@ export default function InstallationDetailPage() {
       {/* Location banner */}
       <div className="inst-location-banner">
         <MapPin size={14} strokeWidth={2} />
-        <strong>{inst.address}</strong>
+        {inst.site?._id ? (
+          <button type="button" className="cell-link" title="Ouvrir la fiche du site"
+            onClick={() => navigate(`/sites/${inst.site._id}`)}>
+            <strong>{inst.address}</strong>
+          </button>
+        ) : (
+          <strong>{inst.address}</strong>
+        )}
         {inst.location && <><span className="text-muted">·</span> {inst.location}</>}
         {inst.serialNumber && (
           <span className="inst-sn-chip">

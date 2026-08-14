@@ -1,30 +1,33 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'react-toastify'
-import {
-  GraduationCap, Plus, FileText, Calendar,
-  Trash2, Check, History, CheckCircle2, Circle,
-} from 'lucide-react'
-import {
-  getFormationsByClient, deleteFormation, toggleAttestation,
-} from '../api/formations'
+import { GraduationCap, Plus } from 'lucide-react'
+import { getFormationsByClient } from '../api/formations'
 import { getUsers } from '../api/users'
-import EventModal from './EventModal'
+import { stageOf } from '../lib/formations'
+import { FormationRow, FormationsSummary } from './FormationRow'
+import FormationModal from './FormationModal'
 
-function fmtDate(d) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
-}
+const FILTERS = [
+  { id: 'toutes',    label: 'Toutes' },
+  { id: 'programme', label: 'Programmées' },
+  { id: 'termine',   label: 'À livrer' },
+  { id: 'livre',     label: 'Livrées' },
+]
 
-/* ─── Main tab ──────────────────────────────────────────────── */
+/**
+ * Formations d'un client, tous sites confondus. Même lecture que la fiche site :
+ * l'aperçu en tête dit ce qui reste à faire, la liste détaille.
+ */
 export default function FormationsClientTab({ clientId, clientName }) {
   const [formations, setFormations] = useState([])
   const [users,      setUsers]      = useState([])
   const [loading,    setLoading]    = useState(true)
-  const [modal,      setModal]      = useState(null)   // { mode, entity? }
+  const [filter,     setFilter]     = useState('toutes')
+  const [modal,      setModal]      = useState(null)   // { mode, formation? }
 
   useEffect(() => {
     getFormationsByClient(clientId)
-      .then(data => { setFormations(data); setLoading(false) })
+      .then(data => { setFormations(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
   }, [clientId])
 
@@ -32,127 +35,91 @@ export default function FormationsClientTab({ clientId, clientName }) {
     getUsers().then(data => setUsers(Array.isArray(data) ? data : [])).catch(() => {})
   }, [])
 
-  function update(updated) {
-    setFormations(prev => prev.map(f => f._id === updated._id ? updated : f))
+  function upsert(f) {
+    setFormations(prev => prev.some(x => x._id === f._id)
+      ? prev.map(x => (x._id === f._id ? f : x))
+      : [f, ...prev])
   }
 
-  async function handleToggleAttestation(id) {
-    try {
-      const updated = await toggleAttestation(id)
-      update(updated)
-    } catch { toast.error("Erreur lors de la mise à jour de l'attestation.") }
-  }
+  const counts = useMemo(() => {
+    const out = { toutes: formations.length, programme: 0, termine: 0, livre: 0 }
+    formations.forEach(f => { out[stageOf(f).id] = (out[stageOf(f).id] || 0) + 1 })
+    return out
+  }, [formations])
 
-  async function handleDelete(id, e) {
-    e.stopPropagation()
-    if (!window.confirm('Supprimer cette formation ? Cette action est irréversible.')) return
-    try {
-      await deleteFormation(id)
-      setFormations(prev => prev.filter(f => f._id !== id))
-      toast.success('Formation supprimée.')
-    } catch { toast.error('Erreur lors de la suppression.') }
-  }
-
-  function handleCreated(f) {
-    setFormations(prev => [f, ...prev])
-    setModal(null)
-  }
-
-  function handleSaved(f) {
-    update(f)
-    setModal(null)
-  }
+  const visible = useMemo(() => {
+    const list = filter === 'toutes' ? formations : formations.filter(f => stageOf(f).id === filter)
+    return [...list].sort((a, b) => new Date(b.date) - new Date(a.date))
+  }, [formations, filter])
 
   if (loading) return <div className="table-loading"><span className="spinner" /></div>
 
   return (
-    <div className="fmn-tab">
-      <div className="fmn-tab-bar">
-        <span className="fmn-tab-count">
-          {formations.length} formation{formations.length !== 1 ? 's' : ''}
-        </span>
+    <div className="sd-section">
+      <div className="cd-tab-header">
+        <div className="cd-tab-headline">
+          <h3 className="cd-tab-title">Formations ({formations.length})</h3>
+          <p className="cd-tab-hint">Chaque DAE posé ouvre droit à 16 places de formation.</p>
+        </div>
         <button className="btn btn--primary btn--sm" onClick={() => setModal({ mode: 'create' })}>
           <Plus size={14} /> Nouvelle formation
         </button>
       </div>
 
+      <FormationsSummary
+        formations={formations}
+        onPick={f => setModal({ mode: 'edit', formation: f })}
+      />
+
+      {formations.length > 0 && (
+        <div className="rep-tabs">
+          {FILTERS.map(t => (
+            <button key={t.id} type="button"
+              className={`rep-tab${filter === t.id ? ' rep-tab--on' : ''}`}
+              onClick={() => setFilter(t.id)}>
+              {t.label}
+              {counts[t.id] > 0 && <span className="rep-tab-count">{counts[t.id]}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
       {formations.length === 0 ? (
         <div className="cd-tab-empty">
-          <GraduationCap size={40} color="var(--gray-300)" />
+          <GraduationCap size={38} color="var(--gray-300)" />
           <p>Aucune formation enregistrée pour ce client.</p>
+          <button className="btn btn--primary btn--sm" onClick={() => setModal({ mode: 'create' })}>
+            <Plus size={13} /> Programmer la première
+          </button>
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="cd-tab-empty">
+          <GraduationCap size={38} color="var(--gray-300)" />
+          <p>Aucune formation dans cette catégorie.</p>
         </div>
       ) : (
-        <div className="fmn-list">
-          {formations.map(f => (
-            <div
-              key={f._id}
-              className={`fmn-card ${f.attestationDelivered ? 'fmn-card--done' : ''}`}
-              onClick={() => setModal({ mode: 'edit', entity: f })}
-            >
-              {/* Attestation toggle — stopPropagation pour ne pas ouvrir la modal */}
-              <button
-                className={`fmn-attest-btn ${f.attestationDelivered ? 'fmn-attest-btn--done' : ''}`}
-                onClick={e => { e.stopPropagation(); handleToggleAttestation(f._id) }}
-                title={f.attestationDelivered ? 'Retirer la livraison des attestations' : 'Marquer les attestations comme livrées'}
-              >
-                {f.attestationDelivered
-                  ? <CheckCircle2 size={18} />
-                  : <Circle size={18} />}
-              </button>
-
-              <div className="fmn-card-body-row">
-                <div className="fmn-title-group">
-                  <span className="fmn-title">{f.title}</span>
-                  <span className="fmn-date"><Calendar size={11} /> {fmtDate(f.date)}</span>
-                </div>
-
-                <div className="fmn-card-chips">
-                  {f.attestationDelivered ? (
-                    <span className="fmn-chip fmn-chip--done">
-                      <Check size={10} strokeWidth={3} /> Attestations livrées
-                    </span>
-                  ) : (
-                    <span className="fmn-chip fmn-chip--pending">En attente</span>
-                  )}
-                  <span className="fmn-chip fmn-chip--neutral">
-                    <FileText size={10} /> {f.documents.length} doc{f.documents.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-              </div>
-
-              <div className="fmn-card-actions">
-                <button
-                  className="fmn-icon-btn fmn-icon-btn--history"
-                  onClick={e => { e.stopPropagation(); setModal({ mode: 'edit', entity: f }) }}
-                  title="Voir les détails / historique"
-                >
-                  <History size={14} />
-                </button>
-                <button
-                  className="fmn-icon-btn fmn-icon-btn--delete"
-                  onClick={e => handleDelete(f._id, e)}
-                  title="Supprimer"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </div>
+        <div className="sd-list">
+          {visible.map(f => (
+            <FormationRow key={f._id} formation={f}
+              onClick={() => setModal({ mode: 'edit', formation: f })} />
           ))}
         </div>
       )}
 
       {modal && (
-        <EventModal
+        <FormationModal
           mode={modal.mode}
-          entity={modal.entity}
-          entityKind="formation"
-          lockType="formation"
+          formation={modal.formation}
           presetClient={{ id: clientId, name: clientName }}
           users={users}
           onClose={() => setModal(null)}
-          onSaved={modal.mode === 'create' ? handleCreated : handleSaved}
-          onChanged={update}
-          onDeleted={id => { setFormations(prev => prev.filter(f => f._id !== id)); setModal(null) }}
+          onSaved={f => { upsert(f); setModal(null) }}
+          onChanged={upsert}
+          onDeleted={id => {
+            setFormations(prev => prev.filter(f => f._id !== id))
+            setModal(null)
+            toast.success('Formation supprimée.')
+          }}
         />
       )}
     </div>

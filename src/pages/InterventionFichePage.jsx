@@ -1,20 +1,26 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   ArrowLeft, CheckCircle2, Clock, AlertCircle, MapPin, Zap,
   Camera, Trash2, X, Save, ImagePlus, Hash, Navigation,
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
-  ChevronDown, ClipboardList, History, Download, FileText,
+  ChevronDown, ClipboardList, History, Download, FileText, Building2, Wrench, Check,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
-  getIntervention, saveFiche, closeIntervention,
+  getIntervention, saveFiche, removeFiche, closeIntervention,
   uploadFichePhoto, deleteFichePhoto, fichePhotoUrl,
   updateIntervention,
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
 import { useLoadingBar } from '../hooks/useLoadingBar'
+import { useGoBack } from '../hooks/useGoBack'
+import ReplacementModal from '../components/ReplacementModal'
+import FicheDeaTabs, { deaLabel as deaLabelOf } from '../components/FicheDeaTabs'
+import {
+  getReplacements, replacementKind, replacementStatus, replacementReason,
+} from '../api/replacements'
 
 /* ─── Constants ─── */
 const STATUS_META = {
@@ -33,6 +39,23 @@ const ACTION_LABELS = {
 
 const SIG_PRESETS = ['Complet', 'Incomplet', 'Manquant', 'Remplacé', 'À remplacer', 'Conforme']
 const ARM_PRESETS = ['Conforme', 'Non conforme', 'Cassée', 'Rouillée', 'Remplacée', 'Manquante']
+
+const ELECTRODE_TYPES = [
+  { value: 'capteur_rcp',      label: 'Avec capteur RCP' },
+  { value: 'sans_capteur_rcp', label: 'Sans capteur RCP' },
+  { value: 'universelle',      label: 'Universelle' },
+]
+
+/** Samedi → lundi (+2), dimanche → lundi (+1). Voir `skipWeekend` côté serveur. */
+function shiftOffWeekend(dateStr) {
+  if (!dateStr) return dateStr
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return dateStr
+  const day = d.getDay()
+  if (day === 6) d.setDate(d.getDate() + 2)
+  else if (day === 0) d.setDate(d.getDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
 
 /* ─── Helpers ─── */
 function fmt(d) {
@@ -90,6 +113,86 @@ function Presets({ presets, value, onSelect }) {
           {p}
         </button>
       ))}
+    </div>
+  )
+}
+
+/* ─── Pièce remplacée ───
+   « Remplacée » sans dire laquelle ne sert à personne : le magasin ne sait pas
+   quoi déduire du stock, et le client ne sait pas ce qu'il a reçu. Cocher ouvre
+   donc le signalement, où le technicien choisit la pièce posée — ou bascule en
+   demande de remplacement, auquel cas rien ne sort du stock. */
+function ReplacedRow({ label, done, reference, readOnly, onDeclare, onClear }) {
+  return (
+    <div className="fiche-replaced">
+      <span className="fiche-replaced-label">{label}</span>
+      {done ? (
+        <span className="fiche-replaced-done">
+          <CheckCircle2 size={13} />
+          <span>Remplacée{reference ? ' · ' : ''}<strong>{reference}</strong></span>
+          {!readOnly && (
+            <button type="button" className="fiche-replaced-undo" title="Annuler cette mention"
+              onClick={onClear}><X size={11} /></button>
+          )}
+        </span>
+      ) : readOnly ? (
+        <span className="fiche-replaced-none">Non</span>
+      ) : (
+        <button type="button" className="fiche-replaced-btn" onClick={onDeclare}>
+          <Wrench size={12} /> Déclarer un remplacement
+        </button>
+      )}
+    </div>
+  )
+}
+
+/* ─── CheckPoint ───
+   Point de contrôle de la checklist : conforme / non conforme / non vérifié.
+   Trois états et non deux : une case vide ne doit pas se lire comme un défaut,
+   elle veut dire « pas encore regardé ». */
+function CheckPoint({ label, value, onChange, readOnly }) {
+  const set = v => !readOnly && onChange(value === v ? undefined : v)
+
+  return (
+    <div className="fiche-check">
+      <span className="fiche-check-label">{label}</span>
+      <div className="fiche-check-btns">
+        <button
+          type="button"
+          className={`fiche-check-btn fiche-check-btn--ok${value === true ? ' fiche-check-btn--on' : ''}`}
+          onClick={() => set(true)}
+          disabled={readOnly}
+          title="Conforme"
+        >
+          <Check size={13} />
+        </button>
+        <button
+          type="button"
+          className={`fiche-check-btn fiche-check-btn--ko${value === false ? ' fiche-check-btn--on' : ''}`}
+          onClick={() => set(false)}
+          disabled={readOnly}
+          title="Non conforme"
+        >
+          <X size={13} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Champ date compact de la checklist ─── */
+function DateField({ label, value, onChange, onBlur, readOnly }) {
+  return (
+    <div className="fiche-datefield">
+      <span className="fiche-datefield-label">{label}</span>
+      <input
+        type="date"
+        className={`fiche-input${readOnly ? ' fiche-input--ro' : ''}`}
+        value={value || ''}
+        readOnly={readOnly}
+        onChange={e => !readOnly && onChange(e.target.value)}
+        onBlur={onBlur}
+      />
     </div>
   )
 }
@@ -154,8 +257,16 @@ const CTRL_CTX = {
 }
 function ControlContextSection({ iv, navigate }) {
   const ct       = CTRL_CTX[iv.controlType] || CTRL_CTX.hors_contrat
-  const inst     = iv.installation
   const contract = iv.contract
+  const site     = iv.site
+  const snap     = iv.installationSnap || {}
+  // Le parc n'a plus de fiche propre : l'appareil se décrit sur place, et c'est
+  // le site qui s'ouvre.
+  const device   = [snap.deviceType, snap.serialNumber].filter(Boolean).join(' · ')
+  const address  = site?.address
+    ? [site.address.street, site.address.city].filter(Boolean).join(' · ')
+    : snap.address
+
   return (
     <div className="fiche-page-section">
       <div className="fiche-page-section-title"><ClipboardList size={14} /> Contexte du contrôle</div>
@@ -166,12 +277,20 @@ function ControlContextSection({ iv, navigate }) {
             <span className={ct.cls}>{ct.label}</span>
           </div>
           <div className="ctx-item">
-            <span className="ctx-label">Installation liée</span>
-            {inst?._id ? (
-              <button type="button" className="cell-link" onClick={() => navigate(`/devices/${inst._id}`)}>
-                <Zap size={12} /> {inst.deviceType || 'DAE'}{inst.serialNumber ? ` · ${inst.serialNumber}` : ''}
+            <span className="ctx-label">Site</span>
+            {site?._id ? (
+              <button type="button" className="cell-link" onClick={() => navigate(`/sites/${site._id}`)}>
+                <Building2 size={12} /> {site.name || iv.siteName || 'Voir le site'}
               </button>
-            ) : <span className="ctx-muted">Aucune installation liée</span>}
+            ) : iv.siteName
+              ? <span className="ctx-value"><Building2 size={12} /> {iv.siteName}</span>
+              : <span className="ctx-muted">Non précisé</span>}
+          </div>
+          <div className="ctx-item">
+            <span className="ctx-label">Appareil</span>
+            {device
+              ? <span className="ctx-value"><Zap size={12} /> {device}</span>
+              : <span className="ctx-muted">Tout le site</span>}
           </div>
           <div className="ctx-item">
             <span className="ctx-label">Contrat</span>
@@ -181,10 +300,16 @@ function ControlContextSection({ iv, navigate }) {
               </button>
             ) : <span className="ctx-muted">Hors contrat</span>}
           </div>
-          {inst?.address && (
+          {snap.location && (
+            <div className="ctx-item">
+              <span className="ctx-label">Emplacement</span>
+              <span className="ctx-value"><MapPin size={12} /> {snap.location}</span>
+            </div>
+          )}
+          {address && (
             <div className="ctx-item">
               <span className="ctx-label">Adresse</span>
-              <span className="ctx-value"><MapPin size={12} /> {inst.address}</span>
+              <span className="ctx-value"><MapPin size={12} /> {address}</span>
             </div>
           )}
         </div>
@@ -197,6 +322,7 @@ function ControlContextSection({ iv, navigate }) {
 export default function InterventionFichePage() {
   const { id }   = useParams()
   const navigate = useNavigate()
+  const goBack   = useGoBack('/interventions')
   const { user } = useAuth()
   const isTech   = user?.role === 'technicien'
   const isAdmin  = !isTech && (
@@ -208,7 +334,11 @@ export default function InterventionFichePage() {
   const [iv,             setIv]             = useState(null)
   const [loading,        setLoading]        = useState(true)
   const [tab,            setTab]            = useState('fiche')
-  const [fiche,          setFiche]          = useState({})
+  // Une fiche par appareil contrôlé, plus les champs de la visite entière.
+  const [fiches,         setFiches]         = useState([])
+  const [activeKey,      setActiveKey]      = useState('')
+  const [visite,         setVisite]         = useState({})
+  const [declaring,      setDeclaring]      = useState(null)   // { kind, field, refField, label }
   const [savingField,    setSavingField]    = useState(null)
   const [savedField,     setSavedField]     = useState(null)
   const [uploading,      setUploading]      = useState(false)
@@ -217,6 +347,9 @@ export default function InterventionFichePage() {
   const [closing,        setClosing]        = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
   const [deviceOpen,     setDeviceOpen]     = useState(true)
+  const [replaceOpen,    setReplaceOpen]    = useState(false)
+  const [weekendShifted, setWeekendShifted] = useState(false)
+  const [replacements,   setReplacements]   = useState([])
 
   // Admin-only
   const [techniciens,      setTechniciens]      = useState([])
@@ -226,25 +359,94 @@ export default function InterventionFichePage() {
 
   useLoadingBar(loading)
 
+  /* Fiche affichée. Tout le formulaire lit et écrit dans celle-ci. */
+  const activeFiche = useMemo(
+    () => fiches.find(f => f.key === activeKey) || fiches[0] || {},
+    [fiches, activeKey])
+
   /* ── Load ── */
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const data = await getIntervention(id)
       setIv(data)
-      setFiche({
-        serialNumber:        data.fiche?.serialNumber        ?? data.installationSnap?.serialNumber ?? '',
-        emplacement:         data.fiche?.emplacement         ?? data.installationSnap?.location     ?? '',
-        signaletique:        data.fiche?.signaletique        ?? '',
-        batteriePct:         data.fiche?.batteriePct         ?? undefined,
-        batterieNote:        data.fiche?.batterieNote        ?? '',
-        electrodesPct:       data.fiche?.electrodesPct       ?? undefined,
-        electrodesNote:      data.fiche?.electrodesNote      ?? '',
-        armoire:             data.fiche?.armoire             ?? '',
-        observation:         data.fiche?.observation         ?? '',
-        dateReception:       data.fiche?.dateReception ? isoDate(data.fiche.dateReception) : isoDate(data.scheduledDate) || '',
-        visa:                data.fiche?.visa                ?? '',
-        observationGenerale: data.fiche?.observationGenerale ?? '',
+
+      /* Les appareils à contrôler : celui que vise le contrôle, sinon tout le
+         parc du site — une visite de contrat les couvre tous. Le technicien
+         peut en retirer ou en ajouter, mais il n'a rien à composer d'avance. */
+      const siteDeas = data.siteDeas || []
+      const targets  = data.installation
+        ? siteDeas.filter(d => String(d._id) === String(data.installation))
+        : siteDeas
+
+      const saved = Array.isArray(data.fiches) ? data.fiches : []
+      const byKey = new Map(saved.map(f => [String(f.dea || ''), f]))
+
+      /* Le technicien ne ressaisit pas ce que l'application connaît : le n° de
+         série et l'emplacement viennent du parc quand la fiche est vierge.
+         `||` et non `??` : un champ enregistré vide doit pouvoir se remplir. */
+      const fromDea = (dea, f = {}) => ({
+        key:          String(dea?._id || f.dea || ''),
+        dea:          dea?._id || f.dea || null,
+        deaLabel:     f.deaLabel || deaLabelOf(dea) || '',
+        serialNumber: f.serialNumber || dea?.serialNumber || '',
+        emplacement:  f.emplacement  || dea?.location     || '',
+        signaletique: f.signaletique ?? '',
+
+        batteriePeremption:   f.batteriePeremption,
+        batteriePct:          f.batteriePct ?? undefined,
+        batterieEtat:         f.batterieEtat,
+        batterieRemplacee:    f.batterieRemplacee,
+        batterieRemplaceeRef: f.batterieRemplaceeRef ?? '',
+        batterieNote:         f.batterieNote ?? '',
+
+        electrodesPeremptionAdulte:      f.electrodesPeremptionAdulte,
+        electrodesPeremptionPediatrique: f.electrodesPeremptionPediatrique,
+        electrodesEmballage:     f.electrodesEmballage,
+        electrodesAdaptees:      f.electrodesAdaptees,
+        electrodesType:          f.electrodesType ?? '',
+        electrodesRemplacees:    f.electrodesRemplacees,
+        electrodesRemplaceesRef: f.electrodesRemplaceesRef ?? '',
+        electrodesPct:           f.electrodesPct ?? undefined,
+        electrodesNote:          f.electrodesNote ?? '',
+
+        kitGants:       f.kitGants,
+        kitCiseaux:     f.kitCiseaux,
+        kitRasoir:      f.kitRasoir,
+        kitMasque:      f.kitMasque,
+        kitCompresses:  f.kitCompresses,
+        kitRemplace:    f.kitRemplace,
+        kitRemplaceRef: f.kitRemplaceRef ?? '',
+
+        voyantVert:        f.voyantVert,
+        autotests:         f.autotests,
+        armoire:           f.armoire ?? '',
+        armoireAccessible: f.armoireAccessible,
+        armoirePiles:      f.armoirePiles,
+
+        dernierControle:  f.dernierControle,
+        prochainControle: f.prochainControle,
+        observation:      f.observation ?? '',
+      })
+
+      const list = []
+      targets.forEach(d => list.push(fromDea(d, byKey.get(String(d._id)) || {})))
+      // Fiches déjà saisies sur un appareil hors cible (ou d'avant le multi-DAE).
+      saved.forEach(f => {
+        const key = String(f.dea || '')
+        if (list.some(e => e.key === key)) return
+        list.push(fromDea(siteDeas.find(d => String(d._id) === key), f))
+      })
+      if (list.length === 0) list.push(fromDea(null, {}))
+
+      setFiches(list)
+      setActiveKey(prev => (list.some(e => e.key === prev) ? prev : list[0].key))
+      setVisite({
+        dateReception: data.visite?.dateReception
+          ? isoDate(data.visite.dateReception)
+          : isoDate(data.scheduledDate) || '',
+        visa:                data.visite?.visa                ?? '',
+        observationGenerale: data.visite?.observationGenerale ?? '',
       })
     } catch {
       toast.error('Intervention introuvable.')
@@ -255,6 +457,14 @@ export default function InterventionFichePage() {
   }, [id, navigate])
 
   useEffect(() => { load() }, [load])
+
+  /* Ce qui a déjà été signalé pendant ce contrôle, pour ne pas le signaler deux
+     fois — et pour que le technicien voie que sa demande est partie. */
+  useEffect(() => {
+    getReplacements({ intervention: id })
+      .then(res => setReplacements(res.data || []))
+      .catch(() => {})
+  }, [id])
 
   // Sync adminForm from iv
   useEffect(() => {
@@ -289,13 +499,33 @@ export default function InterventionFichePage() {
   }, [lightbox, iv])
 
   /* ── Fiche handlers ── */
-  function set(k, v) { setFiche(f => ({ ...f, [k]: v })) }
+  /* Toutes les saisies portent sur l'appareil affiché : `activeKey` accompagne
+     donc chaque enregistrement, côté serveur comme côté état local. */
+  function set(k, v) {
+    setFiches(list => list.map(f => (f.key === activeKey ? { ...f, [k]: v } : f)))
+  }
+  function setVisiteField(k, v) { setVisite(s => ({ ...s, [k]: v })) }
 
-  async function autoSave(field, value) {
+  /* Le parc du site et le visuel de l'appareil sont joints par la lecture
+     complète ; les enregistrements partiels ne les renvoient pas. Sans cette
+     fusion, la première sauvegarde ferait disparaître la photo et le choix
+     de l'appareil. */
+  function mergeIv(updated) {
+    setIv(prev => ({
+      ...updated,
+      siteDeas:      prev?.siteDeas      ?? updated.siteDeas,
+      deviceProduct: prev?.deviceProduct ?? updated.deviceProduct,
+    }))
+  }
+
+  async function autoSave(field, value, opts = {}) {
     setSavingField(field)
     try {
-      const updated = await saveFiche(id, { [field]: value ?? null })
-      setIv(updated)
+      const body = opts.visite
+        ? { [field]: value ?? null }
+        : { dea: activeKey || undefined, deaLabel: activeFiche?.deaLabel, [field]: value ?? null }
+      const updated = await saveFiche(id, body)
+      mergeIv(updated)
       setSavedField(field)
       setTimeout(() => setSavedField(f => f === field ? null : f), 2000)
     } catch {
@@ -305,11 +535,81 @@ export default function InterventionFichePage() {
     }
   }
 
-  function handleBlur(field) { autoSave(field, fiche[field]) }
+  /* Plusieurs champs d'un coup (choix d'un appareil, pièce remplacée) : les
+     enregistrer ensemble évite une fiche à moitié à jour si l'une échoue. */
+  async function saveFields(values) {
+    setSavingField('serialNumber')
+    try {
+      mergeIv(await saveFiche(id, {
+        dea: activeKey || undefined,
+        deaLabel: activeFiche?.deaLabel,
+        ...values,
+      }))
+    } catch {
+      toast.error('Erreur de sauvegarde.')
+    } finally {
+      setSavingField(null)
+    }
+  }
+
+  function handleBlur(field) { autoSave(field, activeFiche?.[field]) }
+  function handleVisiteBlur(field) { autoSave(field, visite[field], { visite: true }) }
+
+  /* ── Appareils de la visite ── */
+  function addDea(deaId) {
+    const dea = (iv?.siteDeas || []).find(d => String(d._id) === String(deaId))
+    if (!dea || fiches.some(f => f.key === String(deaId))) return
+    setFiches(list => [...list, {
+      key: String(dea._id), dea: dea._id, deaLabel: deaLabelOf(dea),
+      serialNumber: dea.serialNumber || '', emplacement: dea.location || '',
+      signaletique: '', electrodesType: '', armoire: '', observation: '',
+      batterieNote: '', electrodesNote: '',
+      batterieRemplaceeRef: '', electrodesRemplaceesRef: '', kitRemplaceRef: '',
+    }])
+    setActiveKey(String(dea._id))
+  }
+
+  async function dropDea(key) {
+    const entry = fiches.find(f => f.key === key)
+    if (!entry) return
+    if (!window.confirm(`Retirer « ${entry.deaLabel || 'cet appareil'} » de cette visite ? La saisie le concernant sera perdue.`)) return
+    try {
+      // Rien à supprimer côté serveur tant qu'aucun champ n'a été enregistré.
+      const updated = await removeFiche(id, key || 'none').catch(err => {
+        if (err.status === 404) return null
+        throw err
+      })
+      if (updated) mergeIv(updated)
+    } catch (err) {
+      toast.error(err.message || 'Suppression impossible.')
+      return
+    }
+    setFiches(list => {
+      const next = list.filter(f => f.key !== key)
+      setActiveKey(k => (k === key ? (next[0]?.key ?? '') : k))
+      return next
+    })
+  }
 
   async function handlePreset(field, val) {
     set(field, val)
     await autoSave(field, val)
+  }
+
+  /* Un point de contrôle n'a pas de « blur » : le clic vaut saisie, donc on
+     enregistre aussitôt. */
+  async function checkPoint(field, val) {
+    set(field, val)
+    await autoSave(field, val)
+  }
+
+  /* La date du prochain contrôle ne tombe pas un week-end : on la reporte au
+     lundi et on le signale, plutôt que de laisser planifier une visite un
+     samedi. Même règle que le calendrier généré par les contrats. */
+  function setProchainControle(value) {
+    const shifted = shiftOffWeekend(value)
+    setWeekendShifted(Boolean(value) && shifted !== value)
+    set('prochainControle', shifted)
   }
 
   /* ── Admin handlers ── */
@@ -345,8 +645,8 @@ export default function InterventionFichePage() {
     e.target.value = ''
     setUploading(true)
     try {
-      const updated = await uploadFichePhoto(id, file)
-      setIv(updated)
+      const updated = await uploadFichePhoto(id, file, activeKey || undefined)
+      mergeIv(updated)
     } catch (err) {
       toast.error(err.message || 'Erreur upload.')
     } finally {
@@ -358,7 +658,7 @@ export default function InterventionFichePage() {
     setDeletingPic(filename)
     try {
       const updated = await deleteFichePhoto(id, filename)
-      setIv(updated)
+      mergeIv(updated)
       if (lightbox !== null) setLightbox(null)
     } catch (err) {
       toast.error(err.message || 'Erreur suppression.')
@@ -371,7 +671,7 @@ export default function InterventionFichePage() {
     setClosing(true)
     try {
       const updated = await closeIntervention(id)
-      setIv(updated)
+      mergeIv(updated)
       setShowClose(false)
       toast.success('Intervention clôturée.')
     } catch (err) {
@@ -388,16 +688,56 @@ export default function InterventionFichePage() {
 
   const snap          = iv.installationSnap || {}
   const isTermine     = iv.status === 'termine'
-  const photos        = iv.fiche?.photos || []
+  const fiche         = activeFiche
+  // Les photos vivent côté serveur : c'est la fiche enregistrée qui fait foi.
+  const photos        = (iv.fiches || []).find(f => String(f.dea || '') === activeKey)?.photos
+    || (iv.fiches?.length ? [] : iv.fiche?.photos) || []
   const meta          = STATUS_META[iv.status] || STATUS_META.planifie
   const StatusIcon    = meta.Icon
   const readOnly      = !isTech || isTermine   // fiche fields: tech-only, blocked when done
   const adminReadOnly = isTermine              // admin fields: blocked for everyone when done
 
-  const deviceImgFile = iv.installation?.deviceProduct?.images?.[0]
+  const deviceImgFile = iv.deviceProduct?.images?.[0]
   const deviceImg     = deviceImgFile
     ? `${STATIC_BASE}/uploads/products/${deviceImgFile}`
     : null
+
+  /* Parc du site : il alimente l'en-tête de l'appareil et la liste de ceux qui
+     restent à ajouter à la visite. */
+  const siteDeas   = iv.siteDeas || []
+  const activeDea  = siteDeas.find(d => String(d._id) === activeKey) || null
+  const addableDeas = siteDeas.filter(d => !fiches.some(f => f.key === String(d._id)))
+
+  const deviceLabel   = activeDea?.deviceType || fiche.deaLabel || snap.deviceType || 'DAE'
+  const siteAddress   = iv.site?.address
+    ? [iv.site.address.street, iv.site.address.city].filter(Boolean).join(' · ')
+    : ''
+  const deviceAddress = snap.address || siteAddress
+
+  /* Une pièce déclarée remplacée : la fiche retient laquelle, le stock est
+     déduit par le signalement lui-même (sauf demande de remplacement). */
+  function applyReplacement(saved) {
+    const decl = declaring
+    setDeclaring(null)
+    setReplacements(l => [saved, ...l])
+    if (!decl) return
+    if (saved.status !== 'remplace') {
+      toast.info('Demande enregistrée — la pièce reste à remplacer, rien n\'est déduit du stock.')
+      return
+    }
+    const ref = saved.replacementSerial || saved.replacementItem?.serialNumber
+      || saved.replacementItem?.lotNumber || ''
+    set(decl.field, true)
+    set(decl.refField, ref)
+    saveFields({ [decl.field]: true, [decl.refField]: ref })
+  }
+
+  function clearReplacement(field, refField) {
+    if (!window.confirm('Retirer cette mention de la fiche ? Le mouvement de stock déjà enregistré, lui, se reprend depuis la page Remplacements.')) return
+    set(field, undefined)
+    set(refField, '')
+    saveFields({ [field]: null, [refField]: '' })
+  }
 
   // Helper: field props — use neutral placeholder when readOnly
   function field(key, value, placeholder) {
@@ -405,6 +745,18 @@ export default function InterventionFichePage() {
       value: value ?? '',
       onChange: e => set(key, e.target.value),
       onBlur: () => handleBlur(key),
+      readOnly,
+      className: `fiche-input${readOnly ? ' fiche-input--ro' : ''}`,
+      placeholder: readOnly ? '—' : (placeholder || ''),
+    }
+  }
+
+  /* Champs de la visite : saisis une fois pour toute l'intervention. */
+  function visiteField(key, placeholder) {
+    return {
+      value: visite[key] ?? '',
+      onChange: e => setVisiteField(key, e.target.value),
+      onBlur: () => handleVisiteBlur(key),
       readOnly,
       className: `fiche-input${readOnly ? ' fiche-input--ro' : ''}`,
       placeholder: readOnly ? '—' : (placeholder || ''),
@@ -419,7 +771,7 @@ export default function InterventionFichePage() {
       {/* ── Header ── */}
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <button className="back-btn" onClick={() => navigate('/interventions')}>
+          <button className="back-btn" onClick={goBack} title="Retour">
             <ArrowLeft size={16} />
           </button>
           <div>
@@ -542,6 +894,45 @@ export default function InterventionFichePage() {
             </div>
           )}
 
+          {/* Une panne se signale au moment où on la constate, pas après coup :
+              le bouton reste à portée tant que l'intervention est ouverte. */}
+          {!isTermine && iv.site?._id && (
+            <div className="fiche-report-bar">
+              <div className="fiche-report-text">
+                <Wrench size={14} />
+                <span>Une pièce est défectueuse, périmée ou manquante ?</span>
+              </div>
+              <button type="button" className="btn btn--ghost btn--sm"
+                onClick={() => setReplaceOpen(true)}>
+                Signaler un remplacement
+              </button>
+            </div>
+          )}
+
+          {replacements.length > 0 && (
+            <div className="fiche-page-section">
+              <div className="fiche-page-section-title">
+                <Wrench size={14} /> Remplacements signalés ({replacements.length})
+              </div>
+              <div className="fiche-page-body">
+                <div className="rep-mini-list">
+                  {replacements.map(r => (
+                    <div key={r._id} className="rep-mini">
+                      <span className={`rep-badge rep-badge--${replacementStatus(r.status).tone}`}>
+                        {replacementStatus(r.status).label}
+                      </span>
+                      <span className="rep-mini-main">
+                        {replacementKind(r.kind).label}
+                        {(r.serialNumber || r.lotNumber) && <> · {r.serialNumber || r.lotNumber}</>}
+                      </span>
+                      <span className="rep-mini-sub">{replacementReason(r.reason).label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Section planification (admin) ── */}
           {isAdmin && (
             <div className="fiche-page-section">
@@ -612,6 +1003,18 @@ export default function InterventionFichePage() {
           {/* Fiche appareil — technicien : toujours ; non-technicien : seulement une fois remplie/validée */}
           {(isTech || isTermine) ? (
           <>
+          {/* Une visite couvre souvent plusieurs DAE du site : chacun a sa
+              fiche, et le technicien passe de l'un à l'autre ici. */}
+          <FicheDeaTabs
+            entries={fiches}
+            activeKey={activeKey}
+            onSelect={setActiveKey}
+            onAdd={addDea}
+            onRemove={dropDea}
+            addable={addableDeas}
+            readOnly={readOnly}
+          />
+
           {/* ── Section appareil ── */}
           <div className="fiche-page-section">
             <button
@@ -626,13 +1029,12 @@ export default function InterventionFichePage() {
                 }
               </div>
               <div className="fiche-device-meta">
-                <span className="fiche-device-name">{snap.deviceType || 'DAE'}</span>
+                <span className="fiche-device-name">{deviceLabel}</span>
                 <div className="fiche-device-sub">
-                  {(fiche.serialNumber || snap.serialNumber) && (
-                    <span><Hash size={10} /> {fiche.serialNumber || snap.serialNumber}</span>
-                  )}
-                  {snap.address && (
-                    <span><MapPin size={10} /> {snap.address}{snap.location ? ` · ${snap.location}` : ''}</span>
+                  {fiche.serialNumber && <span><Hash size={10} /> {fiche.serialNumber}</span>}
+                  {deviceAddress && (
+                    <span><MapPin size={10} /> {deviceAddress}
+                      {fiche.emplacement ? ` · ${fiche.emplacement}` : ''}</span>
                   )}
                 </div>
               </div>
@@ -662,7 +1064,31 @@ export default function InterventionFichePage() {
                   {savedField === 'signaletique' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
 
-                <AutoField label="État batterie" icon={Battery} saving={savingField === 'batteriePct' || savingField === 'batterieNote'}>
+                <AutoField label="Batterie" icon={Battery} saving={savingField === 'batteriePct' || savingField === 'batterieNote'}>
+                  <DateField
+                    label="Date de péremption"
+                    value={isoDate(fiche.batteriePeremption)}
+                    onChange={v => set('batteriePeremption', v)}
+                    onBlur={() => handleBlur('batteriePeremption')}
+                    readOnly={readOnly}
+                  />
+                  <div className="fiche-check-group">
+                    <CheckPoint label="Absence de détérioration ou de corrosion"
+                      value={fiche.batterieEtat} readOnly={readOnly}
+                      onChange={v => checkPoint('batterieEtat', v)} />
+                    <ReplacedRow
+                      label="Batterie remplacée"
+                      done={fiche.batterieRemplacee}
+                      reference={fiche.batterieRemplaceeRef}
+                      readOnly={readOnly}
+                      onDeclare={() => setDeclaring({
+                        kind: 'batterie', field: 'batterieRemplacee',
+                        refField: 'batterieRemplaceeRef',
+                      })}
+                      onClear={() => clearReplacement('batterieRemplacee', 'batterieRemplaceeRef')}
+                    />
+                  </div>
+                  <span className="fiche-sub-label">Niveau de charge indiqué par l'appareil</span>
                   <div className="fiche-two-fields">
                     <PctInput
                       value={fiche.batteriePct}
@@ -680,7 +1106,59 @@ export default function InterventionFichePage() {
                   {savedField === 'batterieNote' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
 
-                <AutoField label="État électrodes" icon={Radio} saving={savingField === 'electrodesPct' || savingField === 'electrodesNote'}>
+                <AutoField label="Électrodes" icon={Radio} saving={savingField === 'electrodesPct' || savingField === 'electrodesNote'}>
+                  {/* Deux jeux distincts sur la checklist : adulte et pédiatrique. */}
+                  <div className="fiche-date-row">
+                    <DateField
+                      label="Péremption adulte"
+                      value={isoDate(fiche.electrodesPeremptionAdulte)}
+                      onChange={v => set('electrodesPeremptionAdulte', v)}
+                      onBlur={() => handleBlur('electrodesPeremptionAdulte')}
+                      readOnly={readOnly}
+                    />
+                    <DateField
+                      label="Péremption pédiatrique"
+                      value={isoDate(fiche.electrodesPeremptionPediatrique)}
+                      onChange={v => set('electrodesPeremptionPediatrique', v)}
+                      onBlur={() => handleBlur('electrodesPeremptionPediatrique')}
+                      readOnly={readOnly}
+                    />
+                  </div>
+
+                  <span className="fiche-sub-label">Type d'électrodes</span>
+                  <div className="fiche-presets">
+                    {ELECTRODE_TYPES.map(t => (
+                      <button key={t.value} type="button"
+                        className={`fiche-preset-chip${fiche.electrodesType === t.value ? ' fiche-preset-chip--active' : ''}`}
+                        disabled={readOnly}
+                        onClick={() => handlePreset('electrodesType',
+                          fiche.electrodesType === t.value ? '' : t.value)}>
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="fiche-check-group">
+                    <CheckPoint label="Intégrité de l'emballage hermétique"
+                      value={fiche.electrodesEmballage} readOnly={readOnly}
+                      onChange={v => checkPoint('electrodesEmballage', v)} />
+                    <CheckPoint label="Présence des électrodes adaptées"
+                      value={fiche.electrodesAdaptees} readOnly={readOnly}
+                      onChange={v => checkPoint('electrodesAdaptees', v)} />
+                    <ReplacedRow
+                      label="Électrodes remplacées"
+                      done={fiche.electrodesRemplacees}
+                      reference={fiche.electrodesRemplaceesRef}
+                      readOnly={readOnly}
+                      onDeclare={() => setDeclaring({
+                        kind: 'electrodes', field: 'electrodesRemplacees',
+                        refField: 'electrodesRemplaceesRef',
+                      })}
+                      onClear={() => clearReplacement('electrodesRemplacees', 'electrodesRemplaceesRef')}
+                    />
+                  </div>
+
+                  <span className="fiche-sub-label">État général</span>
                   <div className="fiche-two-fields">
                     <PctInput
                       value={fiche.electrodesPct}
@@ -698,12 +1176,86 @@ export default function InterventionFichePage() {
                   {savedField === 'electrodesNote' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
 
-                <AutoField label="Armoire / Boîtier" icon={Package} saving={savingField === 'armoire'}>
+                {/* Kit de secours — absent de la fiche jusqu'ici. */}
+                <AutoField label="Kit de secours" icon={Package}>
+                  <div className="fiche-check-group">
+                    <CheckPoint label="Gants de protection présents"
+                      value={fiche.kitGants} readOnly={readOnly}
+                      onChange={v => checkPoint('kitGants', v)} />
+                    <CheckPoint label="Ciseaux disponibles"
+                      value={fiche.kitCiseaux} readOnly={readOnly}
+                      onChange={v => checkPoint('kitCiseaux', v)} />
+                    <CheckPoint label="Rasoir présent"
+                      value={fiche.kitRasoir} readOnly={readOnly}
+                      onChange={v => checkPoint('kitRasoir', v)} />
+                    <CheckPoint label="Masque de ventilation disponible"
+                      value={fiche.kitMasque} readOnly={readOnly}
+                      onChange={v => checkPoint('kitMasque', v)} />
+                    <CheckPoint label="Compresses présentes"
+                      value={fiche.kitCompresses} readOnly={readOnly}
+                      onChange={v => checkPoint('kitCompresses', v)} />
+                    <CheckPoint label="Kit remplacé"
+                      value={fiche.kitRemplace} readOnly={readOnly}
+                      onChange={v => checkPoint('kitRemplace', v)} />
+                    {fiche.kitRemplaceRef && (
+                      <div className="fiche-replaced">
+                        <span className="fiche-replaced-label">Référence du kit posé</span>
+                        <span className="fiche-replaced-done"><CheckCircle2 size={13} /> {fiche.kitRemplaceRef}</span>
+                      </div>
+                    )}
+                  </div>
+                </AutoField>
+
+                {/* État général de l'appareil et de son armoire. */}
+                <AutoField label="État général du DAE" icon={Shield}>
+                  <div className="fiche-check-group">
+                    <CheckPoint label="Voyant de fonctionnement au vert"
+                      value={fiche.voyantVert} readOnly={readOnly}
+                      onChange={v => checkPoint('voyantVert', v)} />
+                    <CheckPoint label="Autotests réalisés correctement"
+                      value={fiche.autotests} readOnly={readOnly}
+                      onChange={v => checkPoint('autotests', v)} />
+                    <CheckPoint label="Armoire accessible et correctement signalée"
+                      value={fiche.armoireAccessible} readOnly={readOnly}
+                      onChange={v => checkPoint('armoireAccessible', v)} />
+                    <CheckPoint label="État des piles de l'armoire"
+                      value={fiche.armoirePiles} readOnly={readOnly}
+                      onChange={v => checkPoint('armoirePiles', v)} />
+                  </div>
+                </AutoField>
+
+                <AutoField label="Armoire" icon={Package} saving={savingField === 'armoire'}>
                   <input {...field('armoire', fiche.armoire, 'Description libre…')} />
                   {!readOnly && (
                     <Presets presets={ARM_PRESETS} value={fiche.armoire} onSelect={v => handlePreset('armoire', v)} />
                   )}
                   {savedField === 'armoire' && <span className="fiche-saved-ok">✓</span>}
+                </AutoField>
+
+                {/* Suivi documentaire — la date du prochain contrôle évite le
+                    week-end, comme le calendrier des contrats. */}
+                <AutoField label="Suivi documentaire" icon={ClipboardList}>
+                  <div className="fiche-date-row">
+                    <DateField
+                      label="Dernier contrôle enregistré"
+                      value={isoDate(fiche.dernierControle)}
+                      onChange={v => set('dernierControle', v)}
+                      onBlur={() => handleBlur('dernierControle')}
+                      readOnly={readOnly}
+                    />
+                    <DateField
+                      label="Prochain contrôle planifié"
+                      value={isoDate(fiche.prochainControle)}
+                      onChange={v => setProchainControle(v)}
+                      onBlur={() => handleBlur('prochainControle')}
+                      readOnly={readOnly}
+                    />
+                  </div>
+                  {weekendShifted && (
+                    <p className="fiche-hint">
+                      Date reportée au lundi : les visites ne se font pas le week-end.
+                    </p>
+                  )}
                 </AutoField>
 
                 <AutoField label="Observation" icon={StickyNote} saving={savingField === 'observation'}>
@@ -769,23 +1321,23 @@ export default function InterventionFichePage() {
           <div className="fiche-page-section">
             <div className="fiche-page-section-title">
               <Calendar size={14} /> Informations de visite
+              <span className="fiche-section-note">Commun à tous les appareils</span>
             </div>
             <div className="fiche-page-body">
               <div className="fiche-row-2col">
                 <AutoField label="Date de réception" icon={Calendar} saving={savingField === 'dateReception'}>
-                  <input type="date" {...field('dateReception', fiche.dateReception)} />
+                  <input type="date" {...visiteField('dateReception', 'Date de réception')} />
                   {savedField === 'dateReception' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
                 <AutoField label="Visa / Signature" icon={User} saving={savingField === 'visa'}>
-                  <input {...field('visa', fiche.visa, 'Nom du responsable…')} />
+                  <input {...visiteField('visa', 'Nom du responsable…')} />
                   {savedField === 'visa' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
               </div>
               <AutoField label="Observation générale" icon={StickyNote} saving={savingField === 'observationGenerale'}>
                 <textarea
-                  {...field('observationGenerale', fiche.observationGenerale, 'Observations générales sur cette intervention…')}
+                  {...visiteField('observationGenerale', 'Observations générales sur cette intervention…')}
                   className={`fiche-input fiche-textarea${readOnly ? ' fiche-input--ro' : ''}`}
-                  placeholder={readOnly ? 'Pas de note' : 'Observations générales sur cette intervention…'}
                   rows={3}
                 />
                 {savedField === 'observationGenerale' && <span className="fiche-saved-ok">✓</span>}
@@ -830,6 +1382,32 @@ export default function InterventionFichePage() {
           onClose={() => setShowClose(false)}
           onConfirm={handleClose}
           loading={closing}
+        />
+      )}
+
+      {replaceOpen && iv.site?._id && (
+        <ReplacementModal
+          site={iv.site}
+          deas={siteDeas}
+          dea={activeDea || (iv.installation ? siteDeas.find(d => String(d._id) === String(iv.installation)) : null)}
+          intervention={iv}
+          onClose={() => setReplaceOpen(false)}
+          onSaved={saved => { setReplacements(l => [saved, ...l]); setReplaceOpen(false) }}
+        />
+      )}
+
+      {/* Déclaration d'une pièce posée depuis la checklist : la même modale,
+          ouverte sur le bon élément et déjà en « déjà remplacé ». */}
+      {declaring && iv.site?._id && (
+        <ReplacementModal
+          site={iv.site}
+          deas={siteDeas}
+          dea={activeDea}
+          presetKind={declaring.kind}
+          presetStatus="remplace"
+          intervention={iv}
+          onClose={() => setDeclaring(null)}
+          onSaved={applyReplacement}
         />
       )}
 

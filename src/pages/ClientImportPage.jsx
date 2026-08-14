@@ -4,37 +4,71 @@ import * as XLSX from 'xlsx'
 import {
   ArrowLeft, Upload, Download, FileSpreadsheet, CheckCircle2,
   XCircle, AlertTriangle, ChevronRight, RotateCcw, Check,
-  Users, Info,
+  Users, Info, Building2, HeartPulse,
 } from 'lucide-react'
 import { validateImport, executeImport } from '../api/clients'
 import { toast } from 'react-toastify'
 
-/* ── Sample data ─────────────────────────────────────────── */
+/* ── Modèle de fichier ───────────────────────────────────────
+   Une ligne = un DAE. Les colonnes client et site se répètent d'une ligne à
+   l'autre ; les lignes sont regroupées à l'import. Une ligne sans colonne DAE
+   crée simplement le client et son site. */
 
 const SAMPLE_COLUMNS = [
-  { key: 'nom',                   label: 'Nom',                   required: true,  example: 'Clinique El Amel' },
-  { key: 'type',                  label: 'Type',                  required: true,  example: 'Clinique' },
-  { key: 'rue',                   label: 'Rue',                   required: false, example: '12 Av. Habib Bourguiba' },
-  { key: 'ville',                 label: 'Ville',                 required: false, example: 'Tunis' },
-  { key: 'gouvernorat',           label: 'Gouvernorat',           required: false, example: 'Tunis' },
-  { key: 'contact 1 nom',         label: 'Contact 1 Nom',         required: false, example: 'Ahmed Ben Ali' },
-  { key: 'contact 1 téléphone',   label: 'Contact 1 Téléphone',   required: false, example: '+216 71 000 000' },
-  { key: 'contact 1 email',       label: 'Contact 1 Email',       required: false, example: 'contact@elamel.tn' },
-  { key: 'contact 2 nom',         label: 'Contact 2 Nom',         required: false, example: 'Leila Gharbi' },
-  { key: 'contact 2 téléphone',   label: 'Contact 2 Téléphone',   required: false, example: '+216 20 000 000' },
-  { key: 'contact 2 email',       label: 'Contact 2 Email',       required: false, example: 'daf@elamel.tn' },
-  { key: 'latitude',              label: 'Latitude GPS',          required: false, example: '36.8065' },
-  { key: 'longitude',             label: 'Longitude GPS',         required: false, example: '10.1815' },
-  { key: 'responsable nom',       label: 'Responsable Nom',       required: false, example: 'Sophie Martin' },
-  { key: 'responsable téléphone', label: 'Responsable Téléphone', required: false, example: '+216 25 000 000' },
-  { key: 'responsable email',     label: 'Responsable Email',     required: false, example: 'sophie@cardiolife.tn' },
-  { key: 'notes',                 label: 'Notes',                 required: false, example: 'Contrat prioritaire' },
+  // Client
+  { key: 'nom',                       group: 'client', label: 'Nom du client', required: true },
+  { key: 'client ville',              group: 'client', label: 'Ville' },
+  { key: 'sous contrat',              group: 'client', label: 'Sous contrat' },
+  { key: 'notes',                     group: 'client', label: 'Notes' },
+  // Site
+  { key: 'site',                      group: 'site', label: 'Nom du site' },
+  { key: 'site adresse',              group: 'site', label: 'Adresse' },
+  { key: 'site ville',                group: 'site', label: 'Ville' },
+  { key: 'responsable',               group: 'site', label: 'Responsable' },
+  { key: 'responsable téléphone',     group: 'site', label: 'Resp. tél.' },
+  { key: 'responsable email',         group: 'site', label: 'Resp. email' },
+  // DAE
+  { key: 'DAE type',                  group: 'dae', label: 'Type / modèle' },
+  { key: 'DAE numéro de série',       group: 'dae', label: 'N° de série' },
+  { key: 'DAE emplacement',           group: 'dae', label: 'Emplacement' },
+  { key: 'DAE date installation',     group: 'dae', label: 'Date de pose' },
+  { key: 'DAE statut',                group: 'dae', label: 'Statut' },
+  { key: 'DAE type de contrôle',      group: 'dae', label: 'Type de contrôle' },
+  { key: 'DAE prochain contrôle',     group: 'dae', label: 'Prochain contrôle' },
+  // Consommables
+  { key: 'batterie numéro de série',  group: 'conso', label: 'Batterie n° série' },
+  { key: 'batterie date expiration',  group: 'conso', label: 'Batterie expiration' },
+  { key: 'batterie niveau',           group: 'conso', label: 'Batterie niveau %' },
+  { key: 'électrodes type',           group: 'conso', label: 'Électrodes type' },
+  { key: 'électrodes lot',            group: 'conso', label: 'Électrodes lot' },
+  { key: 'électrodes date expiration', group: 'conso', label: 'Électrodes expiration' },
 ]
 
+const GROUP_LABELS = {
+  client: 'Client',
+  site:   'Site',
+  dae:    'DAE',
+  conso:  'Consommables',
+}
+
 const SAMPLE_ROWS = [
-  ['Clinique El Amel', 'Clinique', '12 Av. Habib Bourguiba', 'Tunis', 'Tunis', 'Ahmed Ben Ali', '+216 71 100 200', 'contact@elamel.tn', 'Leila Gharbi', '+216 20 100 200', 'daf@elamel.tn', '36.8065', '10.1815', 'Sophie Martin', '+216 25 000 000', 'sophie@cardiolife.tn', 'Contrat prioritaire'],
-  ['Mairie de Sfax', 'Mairie', 'Place de la Liberté', 'Sfax', 'Sfax', 'Fatma Trabelsi', '+216 74 200 300', 'mairie@sfax.tn', '', '', '', '34.7406', '10.7603', 'Pierre Dupont', '', '', ''],
-  ['École Secondaire Ibn Khaldoun', 'École', 'Rue de l\'Indépendance', 'Sousse', 'Sousse', '', '+216 73 300 400', '', '', '', '', '35.8245', '10.6346', '', '', '', 'Renouvellement prévu juin'],
+  ['Clinique El Amel', 'Tunis', 'oui', 'Contrat prioritaire',
+   'Bloc A', '12 Av. Habib Bourguiba', 'Tunis', 'Salah Mabrouk', '+216 71 100 201', 'bloc.a@elamel.tn',
+   'Zoll AED 3', 'SN-A-001', "Hall d'entrée", '12/03/2024', 'installé', 'semestriel', '12/03/2026',
+   'BAT-2024-11', '31/01/2027', '92', 'adulte', 'LOT-77', '30/11/2026'],
+  // Même client, même site : seul le DAE change
+  ['Clinique El Amel', '', '', '',
+   'Bloc A', '', '', '', '', '',
+   'Zoll AED 3', 'SN-A-002', 'Étage 2 — couloir', '15/04/2024', 'installé', 'semestriel', '15/04/2026',
+   '', '', '', 'enfant', 'LOT-78', '30/11/2026'],
+  // Deuxième site du même client, encore sans DAE posé
+  ['Clinique El Amel', '', '', '',
+   'Annexe La Marsa', '3 Rue du Lac', 'La Marsa', 'Nadia Karray', '+216 71 100 202', '',
+   '', '', '', '', '', '', '', '', '', '', '', '', ''],
+  ['Mairie de Sfax', 'Sfax', 'non', '',
+   'Hôtel de ville', 'Place de la Liberté', 'Sfax', '', '', '',
+   'Defibtech Lifeline', 'SN-B-014', 'Accueil', '02/09/2023', 'installé', 'annuel', '02/09/2026',
+   '', '31/08/2026', '', 'adulte', '', '31/08/2026'],
 ]
 
 function downloadSample() {
@@ -46,8 +80,22 @@ function downloadSample() {
   ws['!cols'] = SAMPLE_COLUMNS.map(() => ({ wch: 22 }))
 
   const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Clients')
-  XLSX.writeFile(wb, 'modele_import_clients.xlsx')
+  XLSX.utils.book_append_sheet(wb, ws, 'Parc')
+  XLSX.writeFile(wb, 'modele_import_parc.xlsx')
+}
+
+/* Batterie et électrodes d'une ligne, résumées pour l'aperçu. */
+function ConsumablesCell({ row }) {
+  const lines = []
+  if (row.battSerial || row.battExpiry || row.battLevel) {
+    lines.push(`Batt. ${[row.battSerial, row.battExpiry, row.battLevel && `${row.battLevel} %`]
+      .filter(Boolean).join(' · ')}`)
+  }
+  if (row.elecKind || row.elecLot || row.elecExpiry) {
+    lines.push(`Élec. ${[row.elecKind, row.elecLot, row.elecExpiry].filter(Boolean).join(' · ')}`)
+  }
+  if (lines.length === 0) return <em className="ci-cell--empty">—</em>
+  return lines.map((line, i) => <div key={i}>{line}</div>)
 }
 
 /* ── Steps ──────────────────────────────────────────────── */
@@ -148,9 +196,9 @@ export default function ClientImportPage() {
             <ArrowLeft size={16} />
           </button>
           <div>
-            <h1 className="page-title">Importer des clients</h1>
+            <h1 className="page-title">Importer le parc</h1>
             <p className="page-subtitle">
-              Importez ou mettez à jour plusieurs clients depuis un fichier Excel
+              Créez ou mettez à jour clients, sites et DAE depuis un fichier Excel
             </p>
           </div>
         </div>
@@ -188,9 +236,28 @@ export default function ClientImportPage() {
                   <Download size={13} /> Télécharger le modèle
                 </button>
               </div>
+              <p className="ci-format-intro">
+                <strong>Une ligne = un DAE.</strong> Répétez le nom du client et du site
+                sur chaque ligne : les lignes sont regroupées à l'import. Une ligne sans
+                colonne DAE crée simplement le client et son site. Les colonnes absentes
+                sont ignorées, et l'ordre n'a pas d'importance.
+              </p>
               <div className="ci-table-wrap">
                 <table className="ci-sample-table">
                   <thead>
+                    {/* Bandeau de regroupement : client, site, DAE, consommables */}
+                    <tr>
+                      {Object.entries(
+                        SAMPLE_COLUMNS.reduce((acc, c) => {
+                          acc[c.group] = (acc[c.group] || 0) + 1
+                          return acc
+                        }, {})
+                      ).map(([group, span]) => (
+                        <th key={group} colSpan={span} className={`ci-group-th ci-group-th--${group}`}>
+                          {GROUP_LABELS[group]}
+                        </th>
+                      ))}
+                    </tr>
                     <tr>
                       {SAMPLE_COLUMNS.map(c => (
                         <th key={c.key}>
@@ -211,7 +278,12 @@ export default function ClientImportPage() {
                   </tbody>
                 </table>
               </div>
-              <p className="ci-legend"><span className="ci-required">*</span> Champs obligatoires</p>
+              <p className="ci-legend">
+                <span className="ci-required">*</span> Seul le nom du client est obligatoire.
+                Site sans nom → « Site principal ». Dates au format jj/mm/aaaa.
+                Statut : « installé » ou « à installer ». Contrôle : « semestriel » ou « annuel ».
+                Électrodes : « adulte » ou « enfant ».
+              </p>
             </div>
 
             {/* Dropzone */}
@@ -280,12 +352,24 @@ export default function ClientImportPage() {
             {/* Summary chips */}
             <div className="ci-preview-summary">
               <div className="ci-summary-chip ci-summary-chip--total">
-                <Users size={14} />
+                <FileSpreadsheet size={14} />
                 <strong>{validation.summary.total}</strong> lignes lues
               </div>
               <div className="ci-summary-chip ci-summary-chip--ok">
                 <CheckCircle2 size={14} />
                 <strong>{validation.summary.valid}</strong> valide{validation.summary.valid !== 1 ? 's' : ''}
+              </div>
+              <div className="ci-summary-chip ci-summary-chip--total">
+                <Users size={14} />
+                <strong>{validation.summary.clients}</strong> client{validation.summary.clients !== 1 ? 's' : ''}
+              </div>
+              <div className="ci-summary-chip ci-summary-chip--total">
+                <Building2 size={14} />
+                <strong>{validation.summary.sites}</strong> site{validation.summary.sites !== 1 ? 's' : ''}
+              </div>
+              <div className="ci-summary-chip ci-summary-chip--total">
+                <HeartPulse size={14} />
+                <strong>{validation.summary.deas}</strong> DAE
               </div>
               {validation.summary.invalid > 0 && (
                 <div className="ci-summary-chip ci-summary-chip--error">
@@ -301,14 +385,13 @@ export default function ClientImportPage() {
                 <thead>
                   <tr>
                     <th style={{ width: 46 }}>#</th>
-                    <th>Nom</th>
-                    <th>Type</th>
-                    <th>Ville</th>
-                    <th>Gouvernorat</th>
-                    <th>Contact 1</th>
-                    <th>Contact 2</th>
-                    <th>GPS</th>
-                    <th>Responsable</th>
+                    <th>Client</th>
+                    <th>Site</th>
+                    <th>DAE</th>
+                    <th>Emplacement</th>
+                    <th>Pose</th>
+                    <th>Contrôle</th>
+                    <th>Consommables</th>
                     <th style={{ width: 60 }}>Statut</th>
                     <th>Erreurs</th>
                   </tr>
@@ -317,28 +400,31 @@ export default function ClientImportPage() {
                   {validation.results.map((r, i) => (
                     <tr key={i} className={r.valid ? '' : 'ci-row--error'}>
                       <td className="ci-row-num">{r.rowNum}</td>
-                      <td className="ci-cell-name">{r.row.name || <em className="ci-cell--empty">—</em>}</td>
-                      <td>{r.row.type || <em className="ci-cell--empty">—</em>}</td>
-                      <td>{r.row.city || <em className="ci-cell--empty">—</em>}</td>
-                      <td>{r.row.governorate || <em className="ci-cell--empty">-</em>}</td>
-                      <td>
-                        {[r.row.contact1Name, r.row.contact1Phone, r.row.contact1Email].filter(Boolean).join(' · ')
-                          || <em className="ci-cell--empty">-</em>}
+                      <td className="ci-cell-name">
+                        {r.row.name || <em className="ci-cell--empty">—</em>}
+                        {(r.row.clientCity || r.row.siteCity) && (
+                          <div className="ci-cell-sub">{r.row.siteCity || r.row.clientCity}</div>
+                        )}
                       </td>
                       <td>
-                        {[r.row.contact2Name, r.row.contact2Phone, r.row.contact2Email].filter(Boolean).join(' · ')
-                          || <em className="ci-cell--empty">-</em>}
+                        {r.siteName}
+                        {r.row.siteContactName && <div className="ci-cell-sub">{r.row.siteContactName}</div>}
                       </td>
                       <td>
-                        {r.row.gpsLat || r.row.gpsLng
-                          ? `${r.row.gpsLat || '?'} / ${r.row.gpsLng || '?'}`
-                          : <em className="ci-cell--empty">-</em>
-                        }
+                        {r.hasDea ? (
+                          <>
+                            {r.row.deaType || <em className="ci-cell--empty">type ?</em>}
+                            {r.row.deaSerial && <div className="ci-cell-sub">{r.row.deaSerial}</div>}
+                          </>
+                        ) : <em className="ci-cell--empty">—</em>}
                       </td>
+                      <td>{r.row.deaLocation || <em className="ci-cell--empty">—</em>}</td>
+                      <td>{r.row.deaInstallDate || <em className="ci-cell--empty">—</em>}</td>
                       <td>
-                        {[r.row.managerName, r.row.managerPhone, r.row.managerEmail].filter(Boolean).join(' · ')
-                          || <em className="ci-cell--empty">-</em>}
+                        {[r.row.deaControlType, r.row.deaNextControl].filter(Boolean).join(' · ')
+                          || <em className="ci-cell--empty">—</em>}
                       </td>
+                      <td><ConsumablesCell row={r.row} /></td>
                       <td>
                         {r.valid
                           ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /></span>
@@ -349,6 +435,11 @@ export default function ClientImportPage() {
                         {r.errors.length > 0 && (
                           <ul className="ci-error-list">
                             {r.errors.map((e, j) => <li key={j}>{e}</li>)}
+                          </ul>
+                        )}
+                        {r.warnings?.length > 0 && (
+                          <ul className="ci-error-list ci-warn-list">
+                            {r.warnings.map((w, j) => <li key={j}>{w}</li>)}
                           </ul>
                         )}
                       </td>
@@ -365,6 +456,15 @@ export default function ClientImportPage() {
               </div>
             )}
 
+            {validation.summary.warnings > 0 && (
+              <div className="ci-warning-banner">
+                <AlertTriangle size={14} />
+                {validation.summary.warnings} ligne{validation.summary.warnings !== 1 ? 's' : ''} porte
+                {validation.summary.warnings !== 1 ? 'nt' : ''} un numéro de série déjà présent dans le parc.
+                Ces lignes seront importées : vérifiez qu'il s'agit bien du même appareil.
+              </div>
+            )}
+
             <div className="ci-action-row">
               <button className="btn btn--ghost" onClick={reset}>
                 <RotateCcw size={13} /> Changer de fichier
@@ -375,7 +475,9 @@ export default function ClientImportPage() {
                 onClick={handleImport}
               >
                 <Upload size={14} />
-                Importer {validation.summary.valid} client{validation.summary.valid !== 1 ? 's' : ''}
+                Importer {validation.summary.clients} client{validation.summary.clients !== 1 ? 's' : ''}
+                {' · '}{validation.summary.sites} site{validation.summary.sites !== 1 ? 's' : ''}
+                {validation.summary.deas > 0 && ` · ${validation.summary.deas} DAE`}
               </button>
             </div>
           </div>
@@ -387,7 +489,9 @@ export default function ClientImportPage() {
             <FileSpreadsheet size={48} className="ci-importing-icon" />
             <p className="ci-importing-title">Import en cours…</p>
             <p className="ci-importing-sub">
-              Importation de {validation.summary.valid} client{validation.summary.valid !== 1 ? 's' : ''}
+              Importation de {validation.summary.clients} client{validation.summary.clients !== 1 ? 's' : ''},
+              {' '}{validation.summary.sites} site{validation.summary.sites !== 1 ? 's' : ''}
+              {validation.summary.deas > 0 && ` et ${validation.summary.deas} DAE`}
             </p>
             <div className="ci-progress-wrap">
               <div className="ci-progress-bar">
@@ -416,9 +520,13 @@ export default function ClientImportPage() {
                   }
                 </p>
                 <p className="ci-done-sub">
-                  {importRes.summary.imported} client{importRes.summary.imported !== 1 ? 's' : ''} importé{importRes.summary.imported !== 1 ? 's' : ''}
-                  {importRes.summary.created != null && ` (${importRes.summary.created} cree${importRes.summary.created !== 1 ? 's' : ''}, ${importRes.summary.updated || 0} mis a jour)`}
+                  {importRes.summary.imported} client{importRes.summary.imported !== 1 ? 's' : ''} traité{importRes.summary.imported !== 1 ? 's' : ''}
+                  {importRes.summary.created != null && ` (${importRes.summary.created} créé${importRes.summary.created !== 1 ? 's' : ''}, ${importRes.summary.updated || 0} mis à jour)`}
                   {importRes.summary.failed > 0 && `, ${importRes.summary.failed} échec${importRes.summary.failed !== 1 ? 's' : ''}`}
+                  <br />
+                  {importRes.summary.sitesCreated || 0} site{(importRes.summary.sitesCreated || 0) !== 1 ? 's' : ''} créé{(importRes.summary.sitesCreated || 0) !== 1 ? 's' : ''}
+                  {' · '}{importRes.summary.deasCreated || 0} DAE ajouté{(importRes.summary.deasCreated || 0) !== 1 ? 's' : ''}
+                  {' · '}{importRes.summary.deasUpdated || 0} DAE mis à jour
                 </p>
               </div>
             </div>
@@ -430,6 +538,8 @@ export default function ClientImportPage() {
                   <tr>
                     <th>Client</th>
                     <th>Statut</th>
+                    <th>Sites</th>
+                    <th>DAE</th>
                     <th>Détail</th>
                   </tr>
                 </thead>
@@ -439,9 +549,21 @@ export default function ClientImportPage() {
                       <td className="ci-cell-name">{r.name}</td>
                       <td>
                         {r.success
-                          ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /> {r.action === 'updated' ? 'Mis a jour' : 'Cree'}</span>
+                          ? <span className="ci-status ci-status--ok"><CheckCircle2 size={14} /> {r.action === 'updated' ? 'Mis à jour' : 'Créé'}</span>
                           : <span className="ci-status ci-status--error"><XCircle size={14} /> Échec</span>
                         }
+                      </td>
+                      <td>
+                        {r.success
+                          ? `${r.sites} (${r.sitesCreated} créé${r.sitesCreated !== 1 ? 's' : ''})`
+                          : <em className="ci-cell--empty">—</em>}
+                      </td>
+                      <td>
+                        {r.success
+                          ? (r.deasCreated || r.deasUpdated
+                              ? `${r.deasCreated} ajouté${r.deasCreated !== 1 ? 's' : ''}, ${r.deasUpdated} mis à jour`
+                              : <em className="ci-cell--empty">—</em>)
+                          : <em className="ci-cell--empty">—</em>}
                       </td>
                       <td>{r.error && <span className="ci-error-inline">{r.error}</span>}</td>
                     </tr>

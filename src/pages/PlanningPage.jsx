@@ -6,7 +6,7 @@ import timeGridPlugin  from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin      from '@fullcalendar/list'
 import frLocale        from '@fullcalendar/core/locales/fr'
-import { Plus, Wrench, Zap } from 'lucide-react'
+import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getAppointments, updateAppointment } from '../api/appointments'
 import { getFormations, updateFormation } from '../api/formations'
@@ -14,10 +14,95 @@ import { getInterventions } from '../api/interventions'
 import { getInstallations } from '../api/installations'
 import { getUsers } from '../api/users'
 import EventModal from '../components/EventModal'
-import { TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime } from '../lib/appointmentConstants'
+import FormationModal from '../components/FormationModal'
+import ControlCreateModal from '../components/ControlCreateModal'
+import AppointmentViewModal from '../components/AppointmentViewModal'
+import { useAuth } from '../context/AuthContext'
+import {
+  TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime,
+  DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle,
+} from '../lib/appointmentConstants'
 
 // Ré-export pour compatibilité (anciens imports depuis cette page).
 export { TYPE_OPTS, STATUS_OPTS } from '../lib/appointmentConstants'
+
+const CONTROL_LABELS = {
+  semestriel:   'Contrôle semestriel',
+  annuel:       'Contrôle annuel',
+  hors_contrat: 'Contrôle hors contrat',
+}
+
+/** Délai lisible d'un coup d'œil : « dans 3 j », « dans 5 mois ». */
+function relativeDays(date) {
+  const target = new Date(date)
+  const t = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+  const n = new Date(); n.setHours(0, 0, 0, 0)
+  const days = Math.round((t - n) / 86400000)
+  if (days <= 0)  return "auj."
+  if (days === 1) return 'demain'
+  if (days < 31)  return `${days} j`
+  const months = Math.round(days / 30)
+  return months < 12 ? `${months} mois` : `${Math.round(days / 365)} an${days >= 730 ? 's' : ''}`
+}
+
+/**
+ * Tous les contrôles restant à faire, du plus proche au plus lointain.
+ *
+ * Le calendrier n'affiche qu'une période à la fois ; cette liste donne la suite
+ * complète, sans horizon. Elle vit dans une modale pour ne pas encombrer la
+ * colonne de gauche.
+ */
+function UpcomingControlsModal({ items, onClose, onOpen }) {
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--md">
+        <div className="modal-header">
+          <h2 className="modal-title">
+            <CalendarClock size={16} /> Prochains contrôles ({items.length})
+          </h2>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          {items.length === 0 ? (
+            <p className="plan-side-empty" style={{ padding: '24px 0', textAlign: 'center' }}>
+              Aucun contrôle planifié.
+            </p>
+          ) : (
+            <ul className="plan-next-list plan-next-list--modal">
+              {items.map(iv => {
+                const d = new Date(iv.scheduledDate)
+                return (
+                  <li key={iv._id} className="plan-next-item" onClick={() => onOpen(iv._id)}>
+                    <span className="plan-next-date">
+                      <span className="plan-next-day">
+                        {d.toLocaleDateString('fr-FR', { day: '2-digit' })}
+                      </span>
+                      <span className="plan-next-month">
+                        {d.toLocaleDateString('fr-FR', { month: 'short' })}
+                      </span>
+                      <span className="plan-next-year">{d.getFullYear()}</span>
+                    </span>
+                    <span className="plan-next-main">
+                      <span className="plan-next-title">{iv.clientName || 'Client'}</span>
+                      <span className="plan-next-sub">
+                        {CONTROL_LABELS[iv.controlType] || 'Contrôle'}
+                        {iv.siteName ? ` · ${iv.siteName}` : ''}
+                      </span>
+                    </span>
+                    <span className="plan-next-in">{relativeDays(iv.scheduledDate)}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn--primary" onClick={onClose}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /* ── Helpers événements ─────────────────────────────────────── */
 
@@ -36,20 +121,22 @@ function toFCEvent(a) {
   }
 }
 
-// Un contrôle (intervention, collection séparée) en lecture seule.
+// Un contrôle (intervention, collection séparée) en lecture seule. Son type de
+// planning distingue semestriel, annuel et hors contrat.
 function toInterventionEvent(iv) {
-  const color = TYPE_MAP.intervention.color
+  const type  = controlTypeToPlanning(iv.controlType)
+  const color = TYPE_MAP[type].color
   const start = new Date(iv.scheduledDate)
   return {
     id:              `intv-${iv._id}`,
-    title:           `Contrôle${iv.clientName ? ' — ' + iv.clientName : ''}`,
+    title:           controlEventTitle(iv),
     start,
     end:             new Date(start.getTime() + 60 * 60000),
     backgroundColor: color,
     borderColor:     color,
     textColor:       '#fff',
     editable:        false,
-    extendedProps:   { kind: 'intervention', type: 'intervention', status: iv.status, clientName: iv.clientName, _intv: iv },
+    extendedProps:   { kind: 'intervention', type, status: iv.status, clientName: iv.clientName, _intv: iv },
   }
 }
 
@@ -101,9 +188,22 @@ export default function PlanningPage() {
   const navigate = useNavigate()
   const calendarRef = useRef(null)
   const [modal,       setModal]       = useState(null)
+  // Les formations ont leur fiche dédiée (agents, attestations, documents) :
+  // elles ne passent pas par la modal de rendez-vous.
+  const [fmnModal,    setFmnModal]    = useState(null)
+  // Un contrôle se crée avec la même fiche que depuis la page Contrôles.
+  const [ctrlModal,   setCtrlModal]   = useState(null)
+  const [viewing,     setViewing]     = useState(null)   // RDV consulté sans droit d'édition
   const [todayEvents, setTodayEvents] = useState([])
+  const [upcoming,     setUpcoming]     = useState([])   // contrôles à venir, tous horizons
+  const [upcomingOpen, setUpcomingOpen] = useState(false)
   const [typeFilter,  setTypeFilter]  = useState(null)
   const [users,       setUsers]       = useState([])
+
+  /* Le technicien lit le planning, il ne l'écrit pas : le serveur refuse ses
+     écritures, l'interface ne les propose donc pas. */
+  const { user } = useAuth()
+  const readOnlyPlanning = user?.role === 'technicien'
 
   useEffect(() => {
     getUsers().then(data => setUsers(Array.isArray(data) ? data : [])).catch(() => {})
@@ -122,8 +222,8 @@ export default function PlanningPage() {
         ...(Array.isArray(appts) ? appts : []).map(a => ({ ...a, _kind: 'appointment', _raw: a })),
         ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(i => ({
           _id: i._id, _kind: 'intervention',
-          title: `Contrôle${i.clientName ? ' — ' + i.clientName : ''}`,
-          start: i.scheduledDate, type: 'intervention',
+          title: controlEventTitle(i),
+          start: i.scheduledDate, type: controlTypeToPlanning(i.controlType),
           clientName: i.clientName, status: i.status,
         })),
         ...insts.filter(i => i.scheduledDate).map(i => ({
@@ -144,6 +244,25 @@ export default function PlanningPage() {
 
   useEffect(() => { fetchToday() }, [fetchToday])
 
+  /* Tous les contrôles encore à faire, sans horizon : le calendrier montre un
+     mois à la fois, cette liste donne la suite — y compris les échéances les
+     plus lointaines — dans l'ordre où elles tomberont. */
+  const fetchUpcoming = useCallback(() => {
+    getInterventions()
+      .then(data => {
+        const now = new Date(); now.setHours(0, 0, 0, 0)
+        setUpcoming(
+          (Array.isArray(data) ? data : [])
+            .filter(i => i.status !== 'termine' && i.scheduledDate
+              && new Date(i.scheduledDate) >= now)
+            .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
+        )
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { fetchUpcoming() }, [fetchUpcoming])
+
   function refetch() {
     calendarRef.current?.getApi().refetchEvents()
     fetchToday()
@@ -152,15 +271,15 @@ export default function PlanningPage() {
   const loadEvents = useCallback((info, success, fail) => {
     // Sources : RDV (appointments), contrôles (interventions), poses (installations
     // à installer), formations. Un filtre par type ne montre que la source correspondante.
-    const wantAppt = !typeFilter || !['intervention', 'installation', 'formation'].includes(typeFilter)
-    const wantIntv = !typeFilter || typeFilter === 'intervention'
+    const wantAppt = !typeFilter || !DEDICATED_TYPES.includes(typeFilter)
+    const wantIntv = !typeFilter || CONTROL_TYPES.includes(typeFilter)
     const wantInst = !typeFilter || typeFilter === 'installation'
     const wantFmn  = !typeFilter || typeFilter === 'formation'
 
     const apptP = wantAppt
       ? getAppointments({
           start: info.startStr, end: info.endStr,
-          ...(typeFilter && !['intervention', 'installation', 'formation'].includes(typeFilter) ? { type: typeFilter } : {}),
+          ...(typeFilter && !DEDICATED_TYPES.includes(typeFilter) ? { type: typeFilter } : {}),
         }).catch(() => [])
       : Promise.resolve([])
     const intvP = wantIntv
@@ -176,9 +295,14 @@ export default function PlanningPage() {
     Promise.all([apptP, intvP, instP, fmnP])
       .then(([appts, intvs, instRes, fmns]) => {
         const insts = Array.isArray(instRes) ? instRes : (instRes?.data || [])
+        // Les contrôles arrivent d'une seule requête : le tri semestriel /
+        // annuel / hors contrat se fait ici.
+        const keepIntv = i => i.scheduledDate &&
+          (!typeFilter || controlTypeToPlanning(i.controlType) === typeFilter)
+
         success([
           ...(Array.isArray(appts) ? appts : []).map(toFCEvent),
-          ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(toInterventionEvent),
+          ...(Array.isArray(intvs) ? intvs : []).filter(keepIntv).map(toInterventionEvent),
           ...insts.filter(i => i.scheduledDate).map(toInstallationEvent),
           ...(Array.isArray(fmns) ? fmns : []).map(toFormationEvent),
         ])
@@ -187,15 +311,20 @@ export default function PlanningPage() {
   }, [typeFilter])
 
   function handleSelect(info) {
+    // Le technicien ne compose pas le planning : sélectionner un créneau ne
+    // doit rien ouvrir.
+    if (readOnlyPlanning) { info.view.calendar.unselect(); return }
     setModal({ mode: 'create', slot: info })
     info.view.calendar.unselect()
   }
 
   function handleEventClick(info) {
     const ep = info.event.extendedProps
+    // Un contrôle reste ouvrable : c'est le travail du technicien.
     if (ep.kind === 'intervention')  { navigate(`/interventions/${ep._intv._id}`); return }
     if (ep.kind === 'installation')  { navigate(`/devices/${ep._inst._id}`); return }
-    if (ep.kind === 'formation')     { setModal({ mode: 'edit', entityKind: 'formation', entity: ep._raw }); return }
+    if (readOnlyPlanning) { setViewing(ep._raw); return }
+    if (ep.kind === 'formation')     { setFmnModal({ mode: 'edit', formation: ep._raw }); return }
     setModal({ mode: 'edit', entityKind: 'appointment', entity: ep._raw })
   }
 
@@ -237,7 +366,8 @@ export default function PlanningPage() {
   function handleTodayClick(e) {
     if (e._kind === 'intervention') { navigate(`/interventions/${e._id}`); return }
     if (e._kind === 'installation') { navigate(`/devices/${e._id}`); return }
-    if (e._kind === 'formation')    { setModal({ mode: 'edit', entityKind: 'formation', entity: e._raw }); return }
+    if (readOnlyPlanning) { setViewing(e._raw); return }
+    if (e._kind === 'formation')    { setFmnModal({ mode: 'edit', formation: e._raw }); return }
     setModal({ mode: 'edit', entityKind: 'appointment', entity: e._raw })
   }
 
@@ -247,12 +377,24 @@ export default function PlanningPage() {
       {/* ── Left sidebar ─────────────────────────── */}
       <aside className="plan-side">
 
-        <div className="plan-side-section">
-          <button className="btn btn--primary plan-add-btn" style={{ width: '100%', justifyContent: 'center' }}
-            onClick={() => setModal({ mode: 'create', slot: null })}>
-            <Plus size={14} /> Nouveau RDV
-          </button>
-        </div>
+        {!readOnlyPlanning && (
+          <div className="plan-side-section">
+            <button className="btn btn--primary plan-add-btn" style={{ width: '100%', justifyContent: 'center' }}
+              onClick={() => setModal({ mode: 'create', slot: null })}>
+              <Plus size={14} /> Nouveau RDV
+            </button>
+            {/* Une formation se programme aussi souvent qu'un rendez-vous :
+                elle mérite son entrée directe. */}
+            <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
+              onClick={() => setFmnModal({ mode: 'create', slot: null })}>
+              <GraduationCap size={14} /> Nouvelle formation
+            </button>
+            <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
+              onClick={() => setCtrlModal({ date: null })}>
+              <Wrench size={14} /> Nouveau contrôle
+            </button>
+          </div>
+        )}
 
         <div className="plan-side-section">
           <h3 className="plan-side-title">Aujourd'hui</h3>
@@ -282,6 +424,16 @@ export default function PlanningPage() {
               ))}
             </ul>
           )}
+        </div>
+
+        {/* La liste complète encombrait la colonne : elle passe derrière un
+            bouton qui l'ouvre en modale. */}
+        <div className="plan-side-section">
+          <button type="button" className="btn btn--ghost plan-ctrl-btn"
+            onClick={() => setUpcomingOpen(true)}>
+            <CalendarClock size={14} /> Prochains contrôles
+            <span className="plan-ctrl-count">{upcoming.length}</span>
+          </button>
         </div>
 
         <div className="plan-side-section">
@@ -339,8 +491,8 @@ export default function PlanningPage() {
             day:   'Jour',
             list:  'Liste',
           }}
-          editable
-          selectable
+          editable={!readOnlyPlanning}
+          selectable={!readOnlyPlanning}
           selectMirror
           dayMaxEvents={4}
           eventDisplay="block"
@@ -382,6 +534,43 @@ export default function PlanningPage() {
           onSaved={() => { setModal(null); refetch() }}
           onDeleted={() => { setModal(null); refetch() }}
           onChanged={() => refetch()}
+          // Le créneau retenu suit : choisir « Formation » dans la modal de RDV
+          // ouvre la fiche formation sur la même case du calendrier.
+          onSwitchToFormation={slot => { setModal(null); setFmnModal({ mode: 'create', slot }) }}
+          onSwitchToControl={slot => { setModal(null); setCtrlModal({ date: slot?.startStr || null }) }}
+        />
+      )}
+
+      {ctrlModal && (
+        <ControlCreateModal
+          presetDate={ctrlModal.date}
+          onClose={() => setCtrlModal(null)}
+          onCreated={() => { setCtrlModal(null); refetch() }}
+        />
+      )}
+
+      {fmnModal && (
+        <FormationModal
+          mode={fmnModal.mode}
+          formation={fmnModal.formation}
+          slot={fmnModal.slot}
+          users={users}
+          onClose={() => setFmnModal(null)}
+          onSaved={() => { setFmnModal(null); refetch() }}
+          onDeleted={() => { setFmnModal(null); refetch() }}
+          onChanged={() => refetch()}
+        />
+      )}
+
+      {viewing && (
+        <AppointmentViewModal appointment={viewing} onClose={() => setViewing(null)} />
+      )}
+
+      {upcomingOpen && (
+        <UpcomingControlsModal
+          items={upcoming}
+          onClose={() => setUpcomingOpen(false)}
+          onOpen={id => { setUpcomingOpen(false); navigate(`/interventions/${id}`) }}
         />
       )}
     </div>

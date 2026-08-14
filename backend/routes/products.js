@@ -2,13 +2,12 @@ const router = require('express').Router()
 const { body } = require('express-validator')
 const ctrl   = require('../controllers/productsController')
 const upload = require('../middleware/upload')
-const { protect }           = require('../middleware/auth')
-const { requirePermission } = require('../middleware/permissions')
-const { CATEGORIES }        = require('../models/Product')  // source unique
+const { protect }                  = require('../middleware/auth')
+const { requirePermissionToWrite } = require('../middleware/permissions')
 
 const productValidation = [
   body('name').trim().notEmpty().withMessage('Le nom du produit est requis.'),
-  body('category').isIn(CATEGORIES).withMessage('Catégorie invalide.'),
+  body('category').trim().notEmpty().withMessage('La catégorie est requise.'),
   body('stock').optional({ checkFalsy: true }).isNumeric().withMessage('Stock invalide.'),
   body('alertThreshold').optional({ checkFalsy: true }).isNumeric().withMessage('Seuil d\'alerte invalide.'),
   body('purchasePrice').optional({ checkFalsy: true }).isNumeric().withMessage('Prix d\'achat invalide.'),
@@ -16,7 +15,9 @@ const productValidation = [
 ]
 
 router.use(protect)
-router.use(requirePermission('canManageStock'))
+// Le catalogue est consultable par tous : la pose d'un DEA en dépend. Seules
+// les modifications restent réservées à la gestion du stock.
+router.use(requirePermissionToWrite('canManageStock'))
 
 router.get('/stats',           ctrl.getStats)
 router.get('/suppliers',       ctrl.getSuppliers)

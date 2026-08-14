@@ -57,18 +57,25 @@ export default function InterventionPrintPage() {
   if (error) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Intervention introuvable.</div>
   if (!iv)   return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Chargement…</div>
 
-  const snap   = iv.installationSnap || {}
-  const fiche  = iv.fiche || {}
-  const photos = fiche.photos || []
+  const snap = iv.installationSnap || {}
 
-  const deviceLabel = [snap.deviceType, iv.installation?.deviceProduct?.name || snap.deviceModel]
-    .filter(Boolean).join(' · ') || '—'
+  /* Une visite couvre plusieurs appareils : le rapport les liste tous. Les
+     interventions d'avant les visites multi-DAE n'ont qu'une fiche unique. */
+  const fiches = (iv.fiches?.length ? iv.fiches : [iv.fiche || {}])
+  const visite = iv.visite || iv.fiche || {}
+  const photos = fiches.flatMap(f => (f.photos || []).map(fn => ({ fn, f })))
 
   const deviceImg = iv.installation?.deviceProduct?.images?.[0]
     ? `${STATIC_BASE}/uploads/products/${iv.installation.deviceProduct.images[0]}`
     : null
 
-  const hasObservations = fiche.observation || fiche.observationGenerale
+  const deviceLabelOf = f => f.deaLabel
+    || [snap.deviceType, iv.installation?.deviceProduct?.name || snap.deviceModel]
+      .filter(Boolean).join(' · ')
+    || 'DAE'
+
+  const observations = fiches.filter(f => f.observation)
+  const hasObservations = observations.length > 0 || visite.observationGenerale
 
   return (
     <div className="pr-wrap">
@@ -128,7 +135,7 @@ export default function InterventionPrintPage() {
         </div>
 
         {/* ── Tableau appareil ── */}
-        <Section title="État de l'appareil">
+        <Section title={fiches.length > 1 ? `Appareils contrôlés (${fiches.length})` : "État de l'appareil"}>
           <table className="pr-device-table">
             <thead>
               <tr>
@@ -142,63 +149,76 @@ export default function InterventionPrintPage() {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                {/* Type + image */}
-                <td>
-                  <div className="pr-dt-device">
-                    {deviceImg && (
-                      <img src={deviceImg} alt="" className="pr-dt-img" />
+              {fiches.map((fiche, i) => (
+                <tr key={fiche.dea || i}>
+                  {/* Type + image */}
+                  <td>
+                    <div className="pr-dt-device">
+                      {deviceImg && i === 0 && (
+                        <img src={deviceImg} alt="" className="pr-dt-img" />
+                      )}
+                      <span className="pr-dt-name">{deviceLabelOf(fiche)}</span>
+                    </div>
+                  </td>
+
+                  {/* N° de série */}
+                  <td className="pr-dt-center">
+                    <span className="pr-dt-mono">
+                      {fiche.serialNumber || snap.serialNumber || '—'}
+                    </span>
+                  </td>
+
+                  {/* Emplacement */}
+                  <td>{fiche.emplacement || snap.location || '—'}</td>
+
+                  {/* Signalétique */}
+                  <td className="pr-dt-center">{fiche.signaletique || '—'}</td>
+
+                  {/* Batterie — la pièce posée est nommée : c'est elle qui a
+                      quitté le stock. */}
+                  <td className="pr-dt-center">
+                    {fiche.batteriePct != null && (
+                      <span className={`pr-dt-pct pr-dt-pct--${
+                        fiche.batteriePct >= 80 ? 'ok' : fiche.batteriePct >= 40 ? 'warn' : 'bad'
+                      }`}>
+                        {fiche.batteriePct}%
+                      </span>
                     )}
-                    <span className="pr-dt-name">{deviceLabel}</span>
-                  </div>
-                </td>
+                    {fiche.batterieRemplacee && (
+                      <span className="pr-dt-note">
+                        Remplacée{fiche.batterieRemplaceeRef ? ` — ${fiche.batterieRemplaceeRef}` : ''}
+                      </span>
+                    )}
+                    {fiche.batterieNote && (
+                      <span className="pr-dt-note">{fiche.batterieNote}</span>
+                    )}
+                    {fiche.batteriePct == null && !fiche.batterieNote && !fiche.batterieRemplacee && '—'}
+                  </td>
 
-                {/* N° de série */}
-                <td className="pr-dt-center">
-                  <span className="pr-dt-mono">
-                    {fiche.serialNumber || snap.serialNumber || '—'}
-                  </span>
-                </td>
+                  {/* Électrodes */}
+                  <td className="pr-dt-center">
+                    {fiche.electrodesPct != null && (
+                      <span className={`pr-dt-pct pr-dt-pct--${
+                        fiche.electrodesPct >= 80 ? 'ok' : fiche.electrodesPct >= 40 ? 'warn' : 'bad'
+                      }`}>
+                        {fiche.electrodesPct}%
+                      </span>
+                    )}
+                    {fiche.electrodesRemplacees && (
+                      <span className="pr-dt-note">
+                        Remplacées{fiche.electrodesRemplaceesRef ? ` — ${fiche.electrodesRemplaceesRef}` : ''}
+                      </span>
+                    )}
+                    {fiche.electrodesNote && (
+                      <span className="pr-dt-note">{fiche.electrodesNote}</span>
+                    )}
+                    {fiche.electrodesPct == null && !fiche.electrodesNote && !fiche.electrodesRemplacees && '—'}
+                  </td>
 
-                {/* Emplacement */}
-                <td>{fiche.emplacement || snap.location || '—'}</td>
-
-                {/* Signalétique */}
-                <td className="pr-dt-center">{fiche.signaletique || '—'}</td>
-
-                {/* Batterie */}
-                <td className="pr-dt-center">
-                  {fiche.batteriePct != null && (
-                    <span className={`pr-dt-pct pr-dt-pct--${
-                      fiche.batteriePct >= 80 ? 'ok' : fiche.batteriePct >= 40 ? 'warn' : 'bad'
-                    }`}>
-                      {fiche.batteriePct}%
-                    </span>
-                  )}
-                  {fiche.batterieNote && (
-                    <span className="pr-dt-note">{fiche.batterieNote}</span>
-                  )}
-                  {fiche.batteriePct == null && !fiche.batterieNote && '—'}
-                </td>
-
-                {/* Électrodes */}
-                <td className="pr-dt-center">
-                  {fiche.electrodesPct != null && (
-                    <span className={`pr-dt-pct pr-dt-pct--${
-                      fiche.electrodesPct >= 80 ? 'ok' : fiche.electrodesPct >= 40 ? 'warn' : 'bad'
-                    }`}>
-                      {fiche.electrodesPct}%
-                    </span>
-                  )}
-                  {fiche.electrodesNote && (
-                    <span className="pr-dt-note">{fiche.electrodesNote}</span>
-                  )}
-                  {fiche.electrodesPct == null && !fiche.electrodesNote && '—'}
-                </td>
-
-                {/* Armoire */}
-                <td className="pr-dt-center">{fiche.armoire || '—'}</td>
-              </tr>
+                  {/* Armoire */}
+                  <td className="pr-dt-center">{fiche.armoire || '—'}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </Section>
@@ -207,8 +227,8 @@ export default function InterventionPrintPage() {
         <Section title="Informations de visite">
           <table className="pr-table">
             <tbody>
-              <InfoRow label="Date de réception" value={fiche.dateReception ? fmtShort(fiche.dateReception) : '—'} />
-              <InfoRow label="Visa / Signature"  value={fiche.visa} />
+              <InfoRow label="Date de réception" value={visite.dateReception ? fmtShort(visite.dateReception) : '—'} />
+              <InfoRow label="Visa / Signature"  value={visite.visa} />
             </tbody>
           </table>
         </Section>
@@ -216,16 +236,18 @@ export default function InterventionPrintPage() {
         {/* Observations */}
         {hasObservations && (
           <Section title="Observations">
-            {fiche.observation && (
-              <div className="pr-note-box" style={{ marginBottom: 8 }}>
-                <div className="pr-note-label">Observation</div>
-                <div className="pr-note-text">{fiche.observation}</div>
+            {observations.map((f, i) => (
+              <div key={f.dea || i} className="pr-note-box" style={{ marginBottom: 8 }}>
+                <div className="pr-note-label">
+                  {fiches.length > 1 ? deviceLabelOf(f) : 'Observation'}
+                </div>
+                <div className="pr-note-text">{f.observation}</div>
               </div>
-            )}
-            {fiche.observationGenerale && (
+            ))}
+            {visite.observationGenerale && (
               <div className="pr-note-box">
                 <div className="pr-note-label">Observation générale</div>
-                <div className="pr-note-text">{fiche.observationGenerale}</div>
+                <div className="pr-note-text">{visite.observationGenerale}</div>
               </div>
             )}
           </Section>
@@ -235,8 +257,8 @@ export default function InterventionPrintPage() {
         {photos.length > 0 && (
           <Section title={`Photos (${photos.length})`}>
             <div className="pr-photos">
-              {photos.map(fn => (
-                <img key={fn} src={fichePhotoUrl(fn)} alt="photo" className="pr-photo" />
+              {photos.map(({ fn, f }) => (
+                <img key={fn} src={fichePhotoUrl(fn)} alt={deviceLabelOf(f)} className="pr-photo" />
               ))}
             </div>
           </Section>

@@ -3,41 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   ArrowLeft, Pencil, SlidersHorizontal, X, AlertTriangle, Package,
-  TrendingUp, TrendingDown, Clock, CheckCircle2, History,
-  Users, ShoppingCart, Info, User, ImagePlus, Trash2,
-  ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowUpDown,
-  Hash, Layers, FileText, Search, MapPin, ExternalLink,
-  Globe, Plus, Save,
+  TrendingUp, TrendingDown, History, User, ImagePlus,
+  Hash, Layers, Search, Boxes, Camera,
 } from 'lucide-react'
 import {
-  getProduct, getMovements, adjustStock, assignSerials, getProductInstallations,
+  getProduct, getMovements, adjustStock,
   uploadProductImage, deleteProductImage, productImageUrl,
-  updateProduct, patchProduct,
 } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
-import { PRODUCT_CATEGORIES as CATEGORIES, CATEGORY_MAP as CAT_MAP } from '../constants/categories'
+import ProductItemsTab from '../components/ProductItemsTab'
+import { getProductCategories } from '../api/productCategories'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
   return err.message || 'Une erreur est survenue.'
-}
-
-function getStockStatus(stock, threshold) {
-  if (stock === 0)        return 'out'
-  if (stock <= threshold) return 'low'
-  return 'ok'
-}
-
-function getExpirationStatus(dateStr) {
-  if (!dateStr) return null
-  const date = new Date(dateStr)
-  const now  = new Date()
-  const days = Math.ceil((date - now) / (1000 * 60 * 60 * 24))
-  if (days < 0)   return { level: 'expired', days }
-  if (days <= 30) return { level: 'urgent',  days }
-  if (days <= 90) return { level: 'soon',    days }
-  return { level: 'ok', days }
 }
 
 function formatDate(dateStr) {
@@ -54,57 +34,11 @@ function formatDateTime(dateStr) {
 }
 
 function formatPrice(val) {
-  if (val == null || val === '') return '—'
+  if (val == null || val === '') return null
   return `${Number(val).toLocaleString('fr-FR')} DT`
 }
 
-function RichText({ html }) {
-  if (!html) return null
-  return <div className="pd-richtext" dangerouslySetInnerHTML={{ __html: html }} />
-}
-
-/* ─── Shared UI components ─── */
-function CategoryBadge({ category }) {
-  const cat = CAT_MAP[category]
-  if (!cat) return <span className="type-badge">{category}</span>
-  return <span className={`cat-badge ${cat.color}`}>{cat.label}</span>
-}
-
-function StockIndicator({ stock, threshold }) {
-  const status = getStockStatus(stock, threshold)
-  const pct    = threshold > 0 ? Math.min((stock / (threshold * 2)) * 100, 100) : (stock > 0 ? 100 : 0)
-  return (
-    <div className="stock-cell">
-      <div className="stock-cell-top">
-        <span className={`stock-qty-label stock-qty-label--${status}`}>{stock}</span>
-        <span className="stock-threshold-label">/ min {threshold}</span>
-      </div>
-      <div className="stock-mini-bar">
-        <div className={`stock-mini-fill stock-mini-fill--${status}`} style={{ width: `${pct}%` }} />
-      </div>
-      {status === 'out' && <span className="stock-status-chip stock-status-chip--out">Épuisé</span>}
-      {status === 'low' && <span className="stock-status-chip stock-status-chip--low">Stock faible</span>}
-    </div>
-  )
-}
-
-function ExpirationBadge({ date }) {
-  const exp = getExpirationStatus(date)
-  if (!exp) return <span className="cell-muted">—</span>
-  return (
-    <div className="exp-cell">
-      <span className="exp-date">{formatDate(date)}</span>
-      <span className={`exp-badge exp-badge--${exp.level}`}>
-        {exp.level === 'expired' && <AlertTriangle size={10} />}
-        {(exp.level === 'urgent' || exp.level === 'soon') && <Clock size={10} />}
-        {exp.level === 'ok' && <CheckCircle2 size={10} />}
-        {exp.level === 'expired' ? 'Expiré' : exp.level === 'ok' ? 'OK' : `${exp.days}j`}
-      </span>
-    </div>
-  )
-}
-
-/* ─── Movement row ─── */
+/* ─── Ligne de mouvement ─── */
 function MovementRow({ mv, onClick }) {
   const isEntree  = mv.type === 'entree'
   const isSortie  = mv.type === 'sortie'
@@ -141,7 +75,7 @@ function MovementRow({ mv, onClick }) {
   )
 }
 
-/* ─── Movement detail modal ─── */
+/* ─── Détail d'un mouvement ─── */
 function MovementDetailModal({ movement, onClose }) {
   const isEntree  = movement.type === 'entree'
   const isSortie  = movement.type === 'sortie'
@@ -219,7 +153,6 @@ function MovementDetailModal({ movement, onClose }) {
     </div>
   )
 }
-
 /* ─── Stock adjust modal ─── */
 function StockAdjustModal({ product, onClose, onDone }) {
   const [type,            setType]            = useState('entree')
@@ -558,510 +491,91 @@ function StockAdjustModal({ product, onClose, onDone }) {
     </div>
   )
 }
+/* ─── Photo du produit ─────────────────────────────────────
+   Une seule photo, posée à côté du nom : cliquer l'ajoute ou la remplace, la
+   croix la retire. Le modèle en accepte plusieurs, on n'expose que la première
+   — c'est tout ce dont la fiche a besoin. */
+function ProductPhoto({ product, onChanged }) {
+  const [busy, setBusy] = useState(false)
+  const photo = product.images?.[0]
 
-/* ─── Assign serials modal (régularisation, ne touche pas au stock) ─── */
-function AssignSerialsModal({ product, untrackedCount, inStockSerials, onClose, onDone }) {
-  const [serialsText, setSerialsText] = useState('')
-  const [error,       setError]       = useState('')
-  const [loading,     setLoading]     = useState(false)
-
-  const serialLines = serialsText.split('\n').map(s => s.trim()).filter(Boolean)
-
-  const duplicatesInInput = serialLines.filter((sn, i) => serialLines.indexOf(sn) !== i)
-  const alreadyInStock    = serialLines.filter(sn => inStockSerials.includes(sn))
-  const overCount         = serialLines.length > untrackedCount
-  const canSubmit = serialLines.length > 0 && !overCount &&
-    duplicatesInInput.length === 0 && alreadyInStock.length === 0
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (serialLines.length === 0) { setError('Saisissez au moins un numéro de série.'); return }
-    if (overCount) {
-      setError(`Vous ne pouvez saisir que ${untrackedCount} numéro${untrackedCount > 1 ? 's' : ''} maximum.`); return
-    }
-    if (duplicatesInInput.length > 0) {
-      setError(`En double : ${[...new Set(duplicatesInInput)].join(', ')}`); return
-    }
-    if (alreadyInStock.length > 0) {
-      setError(`Déjà en stock : ${alreadyInStock.join(', ')}`); return
-    }
-    setError('')
-    setLoading(true)
+  async function handlePick(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setBusy(true)
     try {
-      await assignSerials(product._id, { serialNumbers: serialLines })
-      toast.success('Numéros de série enregistrés.')
-      onDone()
-    } catch (err) {
-      setError(formatApiError(err))
-      setLoading(false)
-    }
-  }
-
-  const countOk = serialLines.length > 0 && serialLines.length <= untrackedCount
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--sm">
-        <div className="modal-header">
-          <h2 className="modal-title">Saisir les numéros de série</h2>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="modal-body">
-          <div className="adjust-product-card">
-            <Package size={16} color="var(--orange-500)" />
-            <div>
-              <div className="adjust-product-name">{product.name}</div>
-              {product.reference && <div className="adjust-product-ref">Réf. {product.reference}</div>}
-            </div>
-            <div className="adjust-current-stock">
-              <span className="adjust-stock-num">{product.stock}</span>
-              <span className="adjust-stock-label">en stock</span>
-            </div>
-          </div>
-
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 12px', lineHeight: 1.5 }}>
-            {untrackedCount} unité{untrackedCount > 1 ? 's' : ''} en stock n'{untrackedCount > 1 ? 'ont' : 'a'} pas
-            de numéro de série. Renseignez-les ci-dessous. <strong>Le stock ne sera pas modifié.</strong>
-          </p>
-
-          <div className="form-group">
-            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Numéros de série <span style={{ color: 'var(--red-500)' }}>*</span></span>
-              <span className={`adj-serial-count${countOk ? ' adj-serial-count--ok' : serialLines.length > 0 ? ' adj-serial-count--err' : ''}`}>
-                {serialLines.length} / {untrackedCount}
-              </span>
-            </label>
-            <textarea
-              className="form-input form-input--plain form-textarea"
-              rows={Math.max(3, Math.min(untrackedCount, 8))}
-              value={serialsText}
-              onChange={e => setSerialsText(e.target.value)}
-              placeholder={"Un numéro de série par ligne\nex. SN-001\nSN-002"}
-              autoFocus
-            />
-            <p className="adj-serial-hint">Un numéro par ligne — vous pouvez coller depuis un scanner</p>
-            {overCount && (
-              <div className="adj-serial-warn">
-                <AlertTriangle size={12} /> Trop de numéros : {untrackedCount} maximum.
-              </div>
-            )}
-            {duplicatesInInput.length > 0 && (
-              <div className="adj-serial-warn">
-                <AlertTriangle size={12} /> En double : {[...new Set(duplicatesInInput)].join(', ')}
-              </div>
-            )}
-            {alreadyInStock.length > 0 && (
-              <div className="adj-serial-warn">
-                <AlertTriangle size={12} /> Déjà en stock : {alreadyInStock.join(', ')}
-              </div>
-            )}
-          </div>
-
-          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
-
-          <div className="modal-footer">
-            <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
-            <button type="submit" className="btn btn--primary" disabled={loading || !canSubmit}>
-              {loading ? <span className="login-btn-spinner" /> : 'Enregistrer les séries'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-/* ─── WebCardTab ─── */
-function WebCardTab({ product, onSaved }) {
-  const wc = product.webCard || {}
-  const [form, setForm] = useState({
-    title:       wc.title       ?? product.name        ?? '',
-    description: wc.description ?? product.description ?? '',
-    features:    wc.features    ?? [],
-  })
-  const [saving, setSaving]             = useState(false)
-  const [featureInput, setFeatureInput] = useState('')
-  const [listed, setListed]             = useState(product.listedOnWebsite !== false)
-  const [togglingListed, setTogglingListed] = useState(false)
-
-  async function handleToggleListed() {
-    const next = !listed
-    setListed(next)
-    setTogglingListed(true)
-    try {
-      const updated = await patchProduct(product._id, { listedOnWebsite: next })
-      onSaved(updated)
-      toast.success(next ? 'Produit visible sur le site web.' : 'Produit masqué du site web.')
-    } catch (err) {
-      setListed(!next)
-      toast.error(formatApiError(err))
-    } finally {
-      setTogglingListed(false)
-    }
-  }
-
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-
-  const addFeature = async () => {
-    const val = featureInput.trim()
-    if (!val) return
-    const newFeatures = [...form.features, val]
-    set('features', newFeatures)
-    setFeatureInput('')
-    try {
-      const updated = await updateProduct(product._id, {
-        name:     product.name,
-        category: product.category,
-        webCard:  { ...form, features: newFeatures },
-      })
-      onSaved(updated)
-    } catch (err) {
-      toast.error(formatApiError(err))
-    }
-  }
-  const removeFeature = (i) => set('features', form.features.filter((_, idx) => idx !== i))
-  const updateFeature = (i, v) => set('features', form.features.map((f, idx) => idx === i ? v : f))
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      const updated = await updateProduct(product._id, {
-        name:     product.name,
-        category: product.category,
-        webCard:  form,
-      })
-      onSaved(updated)
-      toast.success('Fiche site web mise à jour.')
+      // Remplacer, pas empiler : les anciennes partent d'abord.
+      for (const old of product.images || []) await deleteProductImage(product._id, old)
+      onChanged(await uploadProductImage(product._id, file))
     } catch (err) {
       toast.error(formatApiError(err))
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
-  const coverImage = product.images?.[0] ? productImageUrl(product.images[0]) : null
-
-  return (
-    <div className="wc-layout">
-      {/* ── Aperçu ── */}
-      <div className="wc-preview-col">
-        <div className="wc-preview-label"><Globe size={13} /> Aperçu de la fiche</div>
-        <div className="wc-card">
-          {/* Image */}
-          <div className="wc-card-img-wrap">
-            {coverImage
-              ? <img src={coverImage} alt={form.title} className="wc-card-img" />
-              : <div className="wc-card-img-placeholder"><Package size={40} color="var(--gray-300)" /></div>
-            }
-          </div>
-
-          {/* Contenu */}
-          <div className="wc-card-body">
-            <h2 className="wc-card-title">{form.title || <span className="wc-placeholder">Titre du produit</span>}</h2>
-            {product.reference && (
-              <div className="wc-card-slug">Réf. <code>{product.reference}</code></div>
-            )}
-            {form.description && (
-              <div className="wc-card-desc" dangerouslySetInnerHTML={{ __html: form.description }} />
-            )}
-            {form.features.length > 0 && (
-              <div className="wc-card-features">
-                <div className="wc-features-label">CARACTÉRISTIQUES</div>
-                {form.features.map((f, i) => (
-                  <div key={i} className="wc-feature-row">
-                    <CheckCircle2 size={14} color="#22c55e" />
-                    <span>{f}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button className="wc-cta-btn">
-              <ShoppingCart size={16} /> Demander un devis
-            </button>
-            <button className="wc-secondary-btn">Continuer la navigation</button>
-            <div className="wc-card-footer">🔒 Réponse garantie sous 24h · Livraison en Tunisie</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Formulaire ── */}
-      <div className="wc-form-col">
-        {/* Visibilité site web */}
-        <div className="wc-form-section">
-          <button
-            type="button"
-            className={`wc-listed-toggle${listed ? ' wc-listed-toggle--on' : ' wc-listed-toggle--off'}`}
-            onClick={handleToggleListed}
-            disabled={togglingListed}
-          >
-            <span className="wc-listed-track">
-              <span className="wc-listed-thumb" />
-            </span>
-            <span className="wc-listed-label">
-              <Globe size={13} />
-              {listed ? 'En vente sur le site web' : 'Masqué du site web'}
-            </span>
-          </button>
-        </div>
-
-        <div className="wc-form-section">
-          <label className="wc-label">Titre</label>
-          <input className="wc-input" value={form.title} onChange={e => set('title', e.target.value)} placeholder={product.name} />
-        </div>
-
-        <div className="wc-form-section">
-          <label className="wc-label">Description</label>
-          <textarea className="wc-textarea" rows={3} value={form.description} onChange={e => set('description', e.target.value)} placeholder="Description affichée sur le site..." />
-        </div>
-
-        <div className="wc-form-section">
-          <label className="wc-label">Caractéristiques</label>
-          {form.features.map((f, i) => (
-            <div key={i} className="wc-feature-edit-row">
-              <input
-                className="wc-input"
-                value={f}
-                onChange={e => updateFeature(i, e.target.value)}
-              />
-              <button className="wc-badge-del wc-feat-del" onClick={() => removeFeature(i)}>×</button>
-            </div>
-          ))}
-          <div className="wc-add-row">
-            <input
-              className="wc-input"
-              value={featureInput}
-              onChange={e => setFeatureInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addFeature()}
-              placeholder="Ex : Fournisseur: CardioLife Tunisie"
-            />
-            <button className="wc-add-btn" onClick={addFeature}><Plus size={14} /></button>
-          </div>
-        </div>
-
-        <button className="wc-save-btn" onClick={handleSave} disabled={saving}>
-          {saving ? <span className="login-btn-spinner" /> : <><Save size={14} /> Sauvegarder la fiche</>}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/* ─── Numéros de série en stock : liste filtrable ─── */
-function SerialStockList({ serials }) {
-  const [search, setSearch] = useState('')
-  const filtered = serials.filter(sn => !search || sn.toLowerCase().includes(search.toLowerCase()))
-  return (
-    <>
-      {serials.length > 5 && (
-        <div className="adj-serial-search-wrap" style={{ marginTop: 8 }}>
-          <Search size={13} className="adj-serial-search-icon" />
-          <input
-            className="form-input form-input--plain"
-            style={{ paddingLeft: 30 }}
-            placeholder="Rechercher un numéro de série…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-      )}
-      {filtered.length === 0 ? (
-        <p className="pd-trace-empty">Aucun numéro ne correspond.</p>
-      ) : (
-        <div className="mv-serials-list" style={{ marginTop: 8 }}>
-          {filtered.map((sn, i) => <span key={i} className="mv-serial-chip">{sn}</span>)}
-        </div>
-      )}
-    </>
-  )
-}
-
-/* ─── Lots en stock : mini-tableau triable & filtrable ─── */
-function LotStockTable({ lots }) {
-  const [search,  setSearch]  = useState('')
-  const [sortBy,  setSortBy]  = useState('expiration')
-  const [sortDir, setSortDir] = useState('asc')
-
-  function toggleSort(col) {
-    if (sortBy === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortBy(col); setSortDir('asc') }
+  async function handleRemove(e) {
+    e.preventDefault(); e.stopPropagation()
+    setBusy(true)
+    try {
+      onChanged(await deleteProductImage(product._id, photo))
+    } catch (err) {
+      toast.error(formatApiError(err))
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const filtered = lots
-    .filter(l => !search || l.lotNumber.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => {
-      let cmp
-      if (sortBy === 'lot')      cmp = a.lotNumber.localeCompare(b.lotNumber, 'fr', { numeric: true })
-      else if (sortBy === 'qty') cmp = a.quantity - b.quantity
-      else {
-        const da = a.expirationDate ? new Date(a.expirationDate).getTime() : Infinity
-        const db = b.expirationDate ? new Date(b.expirationDate).getTime() : Infinity
-        cmp = da - db
-      }
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-
-  const Sort = ({ col }) => (
-    sortBy === col
-      ? (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
-      : <ArrowUpDown size={11} className="pd-lot-sort-idle" />
-  )
-
   return (
-    <>
-      {lots.length > 3 && (
-        <div className="adj-serial-search-wrap" style={{ marginTop: 8, marginBottom: 8 }}>
-          <Search size={13} className="adj-serial-search-icon" />
-          <input
-            className="form-input form-input--plain"
-            style={{ paddingLeft: 30 }}
-            placeholder="Rechercher un lot…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-      )}
-      <table className="pd-lot-table">
-        <thead>
-          <tr>
-            <th className="pd-lot-th--qty" onClick={() => toggleSort('qty')}><span>Qté <Sort col="qty" /></span></th>
-            <th onClick={() => toggleSort('lot')}><span>N° Lot <Sort col="lot" /></span></th>
-            <th onClick={() => toggleSort('expiration')}><span>Expiration <Sort col="expiration" /></span></th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.length === 0 ? (
-            <tr><td colSpan={3} className="pd-lot-empty">Aucun lot ne correspond.</td></tr>
-          ) : (
-            filtered.map(l => (
-              <tr key={l.lotNumber}>
-                <td><span className="pd-lot-qty-badge">{l.quantity}</span></td>
-                <td><span className="mv-lot-chip">{l.lotNumber}</span></td>
-                <td>{l.expirationDate ? <ExpirationBadge date={l.expirationDate} /> : <span className="cell-muted">—</span>}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </>
-  )
-}
+    <label className={`pd-photo${photo ? ' pd-photo--filled' : ''}`} title={photo ? 'Changer la photo' : 'Ajouter une photo'}>
+      {busy
+        ? <span className="spinner" />
+        : photo
+          ? <img src={productImageUrl(photo)} alt={product.name} />
+          : <ImagePlus size={20} strokeWidth={1.6} />}
 
-/* ─── Stock chez les clients (unités posées, identifiées par n° de série) ─── */
-function ClientStockSection({ productId }) {
-  const navigate = useNavigate()
-  const [installs, setInstalls] = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [search,   setSearch]   = useState('')
-
-  useEffect(() => {
-    let alive = true
-    getProductInstallations(productId)
-      .then(data => { if (alive) setInstalls(Array.isArray(data) ? data : (data.data || [])) })
-      .catch(() => { if (alive) setInstalls([]) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [productId])
-
-  const filtered = installs.filter(i => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (i.serialNumber || '').toLowerCase().includes(q)
-      || (i.client?.name || i.clientName || '').toLowerCase().includes(q)
-  })
-
-  return (
-    <div className="pd-section">
-      <div className="pd-section-title">
-        <Users size={14} /> Stock chez les clients
-        {!loading && <span className="pd-count">{installs.length}</span>}
-      </div>
-      {loading ? (
-        <div className="table-loading" style={{ padding: '24px 0' }}><span className="spinner" /></div>
-      ) : installs.length === 0 ? (
-        <p className="pd-trace-empty" style={{ padding: '4px 2px' }}>
-          Aucune unité de ce produit n'est actuellement posée chez un client.
-        </p>
-      ) : (
+      {!busy && photo && (
         <>
-          {installs.length > 5 && (
-            <div className="adj-serial-search-wrap" style={{ marginBottom: 10 }}>
-              <Search size={13} className="adj-serial-search-icon" />
-              <input
-                className="form-input form-input--plain"
-                style={{ paddingLeft: 30 }}
-                placeholder="Rechercher un n° de série ou un client…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-          )}
-          <div className="pd-client-stock-list">
-            {filtered.length === 0 ? (
-              <p className="pd-trace-empty">Aucun résultat.</p>
-            ) : (
-              filtered.map(i => (
-                <button
-                  key={i._id}
-                  type="button"
-                  className="pd-client-stock-row"
-                  onClick={() => navigate(`/devices/${i._id}`)}
-                  title="Voir l'installation"
-                >
-                  <span className="mv-serial-chip">{i.serialNumber}</span>
-                  <span className="pd-client-stock-name">
-                    <Users size={12} /> {i.client?.name || i.clientName || '—'}
-                  </span>
-                  {(i.location || i.address) && (
-                    <span className="pd-client-stock-loc">
-                      <MapPin size={11} /> {i.location || i.address}
-                    </span>
-                  )}
-                  {i.installationDate && (
-                    <span className="pd-client-stock-date">{formatDate(i.installationDate)}</span>
-                  )}
-                  <ExternalLink size={13} className="pd-client-stock-go" />
-                </button>
-              ))
-            )}
-          </div>
+          <span className="pd-photo-hover"><Camera size={16} /></span>
+          <button type="button" className="pd-photo-del" title="Retirer la photo" onClick={handleRemove}>
+            <X size={11} />
+          </button>
         </>
       )}
-    </div>
+      <input type="file" accept="image/*" hidden onChange={handlePick} disabled={busy} />
+    </label>
   )
 }
 
-/* ─── Page principale ─── */
+/* ─── Page principale ─────────────────────────────────────
+   Deux vues seulement : le parc du produit article par article, et le journal
+   de ses mouvements. Tout ce qui décrit le produit lui-même s'édite dans la
+   modale « Modifier ». */
 const TABS = [
-  { key: 'info',      label: 'Informations', icon: Info    },
-  { key: 'stock',     label: 'Stock',        icon: History },
-  { key: 'clients',   label: 'Clients',      icon: Users   },
-  { key: 'site-web',  label: 'Site Web',     icon: Globe   },
+  { key: 'articles',   label: 'Articles',   icon: Boxes   },
+  { key: 'mouvements', label: 'Mouvements', icon: History },
 ]
 
 export default function ProductDetailPage() {
-  const { id }    = useParams()
-  const navigate  = useNavigate()
+  const { id }   = useParams()
+  const navigate = useNavigate()
 
-  const [product,               setProduct]               = useState(null)
-  const [movements,             setMovements]             = useState([])
-  const [loading,               setLoading]               = useState(true)
-  const [mvLoading,             setMvLoading]             = useState(true)
-  const [editOpen,              setEditOpen]              = useState(false)
-  const [adjOpen,               setAdjOpen]               = useState(false)
-  const [serialsOpen,           setSerialsOpen]           = useState(false)
-  const [uploading,             setUploading]             = useState(false)
-  const [deletingImg,           setDeletingImg]           = useState(null)
-  const [lightboxIdx,           setLightbox]              = useState(null)
-  const [activeTab,             setActiveTab]             = useState('info')
-  const [viewingMovementDetail, setViewingMovementDetail] = useState(null)
+  const [product,    setProduct]    = useState(null)
+  const [categories, setCategories] = useState([])
+  const [movements,  setMovements]  = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [mvLoading,  setMvLoading]  = useState(true)
+  const [editOpen,   setEditOpen]   = useState(false)
+  const [adjOpen,    setAdjOpen]    = useState(false)
+  const [activeTab,  setActiveTab]  = useState('articles')
+  const [mvDetail,   setMvDetail]   = useState(null)
 
   useLoadingBar(loading)
 
   const loadProduct = useCallback(async () => {
-    setLoading(true)
     try {
-      const p = await getProduct(id)
-      setProduct(p)
+      setProduct(await getProduct(id))
     } catch {
       toast.error('Produit introuvable.')
       navigate('/stock')
@@ -1084,100 +598,51 @@ export default function ProductDetailPage() {
 
   useEffect(() => { loadProduct()   }, [loadProduct])
   useEffect(() => { loadMovements() }, [loadMovements])
-
   useEffect(() => {
-    if (lightboxIdx === null) return
-    const images = product?.images || []
-    function onKey(e) {
-      if (e.key === 'Escape')      setLightbox(null)
-      if (e.key === 'ArrowRight')  setLightbox(i => (i + 1) % images.length)
-      if (e.key === 'ArrowLeft')   setLightbox(i => (i - 1 + images.length) % images.length)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [lightboxIdx, product])
+    getProductCategories().then(d => setCategories(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [])
 
-  async function handleUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    setUploading(true)
-    try {
-      const updated = await uploadProductImage(id, file)
-      setProduct(updated)
-    } catch (err) {
-      toast.error(err.message || 'Échec de l\'upload.')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  async function handleDeleteImage(filename) {
-    setDeletingImg(filename)
-    try {
-      const updated = await deleteProductImage(id, filename)
-      setProduct(updated)
-    } catch (err) {
-      toast.error(err.message || 'Échec de la suppression.')
-    } finally {
-      setDeletingImg(null)
-    }
-  }
+  /* Toute écriture sur les articles crée un mouvement : les deux vues se
+     rafraîchissent ensemble, sinon le journal reste bloqué sur son état
+     d'ouverture de page. */
+  const refresh = useCallback(() => { loadProduct(); loadMovements() }, [loadProduct, loadMovements])
 
   if (loading || !product) {
-    return (
-      <div className="page-content">
-        <div className="table-loading"><span className="spinner" /></div>
-      </div>
-    )
+    return <div className="page-content"><div className="table-loading"><span className="spinner" /></div></div>
   }
 
-  /* Computed stock data */
-  const inStockSerials = (() => {
-    const entered = new Set()
-    const exited  = new Set()
-    movements.forEach(mv => {
-      if (mv.type === 'entree' || mv.type === 'serialisation') mv.serialNumbers?.forEach(sn => entered.add(sn))
-      if (mv.type === 'sortie') mv.serialNumbers?.forEach(sn => exited.add(sn))
-    })
-    return [...entered].filter(sn => !exited.has(sn))
-  })()
+  const category = categories.find(c => c.slug === product.category) || null
 
-  // Lots réellement en stock : quantité nette (entrées − sorties) par n° de lot.
-  const lotsInStock = (() => {
-    const map = {}
-    movements.forEach(mv => {
-      if (!mv.lotNumber) return
-      const l = map[mv.lotNumber] || (map[mv.lotNumber] = { lotNumber: mv.lotNumber, quantity: 0, expirationDate: null })
-      if (mv.type === 'entree') {
-        l.quantity += mv.quantity || 0
-        if (mv.expirationDate) l.expirationDate = mv.expirationDate
-      } else if (mv.type === 'sortie') {
-        l.quantity -= mv.quantity || 0
-      }
-    })
-    return Object.values(map).filter(l => l.quantity > 0)
-  })()
-
-  const unTrackedCount = (!mvLoading && product.requiresSerialNumber)
-    ? Math.max(0, product.stock - inStockSerials.length)
-    : 0
+  const meta = [
+    product.reference && `Réf. ${product.reference}`,
+    product.brand,
+    product.supplier,
+    formatPrice(product.salePrice) && `Vente ${formatPrice(product.salePrice)}`,
+    formatPrice(product.purchasePrice) && `Achat ${formatPrice(product.purchasePrice)}`,
+    product.alertThreshold != null && `Seuil ${product.alertThreshold}`,
+  ].filter(Boolean)
 
   return (
     <div className="page-content">
       {/* ── En-tête ── */}
       <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <button className="back-btn" onClick={() => navigate('/stock')}>
+        <div className="pd-head">
+          {/* Retour vers la catégorie d'où l'on vient, pas vers l'accueil du stock. */}
+          <button
+            className="back-btn"
+            title={category ? `Retour à ${category.name}` : 'Retour au stock'}
+            onClick={() => navigate(`/stock?tab=categories&cat=${encodeURIComponent(product.category)}`)}
+          >
             <ArrowLeft size={16} />
           </button>
+          <ProductPhoto product={product} onChanged={setProduct} />
           <div>
             <h1 className="page-title">{product.name}</h1>
             <div className="pd-header-meta">
-              <CategoryBadge category={product.category} />
-              {product.reference    && <span className="cell-secondary">Réf. {product.reference}</span>}
-              {product.brand        && <span className="cell-secondary">{product.brand}</span>}
-              {product.compatibleModel && <span className="cell-secondary">{product.compatibleModel}</span>}
+              {category
+                ? <span className={`cat-badge cat--${category.color}`}>{category.name}</span>
+                : <span className="type-badge">{product.category}</span>}
+              {meta.map(m => <span key={m} className="cell-secondary">{m}</span>)}
             </div>
           </div>
         </div>
@@ -1191,31 +656,10 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      {/* ── Métriques ── */}
-      <div className="pd-metrics">
-        <div className="pd-metric-card">
-          <div className="pd-metric-label">Stock actuel</div>
-          <StockIndicator stock={product.stock} threshold={product.alertThreshold} />
-        </div>
-        <div className="pd-metric-card">
-          <div className="pd-metric-label">Péremption</div>
-          <ExpirationBadge date={product.expirationDate} />
-        </div>
-        <div className="pd-metric-card">
-          <div className="pd-metric-label">Prix de vente</div>
-          <div className="pd-metric-value">{formatPrice(product.salePrice)}</div>
-        </div>
-        <div className="pd-metric-card">
-          <div className="pd-metric-label">Prix d'achat</div>
-          <div className="pd-metric-value">{formatPrice(product.purchasePrice)}</div>
-        </div>
-      </div>
-
       {/* ── Onglets ── */}
       <div className="pd-tabs">
         {TABS.map(t => {
           const Icon = t.icon
-          const showAlert = t.key === 'stock' && unTrackedCount > 0
           return (
             <button
               key={t.key}
@@ -1223,310 +667,62 @@ export default function ProductDetailPage() {
               onClick={() => setActiveTab(t.key)}
             >
               <Icon size={14} /> {t.label}
-              {showAlert && <span className="pd-tab-alert"><AlertTriangle size={9} /></span>}
+              {t.key === 'mouvements' && !mvLoading && movements.length > 0 && (
+                <span className="pd-count">{movements.length}</span>
+              )}
             </button>
           )
         })}
       </div>
 
-      {/* ── Onglet Informations ── */}
-      {activeTab === 'info' && (
-        <>
-          {/* Photos */}
-          <div className="pd-section">
-            <div className="pd-section-title">
-              <ImagePlus size={14} /> Photos du produit
-              <span className="pd-count">{product.images?.length || 0}</span>
-            </div>
-            <div className="img-gallery">
-              {(product.images || []).map((filename, idx) => (
-                <div key={filename} className="img-thumb">
-                  <img
-                    src={productImageUrl(filename)} alt={product.name}
-                    className="img-thumb-clickable"
-                    onClick={() => setLightbox(idx)}
-                  />
-                  <button
-                    className="img-thumb-del"
-                    title="Supprimer"
-                    disabled={deletingImg === filename}
-                    onClick={() => handleDeleteImage(filename)}
-                  >
-                    {deletingImg === filename
-                      ? <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
-                      : <Trash2 size={12} />
-                    }
-                  </button>
-                </div>
-              ))}
-              <label className="img-upload-btn" title="Ajouter une photo">
-                {uploading
-                  ? <span className="spinner" />
-                  : <><ImagePlus size={22} /><span>Ajouter</span></>
-                }
-                <input
-                  type="file" accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={handleUpload}
-                  disabled={uploading}
-                />
-              </label>
-            </div>
-          </div>
-
-          {/* Détails produit */}
-          <div className="pd-section">
-            <div className="pd-section-title">
-              <Info size={14} /> Détails produit
-            </div>
-            <div className="pd-details-grid">
-              {[
-                { label: 'Modèle compatible', value: product.compatibleModel },
-                { label: 'N° de lot',         value: product.lotNumber },
-                { label: 'Fournisseur',       value: product.supplier },
-                { label: 'Seuil d\'alerte',   value: product.alertThreshold != null ? `${product.alertThreshold} unités` : null },
-              ].map(({ label, value }) => (
-                <div key={label} className="pd-detail-item">
-                  <div className="pd-detail-label">{label}</div>
-                  <div className="pd-detail-value">{value || <span className="cell-muted">—</span>}</div>
-                </div>
-              ))}
-              {product.notes && (
-                <div className="pd-detail-item pd-detail-item--full">
-                  <div className="pd-detail-label">Notes</div>
-                  <div className="pd-detail-value">{product.notes}</div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {product.description && (
-            <div className="pd-section">
-              <div className="pd-section-title">
-                <FileText size={14} /> Description produit
-              </div>
-              <RichText html={product.description} />
-            </div>
-          )}
-        </>
+      {activeTab === 'articles' && (
+        <ProductItemsTab product={product} category={category} onStockChanged={refresh} />
       )}
 
-      {/* ── Onglet Stock ── */}
-      {activeTab === 'stock' && (
-        <>
-          {/* Stock actuel */}
-          <div className="pd-section">
-            <div className="pd-section-title">
-              <SlidersHorizontal size={14} /> Stock actuel
-              <button
-                className="btn btn--ghost btn--sm pd-section-action"
-                onClick={() => setAdjOpen(true)}
-              >
-                <SlidersHorizontal size={13} /> Ajuster
-              </button>
-            </div>
-
-            <div className="pd-stock-current">
-              <div className="pd-stock-qty-block">
-                <span className="pd-stock-big-num" style={{
-                  color: product.stock === 0 ? 'var(--red-500)'
-                    : product.stock <= product.alertThreshold ? 'var(--amber-600)'
-                    : 'var(--green-600)'
-                }}>
-                  {product.stock}
-                </span>
-                <span className="pd-stock-big-label">unité{product.stock !== 1 ? 's' : ''} en stock</span>
-                {product.stock === 0 && (
-                  <span className="stock-status-chip stock-status-chip--out" style={{ marginTop: 4 }}>Épuisé</span>
-                )}
-                {product.stock > 0 && product.stock <= product.alertThreshold && (
-                  <span className="stock-status-chip stock-status-chip--low" style={{ marginTop: 4 }}>Stock faible</span>
-                )}
-              </div>
-
-              {(product.requiresSerialNumber || product.requiresLotNumber) && (
-                <div className="pd-stock-trace">
-                  {mvLoading ? (
-                    <div style={{ padding: '16px 0', display: 'flex', justifyContent: 'center' }}>
-                      <span className="spinner" />
-                    </div>
-                  ) : (
-                    <>
-                      {product.requiresSerialNumber && (
-                        <div className="pd-trace-block">
-                          <div className="pd-trace-label">
-                            <Hash size={12} /> Numéros de série en stock
-                            <span className="pd-count">{inStockSerials.length}</span>
-                          </div>
-                          {inStockSerials.length === 0 ? (
-                            <p className="pd-trace-empty">Aucun numéro de série en stock.</p>
-                          ) : (
-                            <SerialStockList serials={inStockSerials} />
-                          )}
-                        </div>
-                      )}
-                      {product.requiresLotNumber && (
-                        <div className="pd-trace-block">
-                          <div className="pd-trace-label">
-                            <Layers size={12} /> Lots en stock
-                            <span className="pd-count">{lotsInStock.length}</span>
-                          </div>
-                          {lotsInStock.length === 0 ? (
-                            <p className="pd-trace-empty">Aucun lot en stock.</p>
-                          ) : (
-                            <LotStockTable lots={lotsInStock} />
-                          )}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Stock chez les clients (produits sérialisés posés en installation) */}
-          {product.requiresSerialNumber && (
-            <ClientStockSection productId={product._id} />
-          )}
-
-          {/* Alerte séries manquantes */}
-          {unTrackedCount > 0 && (
-            <div className="pd-section">
-              <div className="pd-serial-warn-banner">
-                <AlertTriangle size={14} />
-                <div>
-                  <strong>{unTrackedCount} unité{unTrackedCount > 1 ? 's' : ''} sans numéro de série renseigné</strong>
-                  <span>Ce produit requiert un numéro de série mais {unTrackedCount} unité{unTrackedCount > 1 ? 's' : ''} en stock n'en ont pas.</span>
-                </div>
-                <button className="btn btn--sm btn--primary" onClick={() => setSerialsOpen(true)}>
-                  Saisir les séries
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Mouvements de stock */}
-          <div className="pd-section">
-            <div className="pd-section-title">
-              <History size={14} /> Mouvements de stock
-              {!mvLoading && <span className="pd-count">{movements.length}</span>}
-            </div>
-            {mvLoading ? (
-              <div className="table-loading" style={{ padding: '32px 0' }}><span className="spinner" /></div>
-            ) : movements.length === 0 ? (
-              <div className="pd-empty">
-                <History size={28} color="var(--gray-300)" />
-                <p>Aucun mouvement enregistré pour ce produit.</p>
-              </div>
-            ) : (
-              <div className="mv-list">
-                {movements.map(mv => (
-                  <MovementRow
-                    key={mv._id}
-                    mv={mv}
-                    onClick={() => setViewingMovementDetail(mv)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {/* ── Onglet Clients ── */}
-      {activeTab === 'clients' && (
+      {activeTab === 'mouvements' && (
         <div className="pd-section">
           <div className="pd-section-title">
-            <Users size={14} /> Clients propriétaires
+            <History size={14} /> Mouvements de stock
+            {!mvLoading && <span className="pd-count">{movements.length}</span>}
+            <button className="btn btn--ghost btn--sm pd-section-action" onClick={() => setAdjOpen(true)}>
+              <SlidersHorizontal size={13} /> Ajuster
+            </button>
           </div>
-          <div className="pd-empty">
-            <Users size={28} color="var(--gray-300)" />
-            <p>Aucun client associé à ce produit.</p>
-            <span className="pd-empty-note">L'association clients-produits sera disponible prochainement.</span>
-          </div>
+          {mvLoading ? (
+            <div className="table-loading" style={{ padding: '32px 0' }}><span className="spinner" /></div>
+          ) : movements.length === 0 ? (
+            <div className="pd-empty">
+              <History size={28} color="var(--gray-300)" />
+              <p>Aucun mouvement enregistré pour ce produit.</p>
+            </div>
+          ) : (
+            <div className="mv-list">
+              {movements.map(mv => (
+                <MovementRow key={mv._id} mv={mv} onClick={() => setMvDetail(mv)} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Onglet Site Web ── */}
-      {activeTab === 'site-web' && (
-        <div className="pd-section">
-          <div className="pd-section-title">
-            <Globe size={14} /> Fiche site web
-          </div>
-          <WebCardTab
-            product={product}
-            onSaved={(updated) => { if (updated) setProduct(updated) }}
-          />
-        </div>
-      )}
-
-      {/* ── Modals ── */}
+      {/* ── Modales ── */}
       {editOpen && (
         <ProductModal
           product={product}
           onClose={() => setEditOpen(false)}
-          onSaved={(updated) => { setEditOpen(false); updated ? setProduct(updated) : loadProduct() }}
+          onSaved={updated => { setEditOpen(false); updated ? setProduct(updated) : loadProduct() }}
         />
       )}
       {adjOpen && (
         <StockAdjustModal
           product={product}
           onClose={() => setAdjOpen(false)}
-          onDone={() => { setAdjOpen(false); loadProduct(); loadMovements() }}
+          onDone={() => { setAdjOpen(false); refresh() }}
         />
       )}
-      {serialsOpen && (
-        <AssignSerialsModal
-          product={product}
-          untrackedCount={unTrackedCount}
-          inStockSerials={inStockSerials}
-          onClose={() => setSerialsOpen(false)}
-          onDone={() => { setSerialsOpen(false); loadProduct(); loadMovements() }}
-        />
+      {mvDetail && (
+        <MovementDetailModal movement={mvDetail} onClose={() => setMvDetail(null)} />
       )}
-      {viewingMovementDetail && (
-        <MovementDetailModal
-          movement={viewingMovementDetail}
-          onClose={() => setViewingMovementDetail(null)}
-        />
-      )}
-
-      {lightboxIdx !== null && (() => {
-        const images = product.images || []
-        const src    = productImageUrl(images[lightboxIdx])
-        const multi  = images.length > 1
-        return (
-          <div className="lightbox-overlay" onClick={() => setLightbox(null)}>
-            <button className="lightbox-close" onClick={() => setLightbox(null)}><X size={20} /></button>
-            {multi && (
-              <button
-                className="lightbox-nav lightbox-nav--prev"
-                onClick={e => { e.stopPropagation(); setLightbox(i => (i - 1 + images.length) % images.length) }}
-              >
-                <ChevronLeft size={28} />
-              </button>
-            )}
-            <img
-              className="lightbox-img"
-              src={src}
-              alt={product.name}
-              onClick={e => e.stopPropagation()}
-            />
-            {multi && (
-              <button
-                className="lightbox-nav lightbox-nav--next"
-                onClick={e => { e.stopPropagation(); setLightbox(i => (i + 1) % images.length) }}
-              >
-                <ChevronRight size={28} />
-              </button>
-            )}
-            {multi && (
-              <div className="lightbox-counter">{lightboxIdx + 1} / {images.length}</div>
-            )}
-          </div>
-        )
-      })()}
     </div>
   )
 }

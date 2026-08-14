@@ -2,8 +2,10 @@ const { validationResult } = require('express-validator')
 const path          = require('path')
 const fs            = require('fs')
 const Product       = require('../models/Product')
+const ProductItem   = require('../models/ProductItem')
 const StockMovement = require('../models/StockMovement')
-const Installation  = require('../models/Installation')
+const { listInstallations } = require('../utils/deaParc')
+const { syncProductStock, IN_STOCK_STATUSES } = require('../utils/productItems')
 
 async function getAll(req, res) {
   const { category, brand, supplier, search, page = 1, limit = 20, archived = 'false', lowStock, expiringSoon, expired } = req.query
@@ -101,7 +103,7 @@ async function create(req, res) {
   const product = await Product.create({ ...req.body, createdBy: req.user._id })
 
   if (product.stock > 0) {
-    await StockMovement.create({
+    const movement = await StockMovement.create({
       product:       product._id,
       type:          'entree',
       quantity:      product.stock,
@@ -109,6 +111,20 @@ async function create(req, res) {
       newStock:      product.stock,
       reason:        'Stock initial à la création',
       createdBy:     req.user._id,
+    })
+
+    // Le stock initial devient une ligne d'articles à détailler ensuite : sans
+    // elle, la fiche produit afficherait un total sans aucun exemplaire derrière.
+    await ProductItem.create({
+      product:       product._id,
+      category:      product.category,
+      reference:     product.reference || '',
+      supplier:      product.supplier  || '',
+      quantity:      product.stock,
+      status:        'disponible',
+      entryMovement: movement._id,
+      createdBy:     req.user._id,
+      history:       [{ action: 'Stock initial à la création', to: 'disponible', user: req.user._id }],
     })
   }
 
@@ -159,7 +175,7 @@ async function adjustStock(req, res) {
   }
 
   await product.save()
-  await StockMovement.create({
+  const movement = await StockMovement.create({
     product:        product._id,
     type,
     quantity:       qty,
@@ -172,7 +188,88 @@ async function adjustStock(req, res) {
     createdBy:      req.user._id,
   })
 
-  res.json(product)
+  // Tout mouvement se répercute sur les articles : sans ça la fiche produit et
+  // le compteur de stock divergent.
+  await applyMovementToItems(product, {
+    type, qty, reason, movement,
+    serialNumbers: Array.isArray(serialNumbers) ? serialNumbers.filter(Boolean) : [],
+    lotNumber, expirationDate, user: req.user._id,
+  })
+  const synced = await syncProductStock(product._id)
+  res.json(synced || product)
+}
+
+/**
+ * Traduit une entrée / sortie de stock en articles.
+ *
+ * À l'entrée on crée un exemplaire par numéro de série, ou une ligne de lot
+ * portant la quantité. À la sortie on solde les exemplaires désignés — à défaut
+ * les plus anciens d'abord, pour que les DLC les plus proches partent en premier.
+ */
+async function applyMovementToItems(product, { type, qty, reason, movement, serialNumbers, lotNumber, expirationDate, user }) {
+  if (type === 'entree') {
+    const base = {
+      product:        product._id,
+      category:       product.category,
+      reference:      product.reference || '',
+      supplier:       product.supplier  || '',
+      lotNumber:      lotNumber || undefined,
+      expirationDate: expirationDate || undefined,
+      entryDate:      new Date(),
+      entryMovement:  movement._id,
+      status:         'disponible',
+      createdBy:      user,
+      history:        [{ action: 'Entrée en stock', to: 'disponible', note: reason || '', user }],
+    }
+
+    // Un numéro déjà connu n'est pas recréé : la saisie peut chevaucher un stock
+    // régularisé auparavant.
+    const known = serialNumbers.length
+      ? (await ProductItem.find({ product: product._id, serialNumber: { $in: serialNumbers } }).select('serialNumber'))
+          .map(i => i.serialNumber)
+      : []
+    const fresh = serialNumbers.filter(sn => !known.includes(sn))
+
+    const docs = fresh.length
+      ? fresh.map(sn => ({ ...base, serialNumber: sn, quantity: 1 }))
+      : [{ ...base, quantity: qty }]
+    if (docs.length) await ProductItem.insertMany(docs)
+    return
+  }
+
+  if (type !== 'sortie') return   // une correction se contente du resync
+
+  const inStock = { product: product._id, status: { $in: IN_STOCK_STATUSES } }
+
+  if (serialNumbers.length) {
+    await ProductItem.updateMany(
+      { ...inStock, serialNumber: { $in: serialNumbers } },
+      {
+        $set:  { status: 'vendu', saleDate: new Date() },
+        $push: { history: { action: 'Sortie de stock', to: 'vendu', note: reason || '', user, date: new Date() } },
+      }
+    )
+    return
+  }
+
+  // Sans numéro : on décrémente les lignes les plus anciennes jusqu'à couvrir
+  // la quantité sortie.
+  const query = lotNumber ? { ...inStock, lotNumber } : inStock
+  const candidates = await ProductItem.find(query).sort({ expirationDate: 1, entryDate: 1 })
+
+  let left = qty
+  for (const item of candidates) {
+    if (left <= 0) break
+    const take = Math.min(item.quantity ?? 1, left)
+    left -= take
+    item.quantity = (item.quantity ?? 1) - take
+    if (item.quantity <= 0) {
+      item.status   = 'vendu'
+      item.saleDate = new Date()
+    }
+    item.history.push({ action: 'Sortie de stock', to: item.status, note: reason || '', user, date: new Date() })
+    await item.save()
+  }
 }
 
 // Rattache des numéros de série à des unités DÉJÀ en stock (régularisation).
@@ -223,7 +320,7 @@ async function assignSerials(req, res) {
     })
   }
 
-  await StockMovement.create({
+  const movement = await StockMovement.create({
     product:       product._id,
     type:          'serialisation',
     quantity:      incoming.length,
@@ -234,20 +331,61 @@ async function assignSerials(req, res) {
     createdBy:     req.user._id,
   })
 
-  res.json(product)
+  // La régularisation matérialise les articles manquants — sans toucher au
+  // total, qui est déjà bon.
+  const known = (await ProductItem.find({ product: product._id, serialNumber: { $in: incoming } }).select('serialNumber'))
+    .map(i => i.serialNumber)
+  const fresh = incoming.filter(sn => !known.includes(sn))
+
+  // On convertit d'abord les lignes anonymes déjà en stock, pour ne pas
+  // gonfler le total en créant des doublons à côté d'elles.
+  const anonymous = await ProductItem.find({
+    product: product._id,
+    status:  { $in: IN_STOCK_STATUSES },
+    $or: [{ serialNumber: { $exists: false } }, { serialNumber: '' }, { serialNumber: null }],
+  }).sort({ entryDate: 1 })
+
+  for (const sn of fresh) {
+    const host = anonymous.find(a => (a.quantity ?? 1) > 0)
+    if (host) {
+      if ((host.quantity ?? 1) > 1) {
+        // Ligne groupée : on en détache une unité.
+        host.quantity -= 1
+        await host.save()
+      } else {
+        host.serialNumber = sn
+        host.history.push({ action: 'Numéro de série renseigné', note: reason || '', user: req.user._id, date: new Date() })
+        await host.save()
+        continue
+      }
+    }
+    await ProductItem.create({
+      product:       product._id,
+      category:      product.category,
+      reference:     product.reference || '',
+      supplier:      product.supplier  || '',
+      serialNumber:  sn,
+      quantity:      1,
+      status:        'disponible',
+      entryMovement: movement._id,
+      createdBy:     req.user._id,
+      history:       [{ action: 'Numéro de série renseigné', to: 'disponible', note: reason || '', user: req.user._id }],
+    })
+  }
+  const synced = await syncProductStock(product._id)
+  res.json(synced || product)
 }
 
-// Unités de ce produit (identifiées par n° de série) actuellement posées chez des clients.
+// Unités de ce produit (identifiées par n° de série) actuellement posées chez
+// des clients. Le parc vit dans les DEA des sites.
 async function getClientStock(req, res) {
-  const installs = await Installation.find({
-    deviceProduct: req.params.id,
-    serialNumber:  { $exists: true, $nin: [null, ''] },
-    status:        'installe',
-  })
-    .select('serialNumber clientName client address location installationDate')
-    .populate('client', 'name')
-    .sort({ installationDate: -1 })
-    .lean()
+  const rows = await listInstallations({})
+  const installs = rows
+    .filter(r =>
+      String(r.deviceProduct?._id || r.deviceProduct) === String(req.params.id) &&
+      r.serialNumber &&
+      r.status === 'installe')
+    .sort((a, b) => new Date(b.installationDate || 0) - new Date(a.installationDate || 0))
   res.json(installs)
 }
 
@@ -284,6 +422,7 @@ async function permanentDelete(req, res) {
     })
   }
   await StockMovement.deleteMany({ product: product._id })
+  await ProductItem.deleteMany({ product: product._id })
   await product.deleteOne()
   res.json({ message: 'Produit supprimé définitivement.' })
 }

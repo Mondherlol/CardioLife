@@ -1,9 +1,9 @@
-const Installation  = require('../models/Installation')
 const Client        = require('../models/Client')
 const Intervention  = require('../models/Intervention')
 const Product       = require('../models/Product')
 const StockMovement = require('../models/StockMovement')
 const Appointment   = require('../models/Appointment')
+const { countDeas } = require('../utils/deaParc')
 
 const APPOINTMENT_TYPE_LABELS = {
   controle:     'Contrôle',
@@ -29,7 +29,7 @@ async function getDashboard(req, res) {
     recentAppointments,
     upcomingAppointmentsRaw,
   ] = await Promise.all([
-    Installation.countDocuments(),
+    countDeas(),
     Client.countDocuments({ isActive: true }),
     Intervention.countDocuments({ createdAt: { $gte: startOfMonth } }),
     Intervention.countDocuments({ status: { $in: ['planifie', 'en_cours'] } }),

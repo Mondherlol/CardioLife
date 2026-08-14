@@ -2,6 +2,7 @@ import { getAppointments } from '../api/appointments'
 import { getFormations } from '../api/formations'
 import { getInterventions } from '../api/interventions'
 import { getInstallations } from '../api/installations'
+import { DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle } from './appointmentConstants'
 
 /**
  * Récupère et normalise tous les événements du planning sur une plage de dates.
@@ -15,9 +16,9 @@ import { getInstallations } from '../api/installations'
  * @returns {Promise<Array>} items { id, kind, type, title, start, end, allDay, clientName, status, raw }
  */
 export async function fetchPlanningItems({ from, to, typeFilter = null }) {
-  const isDedicated = t => ['intervention', 'installation', 'formation'].includes(t)
+  const isDedicated = t => DEDICATED_TYPES.includes(t)
   const wantAppt = !typeFilter || !isDedicated(typeFilter)
-  const wantIntv = !typeFilter || typeFilter === 'intervention'
+  const wantIntv = !typeFilter || CONTROL_TYPES.includes(typeFilter)
   const wantInst = !typeFilter || typeFilter === 'installation'
   const wantFmn  = !typeFilter || typeFilter === 'formation'
 
@@ -46,8 +47,8 @@ export async function fetchPlanningItems({ from, to, typeFilter = null }) {
   for (const i of (Array.isArray(intvs) ? intvs : [])) {
     if (!i.scheduledDate) continue
     items.push({
-      id: i._id, kind: 'intervention', type: 'intervention',
-      title: `Contrôle${i.clientName ? ' — ' + i.clientName : ''}`,
+      id: i._id, kind: 'intervention', type: controlTypeToPlanning(i.controlType),
+      title: controlEventTitle(i),
       start: i.scheduledDate, clientName: i.clientName, status: i.status, raw: i,
     })
   }

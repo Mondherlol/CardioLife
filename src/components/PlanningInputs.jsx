@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Search, X, ChevronDown, Check } from 'lucide-react'
-import { getClients } from '../api/clients'
+// Lookup et non liste complète : désigner un client (rendez-vous, formation,
+// contrôle) ne suppose pas le droit de gérer les fiches clients.
+import { lookupClients } from '../api/clients'
 import { ROLE_LABELS, avatarColor, initials } from '../lib/appointmentConstants'
 
 /* ── Client search autocomplete ─────────────────────────────── */
@@ -31,8 +33,8 @@ export function ClientSearchInput({ clientId, clientName, onChange }) {
     timerRef.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const data = await getClients({ q, limit: 8 })
-        setResults(data.data || [])
+        const data = await lookupClients({ q, limit: 8 })
+        setResults(Array.isArray(data) ? data : (data.data || []))
       } catch { setResults([]) }
       finally  { setLoading(false) }
     }, 280)

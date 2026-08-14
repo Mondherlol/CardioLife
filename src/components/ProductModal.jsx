@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { createProduct, updateProduct, getSuppliers, getBrands } from '../api/products'
-import { PRODUCT_CATEGORIES as CATEGORIES } from '../constants/categories'
+import { getProductCategories } from '../api/productCategories'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -124,18 +124,34 @@ export default function ProductModal({ product, defaultCategory, onClose, onSave
     notes:                product.notes                || '',
   } : { ...EMPTY_FORM, category: defaultCategory || '' })
 
-  const [open,      setOpen]      = useState(new Set(['identification', 'stock', 'tarifs', 'description', 'notes']))
-  const [suppliers, setSuppliers] = useState([])
-  const [brands,    setBrands]    = useState([])
+  const [open,       setOpen]       = useState(new Set(['identification', 'stock', 'tarifs', 'description', 'notes']))
+  const [categories, setCategories] = useState([])
+  const [suppliers,  setSuppliers]  = useState([])
+  const [brands,     setBrands]     = useState([])
   const [error,     setError]     = useState('')
   const [loading,   setLoading]   = useState(false)
 
   useEffect(() => {
+    getProductCategories().then(data => setCategories(Array.isArray(data) ? data : [])).catch(() => {})
     getSuppliers().then(setSuppliers).catch(() => {})
     getBrands().then(setBrands).catch(() => {})
   }, [])
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
+
+  const selectedCat = categories.find(c => c.slug === form.category)
+
+  /* La traçabilité est définie par la catégorie : on la reprend au changement,
+     l'utilisateur reste libre de l'ajuster ensuite pour ce produit. */
+  function setCategory(slug) {
+    const cat = categories.find(c => c.slug === slug)
+    setForm(f => ({
+      ...f,
+      category: slug,
+      requiresSerialNumber: cat ? cat.tracksSerial : f.requiresSerialNumber,
+      requiresLotNumber:    cat ? cat.tracksLot    : f.requiresLotNumber,
+    }))
+  }
 
   function toggle(key) {
     setOpen(prev => {
@@ -155,7 +171,7 @@ export default function ProductModal({ product, defaultCategory, onClose, onSave
         reference:            form.reference   || undefined,
         brand:                form.brand       || undefined,
         category:             form.category,
-        deviceMode:           form.category === 'defibrillateur' && form.deviceMode ? form.deviceMode : undefined,
+        deviceMode:           selectedCat?.tracksSerial && form.deviceMode ? form.deviceMode : undefined,
         alertThreshold:       form.alertThreshold !== '' ? Number(form.alertThreshold) : 5,
         requiresSerialNumber: form.requiresSerialNumber,
         requiresLotNumber:    form.requiresLotNumber,
@@ -214,14 +230,14 @@ export default function ProductModal({ product, defaultCategory, onClose, onSave
               <div className="form-group">
                 <label className="form-label">Catégorie *</label>
                 <select className="form-input form-input--plain" value={form.category}
-                  onChange={e => set('category', e.target.value)} required>
+                  onChange={e => setCategory(e.target.value)} required>
                   <option value="">Sélectionner…</option>
-                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  {categories.map(c => <option key={c.slug} value={c.slug}>{c.name}</option>)}
                 </select>
               </div>
             </div>
 
-            {form.category === 'defibrillateur' && (
+            {selectedCat?.tracksSerial && (
               <div className="form-group">
                 <label className="form-label">Mode de défibrillation</label>
                 <div className="pmodal-mode-row">

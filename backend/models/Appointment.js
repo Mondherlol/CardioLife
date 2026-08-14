@@ -10,7 +10,8 @@ const appointmentSchema = new mongoose.Schema({
   description:  { type: String, trim: true },
   client:       { type: mongoose.Schema.Types.ObjectId, ref: 'Client' },
   clientName:   { type: String, trim: true },
-  installation: { type: mongoose.Schema.Types.ObjectId, ref: 'Installation' },
+  // _id du DEA concerné dans `Site.deas`.
+  installation: { type: mongoose.Schema.Types.ObjectId },
   assignedTo:   [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   createdBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true })

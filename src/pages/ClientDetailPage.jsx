@@ -1,103 +1,31 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
-  ArrowLeft, Building2, MapPin, Phone, Mail, ChevronRight, Zap,
-  User, FileText, Activity, Info, Pencil, Calendar,
-  GraduationCap, ClipboardList, Clock, CheckCircle2,
+  ArrowLeft, Building2, MapPin,
+  User, FileText, Activity, Calendar, Pencil,
+  GraduationCap, ClipboardList, Clock, CheckCircle2, MinusCircle,
+  ChevronRight, AlertTriangle,
 } from 'lucide-react'
-import { getClient } from '../api/clients'
+import { getClient, clientLogoUrl } from '../api/clients'
 import { getInstallations } from '../api/installations'
-import { getInterventions } from '../api/interventions'
+import { getInterventions, closeIntervention } from '../api/interventions'
+import { getContracts } from '../api/contracts'
 
 /* Type de contrôle → libellé */
 const CD_CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat' }
 import { useLoadingBar } from '../hooks/useLoadingBar'
-import ClientModal from '../components/ClientModal'
+import ClientHeaderModal from '../components/ClientHeaderModal'
 import FormationsClientTab from '../components/FormationsClientTab'
 import ClientDocumentsTab from '../components/ClientDocumentsTab'
 import PlanningClientTab from '../components/PlanningClientTab'
+import SitesClientTab from '../components/SitesClientTab'
 
 /* ── Helpers ──────────────────────────────────────────────── */
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString('fr-FR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-  })
-}
-
-function daysUntil(dateStr) {
-  if (!dateStr) return null
-  const target = new Date(dateStr)
-  const now = new Date()
-  const t = new Date(target.getFullYear(), target.getMonth(), target.getDate())
-  const n = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  return Math.round((t - n) / 86400000)
-}
-
-function computeStatus(inst) {
-  const now = new Date()
-  const d60 = new Date(now.getTime() + 60 * 86400000)
-  const ctrl = inst.nextControlDate ? new Date(inst.nextControlDate) : null
-  const firstBatt = inst.batteries?.[0]
-  const batt = firstBatt?.expiryDate ? new Date(firstBatt.expiryDate) : null
-  const level = firstBatt?.level
-  const firstElec = inst.electrodes?.[0]
-  const elec = firstElec?.expiryDate ? new Date(firstElec.expiryDate) : null
-
-  if ((ctrl && ctrl < now) || (batt && batt < now) || (elec && elec < now)) return 'expiré'
-  if ((level != null && level < 25) || (ctrl && ctrl <= d60)) return 'attention'
-  return 'actif'
-}
 
 function initials(name) {
   if (!name) return '?'
   return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2)
-}
-
-/* ── Sub-components ───────────────────────────────────────── */
-
-function StatusBadge({ inst }) {
-  const status = computeStatus(inst)
-  const cls = status === 'expiré' ? 'inst-badge inst-badge--expired'
-    : status === 'attention' ? 'inst-badge inst-badge--warning'
-    : 'inst-badge inst-badge--ok'
-  const label = status === 'expiré' ? 'Expiré' : status === 'attention' ? 'Attention' : 'Actif'
-  return <span className={cls}>{label}</span>
-}
-
-function BatteryBar({ level }) {
-  if (level == null) return <span className="text-muted">—</span>
-  const cls = level < 25 ? 'batt-bar--red' : level < 50 ? 'batt-bar--amber' : 'batt-bar--green'
-  return (
-    <div className="batt-bar-wrap">
-      <div className="batt-bar">
-        <div className={`batt-bar-fill ${cls}`} style={{ width: `${level}%` }} />
-      </div>
-      <span className={`batt-pct batt-pct--${level < 25 ? 'red' : level < 50 ? 'amber' : 'green'}`}>
-        {level}%
-      </span>
-    </div>
-  )
-}
-
-function ControlDate({ date }) {
-  if (!date) return <span className="text-muted">—</span>
-  const days = daysUntil(date)
-  const cls = days < 0 ? 'ctrl-date ctrl-date--expired'
-    : days <= 60 ? 'ctrl-date ctrl-date--soon'
-    : 'ctrl-date ctrl-date--ok'
-  return (
-    <div className={cls}>
-      <span>{formatDate(date)}</span>
-      {days != null && (
-        <span className="ctrl-date-sub">
-          {days < 0 ? `${Math.abs(days)}j dépassé` : days === 0 ? "Aujourd'hui" : `dans ${days}j`}
-        </span>
-      )}
-    </div>
-  )
 }
 
 /* ── Main Component ───────────────────────────────────────── */
@@ -108,6 +36,7 @@ function ControlsClientTab({ clientId, installations }) {
   const navigate = useNavigate()
   const [controls, setControls] = useState([])
   const [loading,  setLoading]  = useState(true)
+  const [closing,  setClosing]  = useState(null)   // id du contrôle en cours de clôture
 
   useEffect(() => {
     getInterventions({ client: clientId })
@@ -116,13 +45,45 @@ function ControlsClientTab({ clientId, installations }) {
       .finally(() => setLoading(false))
   }, [clientId])
 
+  /* Un contrôle en retard a souvent été fait sans que la fiche soit remplie :
+     on le solde d'un clic, sans passer par la fiche complète. */
+  async function closeControl(c, e) {
+    e.stopPropagation()
+    setClosing(c._id)
+    try {
+      const updated = await closeIntervention(c._id)
+      setControls(list => list.map(x => (x._id === c._id ? { ...x, ...updated } : x)))
+      toast.success('Contrôle clôturé.')
+    } catch (err) {
+      toast.error(err.message || 'Clôture impossible.')
+    } finally {
+      setClosing(null)
+    }
+  }
+
   if (loading) return <div className="table-loading"><span className="spinner" /></div>
 
   const instMap = {}
   installations.forEach(i => { instMap[i._id] = i })
 
-  const upcoming  = controls.filter(c => c.status !== 'termine')
-  const completed = controls.filter(c => c.status === 'termine')
+  /* Un contrôle non fait dont la date est passée n'est pas « à venir » : il est
+     en retard, et c'est ce qui doit sauter aux yeux en premier.
+
+     Dans chaque groupe, l'entrée la plus proche d'aujourd'hui remonte en tête :
+     la prochaine échéance, le retard le plus frais, le dernier contrôle fait. */
+  const byDate = key => (a, b) => new Date(a[key] || 0) - new Date(b[key] || 0)
+
+  const pending = controls.filter(c => c.status !== 'termine')
+  const overdue = pending
+    .filter(c => localDaysUntil(c.scheduledDate) < 0)
+    .sort(byDate('scheduledDate')).reverse()
+  const upcoming = pending
+    .filter(c => localDaysUntil(c.scheduledDate) >= 0)
+    .sort(byDate('scheduledDate'))
+  const completed = controls
+    .filter(c => c.status === 'termine')
+    .sort((a, b) =>
+      new Date(b.completedDate || b.scheduledDate || 0) - new Date(a.completedDate || a.scheduledDate || 0))
 
   if (controls.length === 0) {
     return (
@@ -184,7 +145,25 @@ function ControlsClientTab({ clientId, installations }) {
         </div>
         <div className="ctrl-card-actions">
           {isDone && <span className="ctrl-done-badge"><CheckCircle2 size={12} /> Terminé</span>}
-          {!isDone && <span className="ctrl-upcoming-badge"><Clock size={12} /> À venir</span>}
+          {!isDone && days < 0 && (
+            <>
+              <span className="ctrl-late-badge"><AlertTriangle size={12} /> En retard</span>
+              <button
+                type="button"
+                className="btn btn--primary btn--sm ctrl-close-btn"
+                title="Marquer ce contrôle comme effectué"
+                disabled={closing === c._id}
+                onClick={e => closeControl(c, e)}
+              >
+                {closing === c._id
+                  ? <span className="login-btn-spinner" />
+                  : <><CheckCircle2 size={13} /> Clôturer</>}
+              </button>
+            </>
+          )}
+          {!isDone && days >= 0 && (
+            <span className="ctrl-upcoming-badge"><Clock size={12} /> À venir</span>
+          )}
         </div>
       </div>
     )
@@ -194,14 +173,31 @@ function ControlsClientTab({ clientId, installations }) {
     <div className="ctrl-tab">
       <div className="ctrl-tab-bar">
         <div className="ctrl-tab-counts">
+          {overdue.length > 0 && (
+            <span className="ctrl-count-chip ctrl-count-chip--late">
+              {overdue.length} en retard
+            </span>
+          )}
           <span className="ctrl-count-chip ctrl-count-chip--upcoming">{upcoming.length} à venir</span>
           <span className="ctrl-count-chip ctrl-count-chip--done">{completed.length} terminé{completed.length > 1 ? 's' : ''}</span>
         </div>
       </div>
 
+      {/* Le retard passe avant tout le reste : c'est ce qui appelle une action. */}
+      {overdue.length > 0 && (
+        <section className="ctrl-section">
+          <h4 className="ctrl-section-title ctrl-section-title--late">
+            <AlertTriangle size={14} /> En retard ({overdue.length})
+          </h4>
+          <div className="ctrl-list">
+            {overdue.map(c => renderCard(c, true))}
+          </div>
+        </section>
+      )}
+
       {upcoming.length > 0 && (
         <section className="ctrl-section">
-          <h4 className="ctrl-section-title"><Clock size={14} /> À venir</h4>
+          <h4 className="ctrl-section-title"><Clock size={14} /> À venir ({upcoming.length})</h4>
           <div className="ctrl-list">
             {upcoming.map(c => renderCard(c, true))}
           </div>
@@ -210,7 +206,7 @@ function ControlsClientTab({ clientId, installations }) {
 
       {completed.length > 0 && (
         <section className="ctrl-section">
-          <h4 className="ctrl-section-title"><CheckCircle2 size={14} /> Terminés</h4>
+          <h4 className="ctrl-section-title"><CheckCircle2 size={14} /> Terminés ({completed.length})</h4>
           <div className="ctrl-list">
             {completed.map(c => renderCard(c, true))}
           </div>
@@ -221,10 +217,8 @@ function ControlsClientTab({ clientId, installations }) {
 }
 
 const TABS = [
-  { id: 'info',         label: 'Informations', icon: Info },
+  { id: 'sites',        label: 'Sites',        icon: Building2 },
   { id: 'documents',    label: 'Documents',    icon: FileText },
-  { id: 'installations',label: 'Installations',icon: MapPin },
-  { id: 'appareils',    label: 'Appareils',    icon: Activity },
   { id: 'controles',    label: 'Contrôles',    icon: ClipboardList },
   { id: 'planning',     label: 'Planning',     icon: Calendar },
   { id: 'formations',   label: 'Formations',   icon: GraduationCap },
@@ -237,20 +231,35 @@ export default function ClientDetailPage() {
   const [client, setClient]           = useState(null)
   const [installations, setInstallations] = useState([])
   const [loading, setLoading]         = useState(true)
-  const [activeTab, setActiveTab]     = useState('info')
+  /* L'onglet vit dans l'URL : en revenant d'un contrôle ou d'un site, on
+     retrouve l'onglet quitté et non le premier de la liste. */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = TABS.some(t => t.id === searchParams.get('tab'))
+    ? searchParams.get('tab')
+    : 'sites'
+  const setActiveTab = id => setSearchParams(
+    id === 'sites' ? {} : { tab: id },
+    { replace: true }
+  )
+  const [counts, setCounts]           = useState({ sites: 0, deas: 0 })
   const [editOpen, setEditOpen]       = useState(false)
+  // Nombre de sites couverts par un contrat actif — résumé du bandeau.
+  const [covered, setCovered] = useState(0)
 
   useLoadingBar(loading)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [clientData, installationsData] = await Promise.all([
+      const [clientData, installationsData, contractsData] = await Promise.all([
         getClient(id),
         getInstallations({ client: id, limit: 500 }),
+        // Contrats en cours, un par site couvert.
+        getContracts({ client: id, status: 'actif', limit: 200 }).catch(() => ({ data: [] })),
       ])
       setClient(clientData)
       setInstallations(Array.isArray(installationsData.data) ? installationsData.data : [])
+      setCovered(new Set((contractsData?.data || []).map(c => String(c.site?._id || c.site))).size)
     } catch (err) {
       toast.error(err.message || 'Client introuvable.')
       navigate('/clients')
@@ -269,11 +278,6 @@ export default function ClientDetailPage() {
     )
   }
 
-  const location = [client.address?.street, client.address?.city, client.address?.governorate]
-    .filter(Boolean).join(', ')
-
-  const activeInst = installations.filter(i => computeStatus(i) === 'actif').length
-
   return (
     <div className="page-content cd-root">
 
@@ -284,21 +288,32 @@ export default function ClientDetailPage() {
         </button>
 
         <div className="cd-avatar">
-          {initials(client.name)}
+          {client.logo
+            ? <img src={clientLogoUrl(client.logo)} alt="" className="cd-avatar-img" />
+            : initials(client.name)}
         </div>
 
         <div className="cd-banner-info">
           <div className="cd-banner-name">{client.name}</div>
           <div className="cd-banner-meta">
-            <span className="cd-type-badge">{client.type}</span>
             <span className="cd-stat-chip">
-              <Building2 size={12} /> {installations.length} installation{installations.length !== 1 ? 's' : ''}
+              <Building2 size={12} /> {counts.sites} site{counts.sites !== 1 ? 's' : ''}
             </span>
-            {activeInst > 0 && (
-              <span className="cd-stat-chip cd-stat-chip--green">
-                <Activity size={12} /> {activeInst} actif{activeInst !== 1 ? 's' : ''}
-              </span>
-            )}
+            <span className="cd-stat-chip cd-stat-chip--green">
+              <Activity size={12} /> {counts.deas} DEA
+            </span>
+            {/* Les contrats sont par site : le bandeau résume, la couverture se
+                gère site par site dans l'onglet Sites. */}
+            <button
+              type="button"
+              className={`contract-badge contract-badge--${covered > 0 ? 'on' : 'off'} contract-badge--action`}
+              title="Gérer les contrats site par site"
+              onClick={() => setActiveTab('sites')}
+            >
+              {covered > 0
+                ? <><CheckCircle2 size={12} /> {covered}/{counts.sites} site{counts.sites !== 1 ? 's' : ''} sous contrat <ChevronRight size={12} /></>
+                : <><MinusCircle size={12} /> Aucun site sous contrat <ChevronRight size={12} /></>}
+            </button>
             {!client.isActive && (
               <span className="cd-stat-chip cd-stat-chip--red">Archivé</span>
             )}
@@ -330,272 +345,13 @@ export default function ClientDetailPage() {
       {/* ── Tab content ───────────────────────────── */}
       <div className="cd-body">
 
-        {/* ── Informations ──────────────────────── */}
-        {activeTab === 'info' && (
-          <div className="cd-info-grid">
-
-            {/* Contacts card */}
-            <div className="cd-card">
-              <div className="cd-card-title">
-                <User size={15} /> Contacts {client.contacts?.length > 1 && `(${client.contacts.length})`}
-              </div>
-              {(client.contacts || []).length === 0 ? (
-                <p className="cd-empty-hint">Aucune information de contact.</p>
-              ) : (
-                client.contacts.map((p, i) => (
-                  <div key={i} className="cd-person-row">
-                    <span className="cd-person-name">{p.name || <span className="text-muted">Sans nom</span>}</span>
-                    <div className="cd-contact-list">
-                      {p.phone && (
-                        <a href={`tel:${p.phone}`} className="cd-contact-chip cd-contact-chip--phone">
-                          <Phone size={12} /> {p.phone}
-                        </a>
-                      )}
-                      {p.email && (
-                        <a href={`mailto:${p.email}`} className="cd-contact-chip cd-contact-chip--mail">
-                          <Mail size={12} /> {p.email}
-                        </a>
-                      )}
-                      {!p.phone && !p.email && <span className="cd-empty-hint">Aucune coordonnée</span>}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Address card */}
-            <div className="cd-card">
-              <div className="cd-card-title">
-                <MapPin size={15} /> Adresse
-              </div>
-              {location ? (
-                <>
-                  {client.address?.street && (
-                    <div className="cd-info-row">
-                      <span className="cd-info-label">Rue</span>
-                      <span className="cd-info-val">{client.address.street}</span>
-                    </div>
-                  )}
-                  {client.address?.city && (
-                    <div className="cd-info-row">
-                      <span className="cd-info-label">Ville</span>
-                      <span className="cd-info-val">{client.address.city}</span>
-                    </div>
-                  )}
-                  {client.address?.governorate && (
-                    <div className="cd-info-row">
-                      <span className="cd-info-label">Gouvernorat</span>
-                      <span className="cd-info-val">{client.address.governorate}</span>
-                    </div>
-                  )}
-                  {client.address?.gps?.lat && (
-                    <div className="cd-info-row">
-                      <span className="cd-info-label">GPS</span>
-                      <a
-                        href={`https://maps.google.com/?q=${client.address.gps.lat},${client.address.gps.lng}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="cd-gps-link"
-                      >
-                        {client.address.gps.lat.toFixed(5)}, {client.address.gps.lng.toFixed(5)}
-                      </a>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="cd-empty-hint">Aucune adresse renseignée.</p>
-              )}
-            </div>
-
-            {/* Responsables + Notes */}
-            <div className="cd-card cd-card--wide">
-              <div className="cd-card-title">
-                <Info size={15} /> Informations internes
-              </div>
-              {(client.internalManagers || []).length > 0 && (
-                <div className="cd-info-row cd-info-row--list">
-                  <span className="cd-info-label">
-                    Responsable{client.internalManagers.length > 1 ? 's' : ''} interne{client.internalManagers.length > 1 ? 's' : ''}
-                  </span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-                    {client.internalManagers.map((p, i) => (
-                      <div key={i} className="cd-person-row cd-person-row--flat">
-                        <span className="cd-person-name">{p.name || <span className="text-muted">Sans nom</span>}</span>
-                        <div className="cd-contact-list">
-                          {p.phone && (
-                            <a href={`tel:${p.phone}`} className="cd-contact-chip cd-contact-chip--phone">
-                              <Phone size={12} /> {p.phone}
-                            </a>
-                          )}
-                          {p.email && (
-                            <a href={`mailto:${p.email}`} className="cd-contact-chip cd-contact-chip--mail">
-                              <Mail size={12} /> {p.email}
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {client.notes ? (
-                <div className="cd-info-row cd-info-row--notes">
-                  <span className="cd-info-label">Notes</span>
-                  <p className="cd-notes-text">{client.notes}</p>
-                </div>
-              ) : (client.internalManagers || []).length === 0 ? (
-                <p className="cd-empty-hint">Aucune note.</p>
-              ) : null}
-            </div>
-
-          </div>
+        {activeTab === 'sites' && (
+          <SitesClientTab clientId={id} onCountChange={setCounts} />
         )}
 
         {/* ── Documents ─────────────────────────── */}
         {activeTab === 'documents' && (
           <ClientDocumentsTab clientId={id} />
-        )}
-
-        {/* ── Installations ─────────────────────── */}
-        {activeTab === 'installations' && (
-          <div className="cd-table-tab">
-            <div className="cd-tab-header">
-              <h3 className="cd-tab-title">Installations ({installations.length})</h3>
-            </div>
-            {installations.length === 0 ? (
-              <div className="cd-tab-empty">
-                <Zap size={40} color="var(--gray-300)" />
-                <p>Aucune installation enregistrée pour ce client.</p>
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Site / Adresse</th>
-                      <th>Appareil</th>
-                      <th>N° Série</th>
-                      <th>Prochain contrôle</th>
-                      <th>Statut</th>
-                      <th style={{ width: 44 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {installations.map(inst => (
-                      <tr
-                        key={inst._id}
-                        className="table-row-clickable"
-                        onClick={() => navigate(`/devices/${inst._id}`)}
-                      >
-                        <td>
-                          <div className="inst-site-cell">
-                            <div className="inst-site-client">{inst.location || inst.address}</div>
-                            <div className="inst-site-loc">
-                              <MapPin size={11} strokeWidth={1.8} />
-                              {inst.address}
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className="inst-device-cell">
-                            <div className="inst-device-type">{inst.deviceProduct?.name || inst.deviceType || '—'}</div>
-                          </div>
-                        </td>
-                        <td>
-                          {inst.serialNumber
-                            ? <span className="inst-sn-chip">{inst.serialNumber}</span>
-                            : <span className="text-muted">—</span>
-                          }
-                        </td>
-                        <td><ControlDate date={inst.nextControlDate} /></td>
-                        <td><StatusBadge inst={inst} /></td>
-                        <td>
-                          <button
-                            type="button"
-                            className="action-btn action-btn--edit"
-                            title="Voir"
-                            onClick={e => { e.stopPropagation(); navigate(`/devices/${inst._id}`) }}
-                          >
-                            <ChevronRight size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Appareils ─────────────────────────── */}
-        {activeTab === 'appareils' && (
-          <div className="cd-table-tab">
-            <div className="cd-tab-header">
-              <h3 className="cd-tab-title">État des appareils ({installations.length})</h3>
-            </div>
-            {installations.length === 0 ? (
-              <div className="cd-tab-empty">
-                <Activity size={40} color="var(--gray-300)" />
-                <p>Aucun appareil enregistré pour ce client.</p>
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Appareil</th>
-                      <th>N° Série</th>
-                      <th>Batterie</th>
-                      <th>Électrode</th>
-                      <th>Prochain contrôle</th>
-                      <th>Statut</th>
-                      <th style={{ width: 44 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {installations.map(inst => (
-                      <tr
-                        key={inst._id}
-                        className="table-row-clickable"
-                        onClick={() => navigate(`/devices/${inst._id}`)}
-                      >
-                        <td>
-                          <div className="inst-device-cell">
-                            <div className="inst-device-type">{inst.deviceProduct?.name || inst.deviceType || '—'}</div>
-                            <div className="inst-device-sn">
-                              <MapPin size={11} strokeWidth={1.8} />
-                              {inst.location || inst.address || '—'}
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          {inst.serialNumber
-                            ? <span className="inst-sn-chip">{inst.serialNumber}</span>
-                            : <span className="text-muted">—</span>
-                          }
-                        </td>
-                        <td><BatteryBar level={inst.batteries?.[0]?.level} /></td>
-                        <td><ControlDate date={inst.electrodes?.[0]?.expiryDate} /></td>
-                        <td><ControlDate date={inst.nextControlDate} /></td>
-                        <td><StatusBadge inst={inst} /></td>
-                        <td>
-                          <button
-                            type="button"
-                            className="action-btn action-btn--edit"
-                            title="Voir"
-                            onClick={e => { e.stopPropagation(); navigate(`/devices/${inst._id}`) }}
-                          >
-                            <ChevronRight size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         )}
 
         {/* ── Contrôles ─────────────────────────── */}
@@ -615,14 +371,14 @@ export default function ClientDetailPage() {
 
       </div>
 
-      {/* ── Edit modal ────────────────────────────── */}
       {editOpen && (
-        <ClientModal
+        <ClientHeaderModal
           client={client}
           onClose={() => setEditOpen(false)}
-          onSaved={updated => { setClient(updated); setEditOpen(false) }}
+          onSaved={setClient}
         />
       )}
+
 
     </div>
   )

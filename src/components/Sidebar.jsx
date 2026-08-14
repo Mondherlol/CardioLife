@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import {
-  LayoutDashboard, Users, Zap, Package, Boxes, FileText,
-  Wrench, Calendar, File, Map, Mail, GraduationCap,
+  LayoutDashboard, Users, Package, FileText,
+  Wrench, Calendar, File,
   Settings, UserCircle, Heart, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useSidebar } from '../context/SidebarContext'
@@ -12,14 +12,13 @@ import { get }        from '../api/http'
 const ALL_NAV = [
   { icon: LayoutDashboard, label: 'Tableau de bord',  to: '/dashboard',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: Users,           label: 'Clients',           to: '/clients',        roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: Zap,             label: 'DAE installés',     to: '/devices',        roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: Package,         label: 'Stock & Produits',  to: '/stock',          roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: Boxes,           label: 'Packs',             to: '/packs',          roles: ['superadmin','admin','commercial','assistante','readonly'] },
   { icon: FileText,        label: 'Contrats',          to: '/contrats',       roles: ['superadmin','admin','commercial','assistante'] },
-  { icon: Wrench,          label: 'Contrôles',         to: '/interventions',  roles: null }, // all roles
+  // Contrôles, installations, formations et remplacements : un seul suivi
+  // terrain, une seule entrée de menu (onglets internes).
+  { icon: Wrench,          label: 'Maintenance',       to: '/maintenance',    roles: null }, // all roles
   { icon: Calendar,        label: 'Planning',          to: '/planning',       roles: null }, // all roles
   { icon: File,            label: 'Documents',         to: '/documents',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: GraduationCap,   label: 'Formations',        to: '/formations',     roles: null, anyPermission: ['canManageFormations', 'canManageClients'] },
   // Désactivés pour l'instant : { icon: Map, label: 'Carte Tunisie', to: '/carte', roles: [...] }
   // Désactivés pour l'instant : { icon: Mail, label: 'Emails & Relances', to: '/emails', roles: [...] }
 ]
@@ -110,7 +109,7 @@ export default function Sidebar() {
                 <Icon size={16} strokeWidth={1.8} />
               </span>
               <span className="sidebar-item-label">{item.label}</span>
-              {item.to === '/interventions' && pendingCount > 0 && !isCompact && (
+              {item.to === '/maintenance' && pendingCount > 0 && !isCompact && (
                 <span className="sidebar-badge">{pendingCount}</span>
               )}
             </NavLink>

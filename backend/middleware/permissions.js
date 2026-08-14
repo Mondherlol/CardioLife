@@ -38,4 +38,23 @@ function requireAnyPermission(permissions) {
   }
 }
 
-module.exports = { requireSuperAdmin, requireAdminOrSuperAdmin, requirePermission, requireAnyPermission }
+/**
+ * Ne protège que les écritures : les GET restent ouverts à tout utilisateur
+ * authentifié.
+ *
+ * Le catalogue produits et le stock sont consultés bien au-delà du magasin —
+ * poser un DEA suppose de lire les modèles et les numéros de série disponibles,
+ * sans pour autant donner le droit de modifier le stock.
+ */
+function requirePermissionToWrite(permission) {
+  const guard = requirePermission(permission)
+  return (req, res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD') return next()
+    return guard(req, res, next)
+  }
+}
+
+module.exports = {
+  requireSuperAdmin, requireAdminOrSuperAdmin,
+  requirePermission, requireAnyPermission, requirePermissionToWrite,
+}

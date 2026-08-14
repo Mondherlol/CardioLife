@@ -7,8 +7,11 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
-import { getInterventions, createIntervention } from '../api/interventions'
+import { getInterventions } from '../api/interventions'
 import { get } from '../api/http'
+import ControlCreateModal from '../components/ControlCreateModal'
+import InstallationCompleteModal from '../components/InstallationCompleteModal'
+import { getInstallations } from '../api/installations'
 
 /* ─── Constants ─────────────────────────────────────────────── */
 
@@ -54,223 +57,6 @@ function StatusBadge({ status }) {
 
 /* ─── Create Modal ───────────────────────────────────────────── */
 
-function CreateModal({ onClose, onCreated }) {
-  const [techniciens,   setTechniciens]   = useState([])
-  const [installations, setInstallations] = useState([])
-  const [recentInst,    setRecentInst]    = useState([])
-  const [clientSearch,  setClientSearch]  = useState('')
-  const [searchFocused, setSearchFocused] = useState(false)
-  const [loadingInst,   setLoadingInst]   = useState(false)
-  const [saving,        setSaving]        = useState(false)
-
-  const [form, setForm] = useState({
-    clientName:    '',
-    installation:  '',
-    technicien:    '',
-    technicienName:'',
-    scheduledDate: '',
-    controlType:   'hors_contrat',
-    notes:         '',
-  })
-
-  useEffect(() => {
-    get('/users?role=technicien&limit=100')
-      .then(res => setTechniciens(res.data || res))
-      .catch(() => {})
-    get('/interventions/search-installations?limit=8')
-      .then(data => setRecentInst(Array.isArray(data) ? data : []))
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    if (!clientSearch.trim()) { setInstallations([]); return }
-    const t = setTimeout(async () => {
-      setLoadingInst(true)
-      try {
-        const qs = new URLSearchParams({ search: clientSearch, limit: 20 }).toString()
-        const data = await get(`/interventions/search-installations?${qs}`)
-        setInstallations(Array.isArray(data) ? data : [])
-      } catch { /* ignore */ }
-      finally { setLoadingInst(false) }
-    }, 300)
-    return () => clearTimeout(t)
-  }, [clientSearch])
-
-  const displayedInst = clientSearch.trim() ? installations : recentInst
-
-  function setF(k, v) { setForm(p => ({ ...p, [k]: v })) }
-
-  function selectInstallation(inst) {
-    setForm(p => ({
-      ...p,
-      installation:  inst._id,
-      clientName:    inst.client?.name || inst.clientName || '',
-      installationSnap: {
-        deviceType:   inst.deviceType   || '',
-        serialNumber: inst.serialNumber || '',
-        address:      inst.address      || '',
-        location:     inst.location     || '',
-      },
-    }))
-    setClientSearch(inst.client?.name || inst.clientName || '')
-    setInstallations([])
-    setSearchFocused(false)
-  }
-
-  function selectTechnicien(e) {
-    const t = techniciens.find(u => u._id === e.target.value)
-    setForm(p => ({
-      ...p,
-      technicien:     t?._id || '',
-      technicienName: t?.fullName || t?.username || '',
-    }))
-  }
-
-  async function handleCreate() {
-    if (!form.installation) return toast.error('Sélectionnez un DAE.')
-    if (!form.scheduledDate) return toast.error('La date planifiée est requise.')
-    setSaving(true)
-    try {
-      const created = await createIntervention(form)
-      toast.success('Contrôle créé.')
-      onCreated(created)
-      onClose()
-    } catch (err) {
-      toast.error(err.message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const selectedSnap = form.installationSnap
-
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--md modal--dropdown">
-        <div className="modal-header">
-          <h2 className="modal-title">
-            <Plus size={16} /> Nouveau contrôle
-          </h2>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
-        </div>
-
-        <div className="modal-body">
-          <div className="form-field">
-            <label className="form-label">Client / DAE *</label>
-            <div className="iv-search-wrap">
-              <Search size={13} className="iv-search-icon" />
-              <input
-                className="form-input"
-                placeholder="Rechercher par client, adresse, n° de série…"
-                value={clientSearch}
-                onChange={e => { setClientSearch(e.target.value); setForm(p => ({ ...p, installation: '' })) }}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
-                style={{ paddingLeft: 30 }}
-              />
-              {loadingInst && <span className="spinner spinner--sm" style={{ position: 'absolute', right: 10 }} />}
-
-              {searchFocused && displayedInst.length > 0 && (
-                <div className="iv-dropdown">
-                  {!clientSearch.trim() && (
-                    <div className="iv-dropdown-label">Récents</div>
-                  )}
-                  {displayedInst.map(inst => (
-                    <button
-                      key={inst._id}
-                      type="button"
-                      className="iv-dropdown-item"
-                      onClick={() => selectInstallation(inst)}
-                    >
-                      <Zap size={12} strokeWidth={2} />
-                      <div>
-                        <div className="iv-dd-client">{inst.client?.name || inst.clientName}</div>
-                        <div className="iv-dd-info">
-                          {inst.deviceType} · {inst.serialNumber} · {inst.address}
-                          {inst.location ? ` (${inst.location})` : ''}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {selectedSnap && form.installation && (
-              <div className="iv-selected-snap">
-                <Zap size={12} strokeWidth={2} />
-                <span>
-                  <strong>{selectedSnap.deviceType}</strong> · {selectedSnap.serialNumber}
-                  {selectedSnap.location ? ` · ${selectedSnap.location}` : ''}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="form-field">
-            <label className="form-label">Technicien assigné</label>
-            <div className="fiche-select-wrap">
-              <select
-                className="form-input"
-                value={form.technicien}
-                onChange={selectTechnicien}
-              >
-                <option value="">— Non assigné —</option>
-                {techniciens.map(t => (
-                  <option key={t._id} value={t._id}>{t.fullName || t.username}</option>
-                ))}
-              </select>
-              <ChevronDown size={13} className="fiche-select-chevron" />
-            </div>
-          </div>
-
-          <div className="form-field">
-            <label className="form-label">Date planifiée *</label>
-            <input
-              type="date"
-              className="form-input"
-              value={form.scheduledDate}
-              onChange={e => setF('scheduledDate', e.target.value)}
-            />
-          </div>
-
-          <div className="form-field">
-            <label className="form-label">Type de contrôle</label>
-            <div className="ct-type-pills">
-              {CONTROL_TYPE_OPTS.map(o => (
-                <button key={o.value} type="button"
-                  className={`ct-type-pill${form.controlType === o.value ? ' ct-type-pill--on' : ''}`}
-                  onClick={() => setF('controlType', o.value)}>
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="form-field">
-            <label className="form-label">Notes</label>
-            <textarea
-              className="form-input"
-              rows={3}
-              placeholder="Instructions pour le technicien…"
-              value={form.notes}
-              onChange={e => setF('notes', e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="modal-footer">
-          <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
-          <button className="btn btn--primary" onClick={handleCreate} disabled={saving}>
-            {saving && <span className="spinner spinner--sm" />}
-            <Plus size={14} /> Créer
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ─── Date grouping ──────────────────────────────────────────── */
 function groupInterventions(interventions) {
   const now       = new Date(); now.setHours(0,0,0,0)
@@ -284,7 +70,8 @@ function groupInterventions(interventions) {
     demain:    { key: 'demain',    label: 'Demain',               accent: 'amber',  items: [] },
     semaine:   { key: 'semaine',   label: 'Cette semaine',        accent: 'blue',   items: [] },
     prochaine: { key: 'prochaine', label: 'La semaine prochaine', accent: 'gray',   items: [] },
-    plus_tard: { key: 'plus_tard', label: 'Plus tard',            accent: 'gray',   items: [] },
+    // Tout le reste du calendrier, sans horizon : c'est la vue d'ensemble.
+    plus_tard: { key: 'plus_tard', label: 'À venir plus tard',    accent: 'gray',   items: [] },
     termine:   { key: 'termine',   label: 'Terminées',            accent: 'green',  items: [] },
   }
 
@@ -299,6 +86,16 @@ function groupInterventions(interventions) {
     else if (day < endWeek)      groups.semaine.items.push(iv)
     else if (day < endNxtWk)     groups.prochaine.items.push(iv)
     else                         groups.plus_tard.items.push(iv)
+  }
+
+  /* Dans chaque section, l'échéance la plus proche vient en tête — sauf pour
+     les contrôles faits, où c'est le dernier réalisé qui intéresse. Sans ce
+     tri, l'ordre était celui de l'API, donc arbitraire à l'œil du technicien. */
+  const byDateAsc = (a, b) =>
+    new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)
+
+  for (const g of Object.values(groups)) {
+    g.items.sort(g.key === 'termine' ? (a, b) => byDateAsc(b, a) : byDateAsc)
   }
 
   return Object.values(groups).filter(g => g.items.length > 0)
@@ -359,6 +156,74 @@ function TechnicianCard({ intervention, onClick }) {
           <p className="iv-card-notes">{intervention.notes}</p>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ─── Installations à poser (vue technicien) ─────────────────── */
+
+/**
+ * Les poses assignées au technicien, avant ses contrôles : du matériel attend
+ * d'être mis en service, c'est ce qui bloque le client.
+ */
+function PosesSection({ poses, onPick }) {
+  const [open, setOpen] = useState(true)
+
+  return (
+    <div className="iv-date-section">
+      <button className="iv-date-section-hdr" onClick={() => setOpen(o => !o)}>
+        <span className="iv-date-section-dot" style={{ background: 'var(--purple-500, #7c5cff)' }} />
+        <span className="iv-date-section-label">Installations à réaliser</span>
+        <span className="iv-date-section-count">{poses.length}</span>
+        <ChevronDown size={14} className={`iv-date-section-chevron${open ? ' iv-date-section-chevron--open' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="iv-cards-grid">
+          {poses.map(p => {
+            const late = p.scheduledDate &&
+              new Date(p.scheduledDate) < new Date(new Date().setHours(0, 0, 0, 0))
+            return (
+              <div key={p._id} className={`iv-card iv-card--pose${late ? ' iv-card--late' : ''}`}>
+                <div className="iv-card-header">
+                  <div className="iv-card-client">{p.clientName || '—'}</div>
+                  <span className="pose-badge">À installer</span>
+                </div>
+
+                <div className="iv-card-body">
+                  <div className="iv-card-row">
+                    <Zap size={13} strokeWidth={1.8} />
+                    <span>
+                      {p.deviceType || 'DAE'}
+                      {p.serialNumber && <> · <code>{p.serialNumber}</code></>}
+                    </span>
+                  </div>
+                  {(p.address || p.location) && (
+                    <div className="iv-card-row">
+                      <MapPin size={13} strokeWidth={1.8} />
+                      <span>{p.address}{p.location ? ` — ${p.location}` : ''}</span>
+                    </div>
+                  )}
+                  <div className="iv-card-row">
+                    <Calendar size={13} strokeWidth={1.8} />
+                    <span className={late ? 'iv-card-date--late' : ''}>
+                      Prévue le {fmt(p.scheduledDate)}
+                      {late && <AlertTriangle size={11} style={{ marginLeft: 4, color: 'var(--red-500)' }} />}
+                    </span>
+                  </div>
+                  {p.notes && <p className="iv-card-notes">{p.notes}</p>}
+                </div>
+
+                <div className="iv-card-foot">
+                  <button className="btn btn--primary btn--sm" onClick={() => onPick(p)}>
+                    <CheckCircle2 size={13} /> Compte rendu de pose
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -454,7 +319,9 @@ const STATUS_FILTERS = [
 
 const PAGE_SIZE = 100
 
-export default function InterventionsPage() {
+/* `embedded` : monté comme onglet de la page Maintenance — le titre de la page
+   porte déjà le contexte, seul le sous-titre et les actions restent. */
+export default function InterventionsPage({ embedded = false }) {
   const { user } = useAuth()
   const navigate  = useNavigate()
   const isTech   = user?.role === 'technicien'
@@ -468,6 +335,10 @@ export default function InterventionsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [sortDir, setSortDir]     = useState('desc')  // tri par date planifiée
   const [page, setPage]           = useState(1)
+  // Poses assignées au technicien : elles précèdent les contrôles, c'est du
+  // matériel qui attend d'être mis en service.
+  const [poses, setPoses]         = useState([])
+  const [posing, setPosing]       = useState(null)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -481,7 +352,18 @@ export default function InterventionsPage() {
     }
   }, [])
 
+  const fetchPoses = useCallback(async () => {
+    if (!isTech) return
+    try {
+      const res = await getInstallations({ status: 'a_installer', limit: 100 })
+      const list = Array.isArray(res) ? res : (res?.data || [])
+      setPoses(list.sort((a, b) =>
+        new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)))
+    } catch { /* la page reste utilisable sans les poses */ }
+  }, [isTech])
+
   useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => { fetchPoses() }, [fetchPoses])
   useEffect(() => { setPage(1) }, [search, statusFilter, sortDir])
 
   const filtered = useMemo(() => {
@@ -535,13 +417,15 @@ export default function InterventionsPage() {
   }
 
   return (
-    <div className="page-content">
+    <div className={embedded ? 'mt-tab-panel' : 'page-content'}>
       {/* Header */}
       <div className="page-header">
         <div>
-          <h1 className="page-title">
-            <Wrench size={20} strokeWidth={1.8} /> Contrôles
-          </h1>
+          {!embedded && (
+            <h1 className="page-title">
+              <Wrench size={20} strokeWidth={1.8} /> Contrôles
+            </h1>
+          )}
           {isTech ? (
             <p className="page-subtitle">
               Bonjour <strong>{user.fullName || user.username}</strong> —
@@ -620,10 +504,13 @@ export default function InterventionsPage() {
         <div className="table-loading"><span className="spinner" /></div>
       ) : isTech ? (
         filtered.length === 0 ? (
-          <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
-            {search || statusFilter
-              ? 'Aucune intervention pour ces critères.'
-              : 'Aucune intervention ne vous est assignée.'}
+          <div className="iv-dashboard">
+            {poses.length > 0 && <PosesSection poses={poses} onPick={setPosing} />}
+            <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
+              {search || statusFilter
+                ? 'Aucune intervention pour ces critères.'
+                : 'Aucun contrôle ne vous est assigné.'}
+            </div>
           </div>
         ) : groupedSections.length === 0 ? (
           <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
@@ -631,12 +518,15 @@ export default function InterventionsPage() {
           </div>
         ) : (
           <div className="iv-dashboard">
+            {poses.length > 0 && <PosesSection poses={poses} onPick={setPosing} />}
             {groupedSections.map(g => (
               <DateSection
                 key={g.key}
                 group={g}
                 onCardClick={id => navigate(`/interventions/${id}`)}
-                defaultOpen={g.key !== 'termine' && g.key !== 'plus_tard'}
+                // « À venir plus tard » s'ouvre : c'est la vue d'ensemble du
+                // calendrier, elle n'a d'intérêt que dépliée.
+                defaultOpen={g.key !== 'termine'}
               />
             ))}
           </div>
@@ -692,7 +582,15 @@ export default function InterventionsPage() {
       )}
 
       {showCreate && (
-        <CreateModal onClose={() => setShowCreate(false)} onCreated={onCreated} />
+        <ControlCreateModal onClose={() => setShowCreate(false)} onCreated={onCreated} />
+      )}
+
+      {posing && (
+        <InstallationCompleteModal
+          installation={posing}
+          onClose={() => setPosing(null)}
+          onDone={() => { setPosing(null); fetchPoses() }}
+        />
       )}
     </div>
   )

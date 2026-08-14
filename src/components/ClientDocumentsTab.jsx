@@ -8,6 +8,7 @@ import { ImageThumbnail, PdfThumbnail } from './FileThumbnail'
 import DocumentPreviewModal from './DocumentPreviewModal'
 import UploadProgress from './UploadProgress'
 import { getClientDocumentsFolder } from '../api/clients'
+import { getSiteDocumentsFolder } from '../api/sites'
 import {
   getContents, createFolder, renameDoc, moveDoc, deleteDoc, downloadDoc,
 } from '../api/documents'
@@ -120,8 +121,13 @@ function NewFolderModal({ onClose, onSave }) {
   )
 }
 
-/* ── Main tab ─────────────────────────────────────────────────── */
-export default function ClientDocumentsTab({ clientId }) {
+/**
+ * Explorateur de documents rattaché à un dossier système.
+ *
+ * Passer `clientId` pour le dossier « Clients/<client> », ou `siteId` pour
+ * « Clients/<client>/Sites/<site> » — le reste du fonctionnement est identique.
+ */
+export default function ClientDocumentsTab({ clientId, siteId, title = 'Documents du client' }) {
   const [rootFolderId, setRootFolderId] = useState(null)
   const [breadcrumb,   setBreadcrumb]   = useState([])   // [{id, name}] sous la racine du client
   const [items,        setItems]        = useState([])
@@ -139,10 +145,13 @@ export default function ClientDocumentsTab({ clientId }) {
   const currentFolder = breadcrumb.length ? breadcrumb[breadcrumb.length - 1].id : rootFolderId
 
   useEffect(() => {
-    getClientDocumentsFolder(clientId)
+    const request = siteId
+      ? getSiteDocumentsFolder(siteId)
+      : getClientDocumentsFolder(clientId)
+    request
       .then(data => setRootFolderId(data.folderId))
-      .catch(() => toast.error("Impossible de charger le dossier du client."))
-  }, [clientId])
+      .catch(() => toast.error(`Impossible de charger le dossier du ${siteId ? 'site' : 'client'}.`))
+  }, [clientId, siteId])
 
   const fetchItems = useCallback(async () => {
     if (!currentFolder) return
@@ -264,7 +273,7 @@ export default function ClientDocumentsTab({ clientId }) {
   return (
     <div className="cd-docs-tab">
       <div className="cd-tab-header">
-        <h3 className="cd-tab-title">Documents du client</h3>
+        <h3 className="cd-tab-title">{title}</h3>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn--ghost btn--sm" onClick={() => setNewFolderOpen(true)}>
             <FolderPlus size={13} /> Nouveau dossier

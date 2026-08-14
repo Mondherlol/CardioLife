@@ -12,11 +12,6 @@ const clientSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
-  type: {
-    type: String,
-    required: true,
-    trim: true,
-  },
   address: {
     street:      { type: String, trim: true },
     city:        { type: String, trim: true },
@@ -29,6 +24,10 @@ const clientSchema = new mongoose.Schema({
   contacts:         [personSchema],
   internalManagers: [personSchema],
   notes:            { type: String, trim: true },
+  // Client sous contrat de maintenance : pilote les contrôles périodiques.
+  underContract:    { type: Boolean, default: false },
+  // Nom de fichier du logo dans uploads/clients (null → initiales affichées).
+  logo:             { type: String, default: null },
   documentsFolder: { type: mongoose.Schema.Types.ObjectId, ref: 'Document', default: null },
   isActive:        { type: Boolean, default: true },
   createdBy: {

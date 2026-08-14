@@ -2,12 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
-  Plus, Search, Pencil, Trash2, X, AlertTriangle,
+  Plus, Search, Trash2, X, AlertTriangle,
   Building2, ChevronLeft, ChevronRight, RotateCcw, Trash, Archive, ArrowLeft,
-  FileSpreadsheet, Check, ChevronDown, ArrowUp, ArrowDown,
+  FileSpreadsheet, ArrowUp, ArrowDown, HeartPulse, CheckCircle2, MinusCircle,
 } from 'lucide-react'
-import { getClients, archiveClient, restoreClient, destroyClient } from '../api/clients'
-import { getClientTypes } from '../api/clientTypes'
+import { getClients, archiveClient, restoreClient, destroyClient, clientLogoUrl } from '../api/clients'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ClientModal from '../components/ClientModal'
 
@@ -17,79 +16,6 @@ function formatApiError(err) {
 }
 
 /* ─── Confirmation archivage ─── */
-function ClientTypeSelector({ types, selected, onChange }) {
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef(null)
-
-  useEffect(() => {
-    function handlePointerDown(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handlePointerDown)
-    return () => document.removeEventListener('mousedown', handlePointerDown)
-  }, [])
-
-  function toggle(slug) {
-    onChange(
-      selected.includes(slug)
-        ? selected.filter(s => s !== slug)
-        : [...selected, slug]
-    )
-  }
-
-  const selectedLabels = types
-    .filter(t => selected.includes(t.slug))
-    .map(t => t.name)
-
-  return (
-    <div className="cl-type-select" ref={wrapRef}>
-      <button
-        type="button"
-        className={`cl-type-select-btn${open ? ' cl-type-select-btn--open' : ''}${selected.length ? ' cl-type-select-btn--active' : ''}`}
-        onClick={() => setOpen(o => !o)}
-      >
-        <span className="cl-type-select-label">
-          {selected.length === 0
-            ? 'Tous les types'
-            : selected.length === 1
-              ? selectedLabels[0]
-              : `${selected.length} types selectionnes`
-          }
-        </span>
-        {selected.length > 0 && <span className="cl-type-select-count">{selected.length}</span>}
-        <ChevronDown size={14} className="cl-type-select-chevron" />
-      </button>
-
-      {open && (
-        <div className="cl-type-select-menu">
-          <button
-            type="button"
-            className={`cl-type-select-option${selected.length === 0 ? ' cl-type-select-option--active' : ''}`}
-            onClick={() => onChange([])}
-          >
-            <span className="cl-type-select-check">{selected.length === 0 && <Check size={12} />}</span>
-            Tous les types
-          </button>
-          {types.map(t => {
-            const active = selected.includes(t.slug)
-            return (
-              <button
-                key={t._id}
-                type="button"
-                className={`cl-type-select-option${active ? ' cl-type-select-option--active' : ''}`}
-                onClick={() => toggle(t.slug)}
-              >
-                <span className="cl-type-select-check">{active && <Check size={12} />}</span>
-                <span>{t.name}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 function ArchiveConfirm({ client, onClose, onDone }) {
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
@@ -182,9 +108,35 @@ function DestroyConfirm({ client, onClose, onDone }) {
   )
 }
 
+/* ─── Prochain contrôle : date + urgence ─── */
+function daysUntil(value) {
+  const target = new Date(value)
+  const now = new Date()
+  const t = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+  const n = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return Math.round((t - n) / 86400000)
+}
+
+function NextControlCell({ date }) {
+  if (!date) return <span className="cell-muted">—</span>
+  const days  = daysUntil(date)
+  const level = days < 0 ? 'overdue' : days <= 30 ? 'soon' : 'ok'
+  const label = new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const hint  = days < 0
+    ? `Dépassé de ${Math.abs(days)} j`
+    : days === 0 ? "Aujourd'hui" : `Dans ${days} j`
+
+  return (
+    <span className={`next-ctrl next-ctrl--${level}`} title={hint}>
+      {label}
+    </span>
+  )
+}
+
 /* ─── Page principale ─── */
 const LIMIT = 15
 const CLIENTS_STATE_KEY = 'cardiotrack.clients.listState'
+const SORT_FIELDS = ['name', 'sites', 'deas', 'nextControl', 'contract', 'createdAt']
 
 function getSavedClientsState() {
   try {
@@ -199,12 +151,13 @@ export default function ClientsPage() {
   const savedState = useRef(getSavedClientsState())
   const [tab,        setTab]        = useState(savedState.current.tab || 'active')   // 'active' | 'archived'
   const [clients,    setClients]    = useState([])
-  const [types,      setTypes]      = useState([])
   const [total,      setTotal]      = useState(0)
   const [page,       setPage]       = useState(savedState.current.page || 1)
   const [search,     setSearch]     = useState(savedState.current.search || '')
-  const [typeFilter, setTypeFilter] = useState(Array.isArray(savedState.current.typeFilter) ? savedState.current.typeFilter : [])       // slugs, [] = tous
-  const [sortField,  setSortField]  = useState(savedState.current.sortField || 'createdAt')
+  // Les anciennes colonnes (ville, contact, téléphone) peuvent traîner en session.
+  const [sortField,  setSortField]  = useState(
+    SORT_FIELDS.includes(savedState.current.sortField) ? savedState.current.sortField : 'createdAt'
+  )
   const [sortDir,    setSortDir]    = useState(savedState.current.sortDir || 'desc')
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState('')
@@ -218,9 +171,6 @@ export default function ClientsPage() {
 
   const isArchived = tab === 'archived'
   const totalPages = Math.ceil(total / LIMIT)
-  const typeMap    = Object.fromEntries(types.map(t => [t.slug, t.name]))
-
-  useEffect(() => { getClientTypes().then(setTypes).catch(() => {}) }, [])
 
   const fetchClients = useCallback(async () => {
     setLoading(true)
@@ -228,7 +178,6 @@ export default function ClientsPage() {
     try {
       const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false', sort: sortField, dir: sortDir }
       if (search)     params.search = search
-      if (typeFilter.length) params.type = typeFilter.join(',')
       const res = await getClients(params)
       setClients(res.data)
       setTotal(res.total)
@@ -239,15 +188,15 @@ export default function ClientsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search, typeFilter, isArchived, sortField, sortDir])
+  }, [page, search, isArchived, sortField, sortDir])
 
   useEffect(() => { fetchClients() }, [fetchClients])
 
   useEffect(() => {
     sessionStorage.setItem(CLIENTS_STATE_KEY, JSON.stringify({
-      tab, page, search, typeFilter, sortField, sortDir, scrollTop: scrollTopRef.current,
+      tab, page, search, sortField, sortDir, scrollTop: scrollTopRef.current,
     }))
-  }, [tab, page, search, typeFilter, sortField, sortDir])
+  }, [tab, page, search, sortField, sortDir])
 
   useEffect(() => {
     if (loading || !tableWrapRef.current) return
@@ -257,12 +206,6 @@ export default function ClientsPage() {
   function setSearchFilter(value) {
     scrollTopRef.current = 0
     setSearch(value)
-    setPage(1)
-  }
-
-  function setTypeFilterAndReset(value) {
-    scrollTopRef.current = 0
-    setTypeFilter(value)
     setPage(1)
   }
 
@@ -298,7 +241,7 @@ export default function ClientsPage() {
   function saveScroll() {
     scrollTopRef.current = tableWrapRef.current?.scrollTop || 0
     sessionStorage.setItem(CLIENTS_STATE_KEY, JSON.stringify({
-      tab, page, search, typeFilter, sortField, sortDir, scrollTop: scrollTopRef.current,
+      tab, page, search, sortField, sortDir, scrollTop: scrollTopRef.current,
     }))
   }
 
@@ -317,7 +260,17 @@ export default function ClientsPage() {
     }
   }
 
-  function handleSaved()     { setModal(null);     fetchClients() }
+  // Après création, on enchaîne directement sur la fiche du client pour y
+  // ajouter ses sites et ses DEA.
+  function handleSaved(saved) {
+    setModal(null)
+    if (saved?._id) {
+      saveScroll()
+      navigate(`/clients/${saved._id}`)
+      return
+    }
+    fetchClients()
+  }
   function handleArchived()  { setArchiving(null); fetchClients() }
   function handleDestroyed() { setDestroying(null); fetchClients() }
 
@@ -366,14 +319,6 @@ export default function ClientsPage() {
             <button className="search-clear" onClick={() => setSearchFilter('')}><X size={13} /></button>
           )}
         </div>
-
-        {types.length > 0 && !isArchived && (
-          <ClientTypeSelector
-            types={types}
-            selected={typeFilter}
-            onChange={setTypeFilterAndReset}
-          />
-        )}
       </div>
 
       {/* Tableau */}
@@ -408,27 +353,27 @@ export default function ClientsPage() {
                     Client {sortMark('name')}
                   </button>
                 </th>
-                <th>
-                  <button className="th-sort-btn" onClick={() => toggleSort('type')}>
-                    Type {sortMark('type')}
+                <th style={{ width: 110 }}>
+                  <button className="th-sort-btn" onClick={() => toggleSort('sites')}>
+                    Sites {sortMark('sites')}
                   </button>
                 </th>
-                <th>
-                  <button className="th-sort-btn" onClick={() => toggleSort('governorate')}>
-                    Gouvernorat {sortMark('governorate')}
+                <th style={{ width: 110 }}>
+                  <button className="th-sort-btn" onClick={() => toggleSort('deas')}>
+                    DEA {sortMark('deas')}
                   </button>
                 </th>
-                <th>
-                  <button className="th-sort-btn" onClick={() => toggleSort('contactName')}>
-                    Contact {sortMark('contactName')}
+                <th style={{ width: 170 }}>
+                  <button className="th-sort-btn" onClick={() => toggleSort('nextControl')}>
+                    Prochain contrôle {sortMark('nextControl')}
                   </button>
                 </th>
-                <th>
-                  <button className="th-sort-btn" onClick={() => toggleSort('phone')}>
-                    Téléphone {sortMark('phone')}
+                <th style={{ width: 150 }}>
+                  <button className="th-sort-btn" onClick={() => toggleSort('contract')}>
+                    Contrat {sortMark('contract')}
                   </button>
                 </th>
-                <th style={{ width: isArchived ? 100 : 80 }}></th>
+                <th style={{ width: isArchived ? 100 : 60 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -439,13 +384,37 @@ export default function ClientsPage() {
                   onClick={() => openClient(c._id)}
                 >
                   <td>
-                    <div className="cell-primary cell-link">{c.name}</div>
-                    {c.address?.city && <div className="cell-secondary">{c.address.city}</div>}
+                    <div className="client-cell">
+                      <span className="client-thumb">
+                        {c.logo
+                          ? <img src={clientLogoUrl(c.logo)} alt="" />
+                          : <Building2 size={14} />}
+                      </span>
+                      <span className="cell-primary cell-link">{c.name}</span>
+                    </div>
                   </td>
-                  <td><span className="type-badge">{typeMap[c.type] || c.type}</span></td>
-                  <td className="cell-muted">{c.address?.governorate || '—'}</td>
-                  <td className="cell-muted">{c.contacts?.[0]?.name  || '—'}</td>
-                  <td className="cell-muted">{c.contacts?.[0]?.phone || '—'}</td>
+                  <td>
+                    <span className="count-pill">
+                      <Building2 size={11} /> {c.siteCount || 0}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="count-pill count-pill--green">
+                      <HeartPulse size={11} /> {c.deaCount || 0}
+                    </span>
+                  </td>
+                  <td><NextControlCell date={c.nextControlDate} /></td>
+                  <td>
+                    {c.underContract ? (
+                      <span className="contract-badge contract-badge--on">
+                        <CheckCircle2 size={12} /> Sous contrat
+                      </span>
+                    ) : (
+                      <span className="contract-badge contract-badge--off">
+                        <MinusCircle size={12} /> Hors contrat
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <div className="row-actions">
                       {isArchived ? (
@@ -466,14 +435,9 @@ export default function ClientsPage() {
                           </button>
                         </>
                       ) : (
-                        <>
-                          <button className="action-btn action-btn--edit" title="Modifier" onClick={e => { e.stopPropagation(); setModal(c) }}>
-                            <Pencil size={14} />
-                          </button>
-                          <button className="action-btn action-btn--delete" title="Archiver" onClick={e => { e.stopPropagation(); setArchiving(c) }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </>
+                        <button className="action-btn action-btn--delete" title="Archiver" onClick={e => { e.stopPropagation(); setArchiving(c) }}>
+                          <Trash2 size={14} />
+                        </button>
                       )}
                     </div>
                   </td>
@@ -498,9 +462,9 @@ export default function ClientsPage() {
       )}
 
       {/* Modals */}
-      {(modal === 'create' || modal?._id) && (
+      {modal === 'create' && (
         <ClientModal
-          client={modal === 'create' ? null : modal}
+          client={null}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

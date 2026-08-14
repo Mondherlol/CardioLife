@@ -1,5 +1,19 @@
 const Appointment = require('../models/Appointment')
 
+/**
+ * Le technicien exécute le planning, il ne l'établit pas : les rendez-vous lui
+ * sont assignés par le bureau. Il garde la lecture, pour voir ses journées.
+ */
+function isTechnicien(user) {
+  return user.role === 'technicien'
+}
+
+function refusePlanning(res) {
+  return res.status(403).json({
+    message: 'Les rendez-vous sont planifiés par le bureau.',
+  })
+}
+
 async function getAll(req, res) {
   try {
     const { start, end, type, status, client } = req.query
@@ -29,6 +43,8 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
+    if (isTechnicien(req.user)) return refusePlanning(res)
+
     const { title, start, end, allDay, type, status, description, client, clientName, installation, assignedTo } = req.body
     if (!title || !start) return res.status(422).json({ message: 'Titre et date de début requis.' })
 
@@ -48,6 +64,9 @@ async function create(req, res) {
 
 async function update(req, res) {
   try {
+    // Déplacer ou modifier un rendez-vous relève de la même autorité que le créer.
+    if (isTechnicien(req.user)) return refusePlanning(res)
+
     const appt = await Appointment.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -62,6 +81,8 @@ async function update(req, res) {
 
 async function remove(req, res) {
   try {
+    if (isTechnicien(req.user)) return refusePlanning(res)
+
     const appt = await Appointment.findByIdAndDelete(req.params.id)
     if (!appt) return res.status(404).json({ message: 'Rendez-vous introuvable.' })
     res.json({ message: 'Supprimé.' })

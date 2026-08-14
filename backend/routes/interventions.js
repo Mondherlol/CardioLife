@@ -14,6 +14,7 @@ router.put('/:id', ctrl.update)
 
 router.patch('/:id/rapport', ctrl.submitRapport)
 router.patch('/:id/fiche',   ctrl.saveFiche)
+router.delete('/:id/fiche/:deaId', ctrl.removeFiche)
 router.patch('/:id/close',   ctrl.closeIntervention)
 
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)

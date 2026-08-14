@@ -1,119 +1,46 @@
+const mongoose = require('mongoose')
 const { validationResult } = require('express-validator')
 const Contract     = require('../models/Contract')
-const Installation = require('../models/Installation')
+const Client       = require('../models/Client')
+const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
+const { listInstallations } = require('../utils/deaParc')
+const { syncContractControls, syncSiteNextControl } = require('../utils/controls')
 
-const { TYPES, STATUSES } = Contract
+const { STATUSES } = Contract
 
-/* Génère les contrôles périodiques du contrat, de startDate → endDate, sans
-   technicien assigné (l'admin l'affectera plus tard). */
-async function generateControls(contract, userId) {
-  const { startDate, endDate, controlPeriodicity, client, clientName } = contract
-  if (!startDate || !endDate || !['semestriel', 'annuel'].includes(controlPeriodicity)) return
-
-  const interval = controlPeriodicity === 'annuel' ? 12 : 6
-  const end = new Date(endDate)
-  const today = new Date(); today.setHours(0, 0, 0, 0)   // on ne génère rien avant aujourd'hui
-  const d   = new Date(startDate)
-  d.setHours(9, 0, 0, 0)                // heure par défaut des contrôles générés
-  d.setMonth(d.getMonth() + interval)   // premier contrôle : début + période
-
-  const docs = []
-  let guard = 0
-  while (d <= end && guard < 60) {
-    // On saute les échéances déjà passées (inutile de créer un contrôle en retard)
-    if (d >= today) {
-      docs.push({
-        client:        client || undefined,
-        clientName:    clientName || undefined,
-        contract:      contract._id,
-        controlType:   controlPeriodicity,
-        scheduledDate: new Date(d),
-        status:        'planifie',
-        history: [{ action: 'creation', user: userId, details: 'Contrôle généré automatiquement par le contrat' }],
-        createdBy:     userId,
-      })
-    }
-    d.setMonth(d.getMonth() + interval)
-    guard++
-  }
-  if (docs.length) await Intervention.insertMany(docs)
+/* Un client est « sous contrat » dès qu'un de ses sites l'est. Le drapeau est
+   dénormalisé sur la fiche client : listes et tableau de bord le lisent
+   directement. */
+async function syncClientContractFlag(clientId) {
+  if (!clientId) return
+  const n = await Contract.countDocuments({ client: clientId, isActive: true, status: 'actif' })
+  await Client.findByIdAndUpdate(clientId, { underContract: n > 0 })
 }
 
-/* ── Helpers ──────────────────────────────────────────── */
-
-function computeEstimatedValue(lineItems = [], services = []) {
-  const itemsTotal = lineItems.reduce((sum, it) =>
-    sum + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 1), 0)
-  const servicesTotal = services.reduce((sum, s) => sum + (Number(s.price) || 0), 0)
-  return itemsTotal + servicesTotal
-}
-
-// Nettoie un brouillon d'installation reçu du frontend vers le schéma Installation.
-function sanitizeInstallation(inst, clientId, clientName) {
-  return {
-    client:     clientId || inst.client || undefined,
-    clientName: inst.clientName || clientName || '—',
-    address:    (inst.address || '').trim() || '—',
-    location:   (inst.location || '').trim() || undefined,
-    installationDate: inst.installationDate || undefined,
-    nextControlDate:  inst.nextControlDate  || undefined,
-    controlType: inst.controlType || undefined,
-    deviceProduct: inst.deviceProduct || undefined,
-    deviceType:    inst.deviceType || undefined,
-    serialNumber:  (inst.serialNumber || '').trim() || undefined,
-    batteries: Array.isArray(inst.batteries) ? inst.batteries.map(b => ({
-      product:        b.product || undefined,
-      productName:    b.productName || undefined,
-      expiryDate:     b.expiryDate || undefined,
-      activationDate: b.activationDate || undefined,
-      level:          b.level != null && b.level !== '' ? Number(b.level) : undefined,
-      notes:          b.notes || undefined,
-    })) : [],
-    electrodes: Array.isArray(inst.electrodes) ? inst.electrodes.map(e => ({
-      product:     e.product || undefined,
-      productName: e.productName || undefined,
-      expiryDate:  e.expiryDate || undefined,
-      notes:       e.notes || undefined,
-    })) : [],
-    notes: inst.notes || undefined,
-  }
-}
-
-function sanitizeLineItems(items) {
-  return (Array.isArray(items) ? items : [])
-    .filter(it => it && (it.product || it.productName))
-    .map(it => ({
-      product:     it.product || undefined,
-      productName: it.productName?.trim() || undefined,
-      category:    it.category || undefined,
-      quantity:    Math.max(1, Number(it.quantity) || 1),
-      unitPrice:   Math.max(0, Number(it.unitPrice) || 0),
-      fromPack:    it.fromPack || undefined,
-    }))
-}
-
-function sanitizeServices(services) {
-  return (Array.isArray(services) ? services : [])
-    .filter(s => s && s.name?.trim())
-    .map(s => ({
-      name:     s.name.trim(),
-      price:    Math.max(0, Number(s.price) || 0),
-      fromPack: s.fromPack || undefined,
-    }))
-}
-
-function sanitizePacks(packs) {
-  return (Array.isArray(packs) ? packs : [])
-    .filter(p => p && p.pack)
-    .map(p => ({ pack: p.pack, name: p.name?.trim() || undefined }))
-}
+/* Le calendrier des visites vit dans utils/controls : il dépend de la date de
+   pose des appareils, pas seulement du contrat, et se recalcule aussi quand le
+   parc du site change. */
 
 const POPULATE = [
   { path: 'client', select: 'name type address' },
-  { path: 'installations', select: 'clientName address location deviceType serialNumber installationDate nextControlDate status scheduledDate technicianName' },
+  { path: 'site',   select: 'name address' },
   { path: 'createdBy', select: 'username fullName' },
 ]
+
+/* ── DAE couverts ──────────────────────────────────────────────
+   Le contenu du contrat n'est pas saisi : ce sont les DAE installés sur le
+   site, lus dans le parc au moment de l'affichage. */
+
+async function deaCountsBySite(siteIds) {
+  const ids = siteIds.filter(Boolean).map(id => new mongoose.Types.ObjectId(String(id)))
+  if (!ids.length) return {}
+  const rows = await Site.aggregate([
+    { $match: { _id: { $in: ids } } },
+    { $project: { n: { $size: { $ifNull: ['$deas', []] } } } },
+  ])
+  return Object.fromEntries(rows.map(r => [String(r._id), r.n]))
+}
 
 /* ── Génération du numéro de contrat ──────────────────── */
 async function generateNumber(req, res) {
@@ -140,17 +67,18 @@ async function getStats(req, res) {
 
 /* ── Liste ────────────────────────────────────────────── */
 async function getAll(req, res) {
-  const { search, status, type, client, page = 1, limit = 20, archived = 'false' } = req.query
+  const { search, status, type, client, site, page = 1, limit = 20, archived = 'false' } = req.query
 
   const filter = { isActive: archived === 'true' ? false : true }
   if (status) filter.status = status
   if (type)   filter.type   = type
   if (client) filter.client = client
+  if (site)   filter.site   = site
   const q = search?.trim() || ''
   if (q) {
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = { $regex: escaped, $options: 'i' }
-    filter.$or = [{ contractNumber: re }, { clientName: re }]
+    filter.$or = [{ contractNumber: re }, { clientName: re }, { siteName: re }]
   }
 
   const skip  = (Number(page) - 1) * Number(limit)
@@ -160,6 +88,7 @@ async function getAll(req, res) {
     .skip(skip)
     .limit(Number(limit))
     .populate(POPULATE)
+    .lean()
 
   // Prochain contrôle par contrat (contrôle non terminé le plus proche)
   const ids = data.map(c => c._id)
@@ -168,16 +97,19 @@ async function getAll(req, res) {
     { $group: { _id: '$contract', next: { $min: '$scheduledDate' } } },
   ])
   const nextMap = Object.fromEntries(nextControls.map(n => [String(n._id), n.next]))
-  const withNext = data.map(c => ({ ...c.toObject(), nextControlDate: nextMap[String(c._id)] || null }))
+  const deaCounts = await deaCountsBySite(data.map(c => c.site?._id || c.site))
 
-  res.json({ data: withNext, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
+  const rows = data.map(c => ({
+    ...c,
+    nextControlDate: nextMap[String(c._id)] || null,
+    deaCount: deaCounts[String(c.site?._id || c.site)] || 0,
+  }))
+
+  res.json({ data: rows, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
 }
 
 async function getById(req, res) {
-  const contract = await Contract.findById(req.params.id)
-    .populate(POPULATE)
-    .populate({ path: 'lineItems.product', select: 'name category reference images' })
-    .populate({ path: 'packs.pack', select: 'name' })
+  const contract = await Contract.findById(req.params.id).populate(POPULATE).lean()
   if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
 
   // Contrôles liés à ce contrat (interventions générées / manuelles)
@@ -187,7 +119,12 @@ async function getById(req, res) {
     .populate('technicien', 'fullName username')
     .lean()
 
-  res.json({ ...contract.toObject(), controls })
+  // DAE couverts : le parc du site au moment de la consultation.
+  const all  = await listInstallations({ client: contract.client?._id || contract.client })
+  const sid  = String(contract.site?._id || contract.site || '')
+  const installations = all.filter(i => String(i.site?._id || '') === sid)
+
+  res.json({ ...contract, installations, controls })
 }
 
 /* ── Création ─────────────────────────────────────────── */
@@ -197,34 +134,57 @@ async function create(req, res) {
 
   const b = req.body
 
-  // Les installations ne sont PAS créées automatiquement : elles se planifient
-  // depuis la fiche du contrat (section « Installations couvertes »).
-  const existing  = Array.isArray(b.existingInstallations) ? b.existingInstallations : []
-  const lineItems = sanitizeLineItems(b.lineItems)
-  const services  = sanitizeServices(b.services)
+  if (!b.site) return res.status(422).json({ message: 'Le site à couvrir est requis.' })
+
+  const site = await Site.findById(b.site).select('name client deas')
+  if (!site) return res.status(404).json({ message: 'Site introuvable.' })
+
+  // Un contrat de maintenance porte sur du matériel : sans appareil posé, il
+  // n'y a rien à contrôler et le calendrier des visites n'aurait pas d'objet.
+  if (!site.deas?.length) {
+    return res.status(422).json({
+      message: `Aucun DAE sur le site « ${site.name} » : posez au moins un appareil avant de créer son contrat.`,
+    })
+  }
+
+  const client = await Client.findById(site.client).select('name')
+  if (!client) return res.status(404).json({ message: 'Client introuvable.' })
+
+  // Un site n'a qu'un contrat en cours à la fois.
+  const existing = await Contract.findOne({ site: site._id, isActive: true, status: 'actif' })
+  if (existing) {
+    return res.status(409).json({
+      message: `Le site « ${site.name} » a déjà un contrat actif (${existing.contractNumber || 'sans numéro'}).`,
+    })
+  }
+
+  // Un contrat court un an par défaut : la création ne demande que le numéro.
+  const startDate = b.startDate ? new Date(b.startDate) : new Date()
+  const endDate   = b.endDate ? new Date(b.endDate) : (() => {
+    const d = new Date(startDate)
+    d.setFullYear(d.getFullYear() + 1)
+    return d
+  })()
 
   const contract = await Contract.create({
     contractNumber: b.contractNumber?.trim() || undefined,
-    client:     b.client,
-    clientName: b.clientName?.trim() || undefined,
+    site:       site._id,
+    siteName:   site.name,
+    client:     client._id,
+    clientName: client.name,
     type:       'maintenance',   // les contrats sont toujours de maintenance
     status:     STATUSES.includes(b.status) ? b.status : 'actif',
-    startDate:  b.startDate || undefined,
-    endDate:    b.endDate   || undefined,
-    controlPeriodicity: ['semestriel', 'annuel'].includes(b.controlPeriodicity) ? b.controlPeriodicity : '',
-    installations: existing,
-    packs:      sanitizePacks(b.packs),
-    lineItems,
-    services,
-    estimatedValue: computeEstimatedValue(lineItems, services),
+    startDate,
+    endDate,
     notes:      b.notes?.trim() || undefined,
     createdBy:  req.user._id,
   })
 
-  // Génère les prochains contrôles jusqu'à l'échéance
-  await generateControls(contract, req.user._id)
+  // Planifie les visites : tous les six mois depuis la pose, jusqu'à l'échéance
+  await syncContractControls(contract, req.user._id)
+  await syncClientContractFlag(contract.client)
 
-  const populated = await Contract.findById(contract._id).populate(POPULATE)
+  const populated = await Contract.findById(contract._id).populate(POPULATE).lean()
   res.status(201).json(populated)
 }
 
@@ -237,40 +197,28 @@ async function update(req, res) {
   if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
 
   const b = req.body
-
-  // Crée d'éventuelles nouvelles installations (packs/produits ajoutés à l'édition)
-  const createdIds = []
-  if (Array.isArray(b.newInstallations)) {
-    for (const draft of b.newInstallations) {
-      const created = await Installation.create({
-        ...sanitizeInstallation(draft, b.client || contract.client, b.clientName || contract.clientName),
-        createdBy: req.user._id,
-      })
-      createdIds.push(created._id)
-    }
+  const before = {
+    start: contract.startDate?.getTime(),
+    end:   contract.endDate?.getTime(),
   }
-  // `installations` = IDs existants conservés côté frontend
-  const kept = Array.isArray(b.installations) ? b.installations : contract.installations
 
   if (b.contractNumber !== undefined) contract.contractNumber = b.contractNumber?.trim() || undefined
-  if (b.client)     contract.client     = b.client
-  if (b.clientName !== undefined) contract.clientName = b.clientName?.trim() || undefined
-  if (b.type   && TYPES.includes(b.type))       contract.type   = b.type
-  if (b.status && STATUSES.includes(b.status))  contract.status = b.status
+  if (b.status && STATUSES.includes(b.status)) contract.status = b.status
   if (b.startDate !== undefined) contract.startDate = b.startDate || undefined
   if (b.endDate   !== undefined) contract.endDate   = b.endDate   || undefined
-  if (b.controlPeriodicity !== undefined)
-    contract.controlPeriodicity = ['semestriel', 'annuel'].includes(b.controlPeriodicity) ? b.controlPeriodicity : ''
-  if (b.packs     !== undefined) contract.packs     = sanitizePacks(b.packs)
-  if (b.lineItems !== undefined) contract.lineItems = sanitizeLineItems(b.lineItems)
-  if (b.services  !== undefined) contract.services  = sanitizeServices(b.services)
   if (b.notes     !== undefined) contract.notes     = b.notes?.trim() || undefined
 
-  contract.installations = [...kept, ...createdIds]
-  contract.estimatedValue = computeEstimatedValue(contract.lineItems, contract.services)
-
   await contract.save()
-  const populated = await Contract.findById(contract._id).populate(POPULATE)
+
+  // Un changement de période redécoupe les échéances : les visites encore à
+  // venir sont réalignées, celles déjà réalisées sont conservées telles quelles.
+  const datesChanged = before.start !== contract.startDate?.getTime()
+                    || before.end   !== contract.endDate?.getTime()
+  if (datesChanged) await syncContractControls(contract, req.user._id)
+
+  await syncClientContractFlag(contract.client)
+
+  const populated = await Contract.findById(contract._id).populate(POPULATE).lean()
   res.json(populated)
 }
 
@@ -280,6 +228,8 @@ async function archive(req, res) {
   if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
   contract.isActive = false
   await contract.save()
+  await syncClientContractFlag(contract.client)
+  await syncSiteNextControl(contract.site)
   res.json({ message: 'Contrat archivé.' })
 }
 
@@ -288,6 +238,8 @@ async function restore(req, res) {
   if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
   contract.isActive = true
   await contract.save()
+  await syncClientContractFlag(contract.client)
+  await syncContractControls(contract, req.user._id)
   res.json({ message: 'Contrat restauré.' })
 }
 
@@ -297,8 +249,9 @@ async function permanentDelete(req, res) {
   if (contract.isActive) {
     return res.status(400).json({ message: "Archivez d'abord le contrat avant de le supprimer définitivement." })
   }
-  // On ne supprime pas les installations : elles restent dans le parc.
+  // On ne supprime pas les DAE : ils restent dans le parc du client.
   await contract.deleteOne()
+  await syncClientContractFlag(contract.client)
   res.json({ message: 'Contrat supprimé définitivement.' })
 }
 

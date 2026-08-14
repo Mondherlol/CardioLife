@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Monitor, Users, MoreHorizontal, Plus, Pencil, Trash2,
   KeyRound, Power, X, Eye, EyeOff, ShieldOff,
-  CheckCircle2, AlertTriangle, HardDrive, Save,
+  CheckCircle2, AlertTriangle, HardDrive, Save, Boxes,
+  ChevronUp, ChevronDown,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
@@ -11,13 +12,19 @@ import {
 } from '../api/users'
 import { getAppSettings, updateAppSettings } from '../api/appSettings'
 import { getFolderTree } from '../api/documents'
+import {
+  getProductCategories, deleteProductCategory, reorderProductCategories,
+} from '../api/productCategories'
+import { categoryIcon } from '../constants/categoryIcons'
+import CategoryModal from '../components/CategoryModal'
 
 /* ─── Constants ─────────────────────────────────────────────── */
 
 const TABS = [
-  { id: 'systeme',       label: 'Système',       icon: Monitor },
-  { id: 'utilisateurs',  label: 'Utilisateurs',  icon: Users },
-  { id: 'autres',        label: 'Autres',        icon: MoreHorizontal },
+  { id: 'systeme',       label: 'Système',            icon: Monitor },
+  { id: 'utilisateurs',  label: 'Utilisateurs',       icon: Users },
+  { id: 'categories',    label: 'Catégories produits', icon: Boxes },
+  { id: 'autres',        label: 'Autres',             icon: MoreHorizontal },
 ]
 
 const ROLES = ['admin', 'technicien', 'commercial', 'assistante', 'readonly']
@@ -685,6 +692,149 @@ function SystemeTab() {
   )
 }
 
+/* ─── Catégories produits ───────────────────────────────────── */
+
+function CategoriesTab() {
+  const [categories, setCategories] = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [modal,      setModal]      = useState(null)   // null | 'create' | category
+  const [deleting,   setDeleting]   = useState(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await getProductCategories({ withStats: 'true' })
+      setCategories(Array.isArray(data) ? data : [])
+    } catch (err) {
+      toast.error(err.message || 'Chargement impossible.')
+    } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  /* L'ordre défini ici est celui des cartes sur la page Stock. */
+  async function move(index, delta) {
+    const next = [...categories]
+    const target = index + delta
+    if (target < 0 || target >= next.length) return
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setCategories(next)
+    try {
+      await reorderProductCategories(next.map(c => c._id))
+    } catch (err) {
+      toast.error(err.message || 'Réordonnancement impossible.')
+      load()
+    }
+  }
+
+  async function confirmDelete() {
+    try {
+      await deleteProductCategory(deleting._id)
+      toast.success('Catégorie supprimée.')
+      setDeleting(null)
+      load()
+    } catch (err) {
+      toast.error(err.message || 'Suppression impossible.')
+    }
+  }
+
+  return (
+    <>
+      <div className="sp-section-head">
+        <div>
+          <h2 className="sp-section-title">Catégories produits</h2>
+          <p className="sp-section-desc">
+            Nom, icône, couleur et traçabilité des catégories affichées sur la page Stock.
+          </p>
+        </div>
+        <button className="btn btn--primary" onClick={() => setModal('create')}>
+          <Plus size={15} /> Nouvelle catégorie
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="table-loading"><span className="spinner" /></div>
+      ) : (
+        <div className="cat-settings-list">
+          {categories.map((c, i) => {
+            const Icon = categoryIcon(c.icon)
+            return (
+              <div key={c._id} className="cat-settings-row">
+                <div className="cat-settings-order">
+                  <button className="cat-order-btn" disabled={i === 0} onClick={() => move(i, -1)} title="Monter">
+                    <ChevronUp size={13} />
+                  </button>
+                  <button className="cat-order-btn" disabled={i === categories.length - 1} onClick={() => move(i, 1)} title="Descendre">
+                    <ChevronDown size={13} />
+                  </button>
+                </div>
+
+                <span className={`cat-settings-icon cat--${c.color}`}>
+                  {c.image ? <img src={c.image} alt="" /> : <Icon size={18} strokeWidth={1.7} />}
+                </span>
+
+                <div className="cat-settings-body">
+                  <div className="cat-settings-name">{c.name}</div>
+                  <div className="cat-settings-meta">
+                    <code>{c.slug}</code>
+                    <span>{c.stats?.products ?? 0} produit{(c.stats?.products ?? 0) !== 1 ? 's' : ''}</span>
+                    {c.tracksSerial && <span className="track-badge">N° série</span>}
+                    {c.tracksLot    && <span className="track-badge track-badge--lot">N° lot</span>}
+                  </div>
+                </div>
+
+                <div className="row-actions">
+                  <button className="action-btn action-btn--edit" title="Modifier" onClick={() => setModal(c)}>
+                    <Pencil size={14} />
+                  </button>
+                  <button className="action-btn action-btn--delete" title="Supprimer" onClick={() => setDeleting(c)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+          {categories.length === 0 && (
+            <div className="sp-placeholder">
+              <Boxes size={40} strokeWidth={1.2} />
+              <p style={{ marginTop: 12 }}>Aucune catégorie configurée.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {modal && (
+        <CategoryModal
+          category={modal === 'create' ? null : modal}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); load() }}
+        />
+      )}
+
+      {deleting && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setDeleting(null)}>
+          <div className="modal modal--sm">
+            <div className="modal-header">
+              <h2 className="modal-title">Supprimer la catégorie</h2>
+              <button className="modal-close" onClick={() => setDeleting(null)}><X size={18} /></button>
+            </div>
+            <div className="modal-body">
+              <p className="delete-confirm-text">
+                Supprimer <strong>{deleting.name}</strong> ? La suppression est refusée tant que des
+                produits y sont rattachés.
+              </p>
+              <div className="modal-footer">
+                <button className="btn btn--ghost" onClick={() => setDeleting(null)}>Annuler</button>
+                <button className="btn btn--danger" onClick={confirmDelete}>Supprimer</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 function AutresTab() {
   return (
     <>
@@ -726,6 +876,7 @@ export default function SettingsPage() {
       <div className="sp-content">
         {activeTab === 'systeme'      && <SystemeTab />}
         {activeTab === 'utilisateurs' && <UtilisateursTab currentUser={currentUser} />}
+        {activeTab === 'categories'   && <CategoriesTab />}
         {activeTab === 'autres'       && <AutresTab />}
       </div>
     </div>
