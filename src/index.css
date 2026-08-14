@@ -19343,3 +19343,86 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
   .nodea-resa-actions { width: 100%; }
   .nodea-resa-actions .btn { flex: 1; justify-content: center; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   PARAMÈTRES — zone dangereuse (super admin).
+   Le rouge n'est pas décoratif : il marque ce qui ne se défait pas.
+   ═══════════════════════════════════════════════════════════════ */
+
+.sp-danger {
+  border: 1px solid var(--red-200, #fecaca);
+  background: var(--red-50);
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+
+.sp-danger-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--red-600);
+}
+.sp-danger-head svg { flex-shrink: 0; margin-top: 2px; }
+
+.sp-danger-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--red-600);
+  margin: 0;
+}
+
+.sp-danger-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 0;
+}
+
+.sp-danger-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+}
+
+.sp-danger-row-text {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sp-danger-row-text strong { font-size: 13px; color: var(--text-primary); }
+.sp-danger-row-text span { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+
+/* ── Modale de réinitialisation ───────────────────────────────── */
+.sp-reset-keep {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--green-50);
+  color: var(--green-700);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sp-reset-keep svg { flex-shrink: 0; margin-top: 2px; }
+
+.sp-reset-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  cursor: pointer;
+}
+.sp-reset-opt input { margin-top: 2px; flex-shrink: 0; }

@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   getUsers, createUser, updateUser, resetUserPassword, deleteUser,
 } from '../api/users'
-import { getAppSettings, updateAppSettings } from '../api/appSettings'
+import { getAppSettings, updateAppSettings, resetDatabase } from '../api/appSettings'
 import { getFolderTree } from '../api/documents'
 import {
   getProductCategories, deleteProductCategory, reorderProductCategories,
@@ -835,15 +835,137 @@ function CategoriesTab() {
   )
 }
 
-function AutresTab() {
+/* ─── Réinitialisation de la base ───────────────────────────── */
+
+const RESET_PHRASE = 'REINITIALISER'
+
+/**
+ * Le geste est irréversible : il demande la phrase exacte, énumère ce qui va
+ * disparaître, et rappelle ce qui survit. Un simple « Êtes-vous sûr ? » ne
+ * suffirait pas pour une action de cette portée.
+ */
+function ResetDbModal({ onClose, onDone }) {
+  const [phrase,  setPhrase]  = useState('')
+  const [keepFiles, setKeepFiles] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
+
+  const armed = phrase.trim().toUpperCase() === RESET_PHRASE
+
+  async function confirm() {
+    setLoading(true)
+    setError('')
+    try {
+      const res = await resetDatabase({ confirm: RESET_PHRASE, keepFiles })
+      const total = Object.values(res.deleted || {}).reduce((n, v) => n + v, 0)
+      toast.success(`Base réinitialisée — ${total} enregistrement${total > 1 ? 's' : ''} supprimé${total > 1 ? 's' : ''}.`)
+      onDone()
+    } catch (err) {
+      setError(err.message || 'La réinitialisation a échoué.')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--sm">
+        <div className="modal-header">
+          <h2 className="modal-title"><AlertTriangle size={16} /> Réinitialiser la base</h2>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          <p className="delete-confirm-text">
+            Toutes les données saisies seront <strong>définitivement supprimées</strong> :
+            clients, sites et parc DAE, contrats, contrôles et fiches, formations,
+            remplacements, planning, stock, produits et documents.
+          </p>
+
+          <div className="sp-reset-keep">
+            <CheckCircle2 size={13} />
+            <span>Les <strong>comptes utilisateurs</strong> et les réglages de
+            l'application sont conservés.</span>
+          </div>
+
+          <label className="sp-reset-opt">
+            <input type="checkbox" checked={keepFiles}
+              onChange={e => setKeepFiles(e.target.checked)} />
+            <span>Conserver les fichiers déjà téléversés (photos, documents, logos).
+              Sans cette option, ils sont effacés du serveur — plus rien ne les
+              désignerait.</span>
+          </label>
+
+          <div className="form-group">
+            <label className="form-label">
+              Tapez <strong>{RESET_PHRASE}</strong> pour confirmer
+            </label>
+            <input className="form-input form-input--plain" value={phrase}
+              onChange={e => setPhrase(e.target.value)}
+              placeholder={RESET_PHRASE} autoFocus autoComplete="off" />
+          </div>
+
+          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
+
+          <div className="modal-footer">
+            <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
+            <button className="btn btn--danger" onClick={confirm} disabled={!armed || loading}>
+              {loading ? <span className="login-btn-spinner" /> : <><Trash2 size={14} /> Tout effacer</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AutresTab({ currentUser }) {
+  const [resetOpen, setResetOpen] = useState(false)
+  const isSuper = currentUser?.role === 'superadmin'
+
   return (
     <>
       <h2 className="sp-section-title">Autres</h2>
       <p className="sp-section-desc">Paramètres divers.</p>
-      <div className="sp-placeholder">
-        <MoreHorizontal size={40} strokeWidth={1.2} />
-        <p style={{ marginTop: 12 }}>Aucun paramètre disponible pour l'instant.</p>
-      </div>
+
+      {isSuper ? (
+        <div className="sp-danger">
+          <div className="sp-danger-head">
+            <ShieldOff size={16} />
+            <div>
+              <h3 className="sp-danger-title">Zone dangereuse</h3>
+              <p className="sp-danger-desc">
+                Réservé au Super Admin. Ces actions ne se défont pas.
+              </p>
+            </div>
+          </div>
+
+          <div className="sp-danger-row">
+            <div className="sp-danger-row-text">
+              <strong>Réinitialiser la base</strong>
+              <span>
+                Efface toutes les données métier — clients, parc, contrats, contrôles,
+                formations, stock, documents. Les comptes utilisateurs sont conservés.
+              </span>
+            </div>
+            <button className="btn btn--danger" onClick={() => setResetOpen(true)}>
+              <Trash2 size={14} /> Réinitialiser
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="sp-placeholder">
+          <MoreHorizontal size={40} strokeWidth={1.2} />
+          <p style={{ marginTop: 12 }}>Aucun paramètre disponible pour l'instant.</p>
+        </div>
+      )}
+
+      {resetOpen && (
+        <ResetDbModal
+          onClose={() => setResetOpen(false)}
+          // Tout ce qui est en mémoire dans l'application vient d'être effacé :
+          // on repart d'une page propre plutôt que d'écrans qui mentent.
+          onDone={() => { setResetOpen(false); window.location.assign('/dashboard') }}
+        />
+      )}
     </>
   )
 }
@@ -877,7 +999,7 @@ export default function SettingsPage() {
         {activeTab === 'systeme'      && <SystemeTab />}
         {activeTab === 'utilisateurs' && <UtilisateursTab currentUser={currentUser} />}
         {activeTab === 'categories'   && <CategoriesTab />}
-        {activeTab === 'autres'       && <AutresTab />}
+        {activeTab === 'autres'       && <AutresTab currentUser={currentUser} />}
       </div>
     </div>
   )
