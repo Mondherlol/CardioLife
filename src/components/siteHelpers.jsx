@@ -42,6 +42,34 @@ export function itemsStatus(items) {
   return { level, count: items.length, soonest, days }
 }
 
+/**
+ * Échéance du prochain contrôle, colorée par son urgence et cliquable pour la
+ * corriger. Le calcul automatique part de la pose : sur un parc ancien il tombe
+ * souvent à côté, la date doit donc rester rattrapable ici, sans quitter la
+ * fiche du client.
+ */
+export function NextControlChip({ dea, onClick }) {
+  const date  = dea?.nextControlDate
+  const days  = daysUntil(date)
+  const level = !date ? 'none' : days < 0 ? 'expired' : days <= 30 ? 'soon' : 'ok'
+
+  const title = !date
+    ? 'Aucune échéance — cliquez pour en fixer une'
+    : `${days < 0 ? `En retard de ${Math.abs(days)} j` : days === 0 ? "Aujourd'hui" : `Dans ${days} j`}`
+      + `${dea.nextControlManual ? ' · date fixée à la main' : ''} — cliquez pour modifier`
+
+  return (
+    <button type="button" className={`ctrl-chip ctrl-chip--${level}`} title={title}
+      onClick={e => { e.stopPropagation(); onClick() }}>
+      <CalendarClock size={11} />
+      {date
+        ? <span className="ctrl-chip-date">{formatDate(date)}</span>
+        : <span className="ctrl-chip-date ctrl-chip-date--none">À fixer</span>}
+      {dea?.nextControlManual && <span className="ctrl-chip-manual" title="Fixée à la main">·</span>}
+    </button>
+  )
+}
+
 /** Contenu commun aux deux pastilles de consommables. */
 function itemsChipParts(kind, items, full) {
   const st    = itemsStatus(items)

@@ -121,6 +121,9 @@ const interventionSchema = new Schema({
 
   status:        { type: String, enum: ['planifie','en_cours','termine'], default: 'planifie' },
   scheduledDate: Date,
+  /* Date déplacée à la main (fiche client). Le calendrier du contrat ne la
+     réaligne plus : une reprise de parc ancien vaut mieux que la règle. */
+  manualDate:    { type: Boolean, default: false },
   completedDate: Date,
 
   rapport:  { type: rapportSchema, default: () => ({}) },

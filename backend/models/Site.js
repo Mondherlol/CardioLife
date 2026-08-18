@@ -47,6 +47,10 @@ const deaSchema = new mongoose.Schema({
 
   installationDate: Date,
   nextControlDate:  Date,
+  /* Échéance fixée à la main depuis la fiche client. Le calendrier du contrat
+     ne la recalcule plus : le terrain sait mieux que la règle des six mois où
+     en est un parc repris des années après sa pose. */
+  nextControlManual: { type: Boolean, default: false },
 
   electrodes: { type: [electrodeSchema], default: [] },
   batteries:  { type: [batterySchema],   default: [] },

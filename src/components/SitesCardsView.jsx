@@ -1,7 +1,8 @@
 import {
-  Phone, Mail, Building2, MapPin, HeartPulse, Hash, CalendarDays, ArrowUpRight, Plus,
+  Phone, Mail, Building2, MapPin, HeartPulse, Hash, CalendarDays, CalendarClock,
+  ArrowUpRight, Plus,
 } from 'lucide-react'
-import { formatDate, ItemsButton, ContractChip, NoDeaBox } from './siteHelpers'
+import { formatDate, ItemsButton, ContractChip, NoDeaBox, NextControlChip } from './siteHelpers'
 
 /* Une ligne d'information d'un DEA : icône, libellé, valeur. */
 function DeaField({ icon: Icon, label, children }) {
@@ -48,6 +49,11 @@ function DeaCard({ site, dea, index, total, act }) {
           {dea.installationDate
             ? <span className="dea-date">{formatDate(dea.installationDate)}</span>
             : <span className="site-cell-empty">—</span>}
+        </DeaField>
+        {/* L'échéance se corrige ici : le calcul part de la pose et tombe à
+            côté sur un parc repris longtemps après son installation. */}
+        <DeaField icon={CalendarClock} label="Prochain contrôle">
+          <NextControlChip dea={dea} onClick={() => act.editControl(site, dea)} />
         </DeaField>
       </div>
 

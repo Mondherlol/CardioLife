@@ -13,6 +13,7 @@ import ContractModal from './ContractModal'
 import SiteModal from './SiteModal'
 import DeaModal from './DeaModal'
 import DeaItemsModal from './DeaItemsModal'
+import NextControlModal from './NextControlModal'
 import ContextMenu from './ContextMenu'
 import DeleteDeaConfirm from './DeleteDeaConfirm'
 import SitesTableView from './SitesTableView'
@@ -138,6 +139,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
   const [siteModal,  setSiteModal]  = useState(null)   // null | { site, focus, chainDea }
   const [deaModal,   setDeaModal]   = useState(null)   // null | { site, dea }
   const [itemsModal, setItemsModal] = useState(null)   // null | { site, dea, kind }
+  const [ctrlModal,  setCtrlModal]  = useState(null)   // null | { site, dea }
   const [pickSite,   setPickSite]   = useState(null)   // null | 'dea' | 'contact'
   const [deleting,   setDeleting]   = useState(null)   // site à supprimer
   const [deaDeleting, setDeaDeleting] = useState(null) // { site, dea }
@@ -220,6 +222,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
     deleteSite:   site => setDeleting(site),
     addDea:       site => setDeaModal({ site, dea: null }),
     editDea:      (site, dea) => setDeaModal({ site, dea }),
+    editControl:  (site, dea) => setCtrlModal({ site, dea }),
     deleteDea:    (site, dea) => setDeaDeleting({ site, dea }),
     items:        (site, dea, kind) => setItemsModal({ site, dea, kind }),
     pickSite:     purpose => setPickSite(purpose),
@@ -271,6 +274,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
         title: `${dea.deviceType || 'DEA'}${dea.location ? ` · ${dea.location}` : ''}`,
         items: [
           { label: 'Modifier ce DEA',      icon: Pencil,        onClick: () => act.editDea(site, dea) },
+          { label: 'Modifier le prochain contrôle', icon: CalendarClock, onClick: () => act.editControl(site, dea) },
           { label: 'Gérer les batteries',  icon: BatteryMedium, onClick: () => act.items(site, dea, 'batteries') },
           { label: 'Gérer les électrodes', icon: Zap,           onClick: () => act.items(site, dea, 'electrodes') },
           { label: 'Retirer ce DEA', icon: Trash2, danger: true, onClick: () => act.deleteDea(site, dea) },
@@ -300,7 +304,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           <h3 className="cd-tab-title">Sites ({sites.length}) · {deaTotal} DEA</h3>
           <p className="cd-tab-hint">
             Clic sur un site pour sa fiche · sur un DEA pour le modifier · sur une pastille
-            pour ses consommables · clic droit pour toutes les actions
+            pour ses consommables ou pour corriger l'échéance · clic droit pour toutes les actions
           </p>
         </div>
 
@@ -407,6 +411,16 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           onClose={() => setDeaModal(null)}
           // Un DEA peut créer le contrat du site : on recharge les deux.
           onSaved={updated => { replaceSite(updated); setDeaModal(null); load() }}
+        />
+      )}
+
+      {ctrlModal && (
+        <NextControlModal
+          site={ctrlModal.site}
+          dea={ctrlModal.dea}
+          onClose={() => setCtrlModal(null)}
+          // La visite planifiée a bougé avec la date : le contrat se relit.
+          onSaved={updated => { replaceSite(updated); setCtrlModal(null); load() }}
         />
       )}
 

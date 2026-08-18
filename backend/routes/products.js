@@ -1,7 +1,8 @@
 const router = require('express').Router()
 const { body } = require('express-validator')
-const ctrl   = require('../controllers/productsController')
-const upload = require('../middleware/upload')
+const ctrl      = require('../controllers/productsController')
+const importCtrl = require('../controllers/productImportController')
+const upload    = require('../middleware/upload')
 const { protect }                  = require('../middleware/auth')
 const { requirePermissionToWrite } = require('../middleware/permissions')
 
@@ -18,6 +19,12 @@ router.use(protect)
 // Le catalogue est consultable par tous : la pose d'un DEA en dépend. Seules
 // les modifications restent réservées à la gestion du stock.
 router.use(requirePermissionToWrite('canManageStock'))
+
+/* Import / export Excel du catalogue — déclarés avant `/:id`, qui avalerait
+   sinon « import » et « export » comme des identifiants. */
+router.get('/export',            importCtrl.exportAll)
+router.post('/import/validate',  importCtrl.validate)
+router.post('/import/execute',   importCtrl.execute)
 
 router.get('/stats',           ctrl.getStats)
 router.get('/suppliers',       ctrl.getSuppliers)

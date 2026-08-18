@@ -74,6 +74,13 @@ function scheduleFor(site, contract) {
 
 const dayKey = d => new Date(d).toISOString().slice(0, 10)
 
+/** Minuit aujourd'hui — frontière entre ce qui est passé et ce qui vient. */
+function startOfToday() {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 /**
  * Aligne les contrôles enregistrés sur le calendrier théorique.
  *
@@ -89,7 +96,7 @@ async function syncContractControls(contract, userId) {
   const plannedKeys = new Set(planned.map(p => dayKey(p.date)))
 
   const existing = await Intervention.find({ contract: contract._id })
-    .select('scheduledDate status controlType')
+    .select('scheduledDate status controlType manualDate')
     .lean()
 
   const keptKeys = new Set()
@@ -98,14 +105,24 @@ async function syncContractControls(contract, userId) {
     const key = iv.scheduledDate ? dayKey(iv.scheduledDate) : null
     // Une visite faite reste, même hors calendrier : elle a eu lieu.
     if (iv.status === 'termine') { if (key) keptKeys.add(key); continue }
+    // Une date posée à la main l'emporte sur le calendrier théorique.
+    if (iv.manualDate) { if (key) keptKeys.add(key); continue }
     if (key && plannedKeys.has(key)) { keptKeys.add(key); continue }
     obsolete.push(iv._id)
   }
 
   if (obsolete.length) await Intervention.deleteMany({ _id: { $in: obsolete } })
 
+  /* On ne planifie pas une visite dans le passé. Un parc repris tardivement —
+     une pose de 2016 mise sous contrat aujourd'hui — verrait sinon naître des
+     visites déjà en retard le jour de leur création, et la fiche client
+     annoncerait un « prochain contrôle » antérieur à la signature.
+     Les occurrences passées restent dans `planned` : celles qui existent déjà
+     y trouvent leur correspondance et ne sont donc pas effacées. */
+  const today = startOfToday()
+
   const docs = planned
-    .filter(p => !keptKeys.has(dayKey(p.date)))
+    .filter(p => !keptKeys.has(dayKey(p.date)) && p.date >= today)
     .map(p => ({
       client:        contract.client || undefined,
       clientName:    contract.clientName || undefined,
@@ -131,23 +148,45 @@ async function syncContractControls(contract, userId) {
 /**
  * Reporte sur chaque DAE du site la date de sa prochaine visite. Une visite
  * couvre le site entier : tous ses appareils partagent donc la même échéance.
+ *
+ * « Prochaine » se prend au mot : c'est la première visite **à venir**. Une
+ * visite en retard ne sert de repli que s'il n'y en a aucune devant — sinon un
+ * arriéré, fréquent sur un parc repris après coup, figerait la fiche client sur
+ * une date dépassée.
+ *
+ * Les échéances saisies à la main sur la fiche client ne sont pas touchées.
  */
 async function syncSiteNextControl(siteId) {
   if (!siteId) return null
 
-  const next = await Intervention.findOne({
+  const pending = {
     site: siteId,
     status: { $ne: 'termine' },
     scheduledDate: { $ne: null },
+  }
+
+  const upcoming = await Intervention.findOne({
+    ...pending,
+    scheduledDate: { $gte: startOfToday() },
   })
     .sort({ scheduledDate: 1 })
+    .select('scheduledDate')
+    .lean()
+
+  // Rien devant : on retombe sur la visite en retard la plus récente, qui reste
+  // bien celle à honorer.
+  const next = upcoming || await Intervention.findOne(pending)
+    .sort({ scheduledDate: -1 })
     .select('scheduledDate')
     .lean()
 
   const site = await Site.findById(siteId)
   if (!site) return null
 
-  site.deas.forEach(dea => { dea.nextControlDate = next?.scheduledDate || undefined })
+  site.deas.forEach(dea => {
+    if (dea.nextControlManual) return
+    dea.nextControlDate = next?.scheduledDate || undefined
+  })
   await site.save()
   return next?.scheduledDate || null
 }

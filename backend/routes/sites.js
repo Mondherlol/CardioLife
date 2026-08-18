@@ -42,5 +42,7 @@ router.delete('/:id',  ctrl.remove)
 router.post('/:id/deas',           ctrl.addDea)
 router.put('/:id/deas/:deaId',     ctrl.updateDea)
 router.delete('/:id/deas/:deaId',  ctrl.removeDea)
+// Échéance du prochain contrôle réglée à la main depuis la fiche client.
+router.put('/:id/deas/:deaId/next-control', ctrl.setNextControl)
 
 module.exports = router

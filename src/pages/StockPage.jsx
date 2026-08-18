@@ -6,7 +6,7 @@ import {
   Package, ChevronLeft, ChevronRight, RotateCcw, Trash, Archive,
   TrendingUp, TrendingDown, SlidersHorizontal,
   History, User, Hash, Layers, Boxes, Clock,
-  MoreVertical, Eye, PackageOpen, LayoutGrid, List,
+  MoreVertical, Eye, PackageOpen, LayoutGrid, List, FileSpreadsheet,
 } from 'lucide-react'
 import {
   getProducts, getAllMovements,
@@ -1136,9 +1136,16 @@ export default function StockPage() {
           </p>
         </div>
         {!isMovements && !isArchived && !isParc && (
-          <button className="btn btn--primary" onClick={() => setModal('create')}>
-            <Plus size={15} /> Nouveau produit
-          </button>
+          <div className="page-header-actions">
+            {/* Reprendre un catalogue existant ligne à ligne serait interminable :
+                l'aller-retour Excel évite la saisie manuelle des modèles. */}
+            <button className="btn btn--ghost" onClick={() => navigate('/stock/import')}>
+              <FileSpreadsheet size={15} /> Import / export Excel
+            </button>
+            <button className="btn btn--primary" onClick={() => setModal('create')}>
+              <Plus size={15} /> Nouveau produit
+            </button>
+          </div>
         )}
       </div>
 

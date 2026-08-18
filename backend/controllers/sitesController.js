@@ -341,6 +341,98 @@ async function updateDea(req, res) {
   res.json(await refreshSchedule(site, req.user._id))
 }
 
+/**
+ * Déplace la visite à venir d'un site sur une nouvelle date.
+ *
+ * Sans elle, la fiche client et le planning se contrediraient : la date
+ * affichée sur le DAE dirait une chose, la visite planifiée une autre. La
+ * visite retenue est la première à venir, à défaut la dernière en retard ; s'il
+ * n'y en a aucune, on la crée — une échéance annoncée doit exister quelque part.
+ */
+async function moveNextVisit(site, when, user) {
+  const pending = { site: site._id, status: { $ne: 'termine' }, scheduledDate: { $ne: null } }
+
+  const visit =
+    await Intervention.findOne({ ...pending, scheduledDate: { $gte: new Date() } }).sort({ scheduledDate: 1 }) ||
+    await Intervention.findOne(pending).sort({ scheduledDate: -1 })
+
+  if (visit) {
+    const from = visit.scheduledDate
+    visit.scheduledDate = when
+    visit.manualDate    = true
+    visit.history.push({
+      action: 'replanification', user: user._id, userName: user.fullName || user.username,
+      details: `Contrôle reporté du ${from ? new Date(from).toLocaleDateString('fr-FR') : '—'} `
+             + `au ${when.toLocaleDateString('fr-FR')} depuis la fiche client`,
+    })
+    await visit.save()
+    return visit
+  }
+
+  const [client, contract] = await Promise.all([
+    Client.findById(site.client).select('name').lean(),
+    Contract.findOne({ site: site._id, isActive: true, status: 'actif' }).select('_id').lean(),
+  ])
+
+  return Intervention.create({
+    client:        site.client,
+    clientName:    client?.name,
+    site:          site._id,
+    siteName:      site.name,
+    contract:      contract?._id,
+    controlType:   contract ? 'semestriel' : 'hors_contrat',
+    scheduledDate: when,
+    manualDate:    true,
+    status:        'planifie',
+    history: [{
+      action: 'creation', user: user._id, userName: user.fullName || user.username,
+      details: 'Contrôle planifié à la main depuis la fiche client',
+    }],
+    createdBy:     user._id,
+  })
+}
+
+/**
+ * PUT /api/sites/:id/deas/:deaId/next-control — { date }
+ *
+ * Fixe l'échéance du prochain contrôle depuis la fiche client, sans passer par
+ * le contrat. Une date vide rend la main au calendrier automatique.
+ *
+ * Une visite couvre le site entier : la date vaut donc pour tous ses appareils,
+ * comme le fait déjà le calcul automatique.
+ */
+async function setNextControl(req, res) {
+  const site = await findSite(req, res)
+  if (!site) return
+
+  const dea = site.deas.id(req.params.deaId)
+  if (!dea) return res.status(404).json({ message: 'DEA introuvable.' })
+
+  const raw = req.body?.date
+  if (!raw) {
+    // Retour au calendrier automatique : le contrat reprend la main.
+    site.deas.forEach(d => { d.nextControlManual = false })
+    await site.save()
+    await syncSiteControls(site._id, req.user._id)
+    return res.json(await Site.findById(site._id))
+  }
+
+  const when = new Date(raw)
+  if (Number.isNaN(when.getTime())) {
+    return res.status(422).json({ message: 'Date de contrôle invalide.' })
+  }
+  when.setHours(9, 0, 0, 0)      // heure par défaut des visites
+
+  site.deas.forEach(d => {
+    d.nextControlDate  = when
+    d.nextControlManual = true
+  })
+  await site.save()
+  await moveNextVisit(site, when, req.user)
+
+  res.json(await Site.findById(site._id))
+}
+
 async function removeDea(req, res) {
   const site = await findSite(req, res)
   if (!site) return
@@ -354,5 +446,5 @@ async function removeDea(req, res) {
 
 module.exports = {
   getAll, lookup, listDeas, getById, getHistory, getDocumentsFolder,
-  create, update, remove, addDea, updateDea, removeDea,
+  create, update, remove, addDea, updateDea, removeDea, setNextControl,
 }

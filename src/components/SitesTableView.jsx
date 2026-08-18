@@ -1,5 +1,5 @@
 import { Phone, Mail, HeartPulse, ArrowUpRight, Plus } from 'lucide-react'
-import { formatDate, ItemsButton, ContractChip, NoDeaBox } from './siteHelpers'
+import { formatDate, ItemsButton, ContractChip, NoDeaBox, NextControlChip } from './siteHelpers'
 
 /**
  * Vue tableau : une ligne par DEA, les colonnes site et responsable fusionnées
@@ -30,7 +30,8 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
           <col style={{ width: 190 }} />
           <col style={{ width: 165 }} />
           <col style={{ width: 145 }} />
-          <col style={{ width: 125 }} />
+          <col style={{ width: 110 }} />
+          <col style={{ width: 130 }} />
           <col style={{ width: 165 }} />
         </colgroup>
         <thead>
@@ -42,6 +43,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
             <th><div className="th-inner">Type</div></th>
             <th><div className="th-inner">N° de série</div></th>
             <th><div className="th-inner">Installation</div></th>
+            <th><div className="th-inner">Prochain contrôle</div></th>
             <th><div className="th-inner">Consommables</div></th>
           </tr>
         </thead>
@@ -100,7 +102,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                 <tr className="sites-xl-row"
                   onContextMenu={e => act.siteMenu(e, site)}>
                   {siteCells}
-                  <td colSpan={5} className="sites-xl-nodea">
+                  <td colSpan={6} className="sites-xl-nodea">
                     <NoDeaBox site={site} act={act} />
                   </td>
                 </tr>
@@ -145,6 +147,12 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                     {dea.installationDate
                       ? <span className="dea-date">{formatDate(dea.installationDate)}</span>
                       : <span className="site-cell-empty">—</span>}
+                  </td>
+
+                  {/* L'échéance s'ouvre sur son propre réglage : le calcul
+                      automatique se corrige ici, sans quitter la fiche client. */}
+                  <td className="dea-td">
+                    <NextControlChip dea={dea} onClick={() => act.editControl(site, dea)} />
                   </td>
 
                   <td className="dea-td">

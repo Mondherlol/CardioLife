@@ -12,17 +12,26 @@
  *
  * Idempotent — relançable sans risque.
  *
- * Usage : node scripts/resyncControls.js [--dry]
+ * `--drop-passees` retire en plus les visites planifiées **dans le passé** et
+ * jamais honorées. Un parc repris longtemps après sa pose — une installation de
+ * 2016 mise sous contrat aujourd'hui — s'en voyait attribuer d'office : elles
+ * n'ont jamais eu lieu, personne ne les fera, et elles tiraient la date du
+ * prochain contrôle vers une échéance déjà dépassée. Les visites commencées ou
+ * terminées ne sont jamais touchées.
+ *
+ * Usage : node scripts/resyncControls.js [--dry] [--drop-passees]
  */
 
 require('dotenv').config()
 const mongoose = require('mongoose')
 
-const Contract = require('../models/Contract')
-const Site     = require('../models/Site')
-const { scheduleFor, scheduleAnchor, syncContractControls } = require('../utils/controls')
+const Contract     = require('../models/Contract')
+const Site         = require('../models/Site')
+const Intervention = require('../models/Intervention')
+const { scheduleFor, scheduleAnchor, syncContractControls, syncSiteNextControl } = require('../utils/controls')
 
-const DRY = process.argv.includes('--dry')
+const DRY  = process.argv.includes('--dry')
+const DROP = process.argv.includes('--drop-passees')
 const fmt = d => (d ? new Date(d).toLocaleDateString('fr-FR') : '—')
 
 async function run() {
@@ -49,6 +58,29 @@ async function run() {
       console.log(`   → ${r.created} créée(s), ${r.removed} remplacée(s)`)
     }
     console.log('')
+  }
+
+  if (DROP) {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const query = {
+      status: 'planifie',
+      manualDate: { $ne: true },
+      scheduledDate: { $lt: today, $ne: null },
+      contract: { $ne: null },
+    }
+    const stale = await Intervention.find(query).select('site siteName scheduledDate controlType').lean()
+    console.log(`
+${stale.length} visite(s) planifiée(s) dans le passé et jamais honorée(s) :`)
+    stale.forEach(iv => console.log(`   ${fmt(iv.scheduledDate)}  ${iv.controlType}  « ${iv.siteName || '?'} »`))
+
+    if (!DRY && stale.length) {
+      await Intervention.deleteMany(query)
+      // Chaque site concerné retrouve une échéance à venir.
+      const sites = [...new Set(stale.map(iv => String(iv.site)).filter(Boolean))]
+      for (const id of sites) await syncSiteNextControl(id)
+      console.log(`   → ${stale.length} retirée(s).`)
+    }
   }
 
   if (!DRY) console.log(`Total : ${created} visite(s) créée(s), ${removed} remplacée(s).`)

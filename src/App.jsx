@@ -10,6 +10,7 @@ import ClientDetailPage      from './pages/ClientDetailPage'
 import ClientImportPage     from './pages/ClientImportPage'
 import SiteDetailPage       from './pages/SiteDetailPage'
 import StockPage           from './pages/StockPage'
+import ProductImportPage   from './pages/ProductImportPage'
 import ProductDetailPage   from './pages/ProductDetailPage'
 import ProductItemPage     from './pages/ProductItemPage'
 import ContractsPage       from './pages/ContractsPage'
@@ -90,6 +91,7 @@ export default function App() {
                 <Route path="/stock"       element={<StockPage />} />
                 {/* Avant /stock/:id — sinon « articles » serait pris pour un id de modèle. */}
                 <Route path="/stock/articles/:id" element={<ProductItemPage />} />
+                <Route path="/stock/import" element={<ProductImportPage />} />
                 <Route path="/stock/:id"  element={<ProductDetailPage />} />
                 <Route path="/contrats"          element={<ContractsPage />} />
                 <Route path="/contrats/:id"      element={<ContractDetailPage />} />

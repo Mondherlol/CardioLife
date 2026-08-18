@@ -885,6 +885,15 @@ button {
   gap: 12px;
 }
 
+/* Plusieurs actions à droite d'un en-tête de page : elles restent groupées et
+   passent à la ligne ensemble sur écran étroit. */
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .page-title {
   font-size: 21px;
   font-weight: 700;
@@ -14199,6 +14208,34 @@ button {
 .dea-chip--soon     { background: var(--amber-50); border-color: var(--amber-100); color: var(--amber-600); }
 .dea-chip--expired  { background: var(--red-50);   border-color: var(--red-100);   color: var(--red-700); }
 .dea-chip--unknown  { background: var(--blue-50);  border-color: var(--blue-100);  color: var(--blue-700); }
+
+/* Échéance du prochain contrôle — cliquable pour la corriger sans quitter la
+   fiche du client. Même grammaire visuelle que les pastilles de consommables. */
+.ctrl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  background: var(--gray-50);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  transition: filter 0.12s;
+}
+
+.ctrl-chip:hover { filter: brightness(0.95); }
+
+.ctrl-chip--ok      { background: var(--green-50); border-color: var(--green-100); color: var(--green-700); }
+.ctrl-chip--soon    { background: var(--amber-50); border-color: var(--amber-100); color: var(--amber-600); }
+.ctrl-chip--expired { background: var(--red-50);   border-color: var(--red-100);   color: var(--red-700); }
+.ctrl-chip--none    { color: var(--text-muted); }
+
+.ctrl-chip-date--none { font-style: italic; font-weight: 500; }
+
+/* Le point signale une date posée à la main, que le contrat ne recalcule plus. */
+.ctrl-chip-manual { font-weight: 900; opacity: 0.65; }
 
 /* ═══════════════════════════════════════════════════════════
    SITES CLIENT — vue fiches : une section par site

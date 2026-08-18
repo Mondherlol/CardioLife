@@ -108,9 +108,13 @@ export function ProductPicker({
 /**
  * Choix d'un exemplaire en stock, par numéro de série ou par numéro de lot.
  * `field` désigne celui des deux qui identifie l'article ici.
+ *
+ * `createLabel` remplace l'appel à l'entrée en stock quand la saisie libre est
+ * légitime — un appareil déjà posé n'a pas à passer par l'inventaire.
  */
 export function StockPicker({
   items, value, onChange, onClear, onUnknown, onQueryChange, field, product, placeholder,
+  createLabel,
 }) {
   const [query, setQuery] = useState('')
   const isSerial = field === 'serialNumber'
@@ -136,7 +140,7 @@ export function StockPicker({
       emptyText={query
         ? `« ${query} » n'est pas en stock`
         : product ? 'Rien de ce modèle en stock' : 'Rien en stock'}
-      emptyCtaLabel={q => `Entrer « ${q} » en stock`}
+      emptyCtaLabel={createLabel || (q => `Entrer « ${q} » en stock`)}
     />
   )
 }

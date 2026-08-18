@@ -23,3 +23,7 @@ export const deleteSite = (id)       => del(`/sites/${id}`)
 export const addDea    = (siteId, data)        => post(`/sites/${siteId}/deas`, data)
 export const updateDea = (siteId, deaId, data) => put(`/sites/${siteId}/deas/${deaId}`, data)
 export const deleteDea = (siteId, deaId)       => del(`/sites/${siteId}/deas/${deaId}`)
+/* Échéance du prochain contrôle fixée à la main depuis la fiche client. La
+   visite planifiée suit ; une date vide rend la main au calendrier du contrat. */
+export const setDeaNextControl = (siteId, deaId, date) =>
+  put(`/sites/${siteId}/deas/${deaId}/next-control`, { date })

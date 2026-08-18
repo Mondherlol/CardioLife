@@ -50,13 +50,16 @@ function nextControlAfterInstall(dateStr) {
 /**
  * Création / édition d'un DEA rattaché à un site.
  *
- * Le type et le numéro de série ne se saisissent pas librement : le type vient
- * du catalogue, le numéro de série du stock. Une valeur inconnue n'est pas
- * refusée sèchement — elle ouvre une confirmation qui propose de créer le type,
- * ou d'entrer l'appareil en stock avant de le poser.
+ * Le type vient du catalogue — une valeur inconnue ouvre une confirmation qui
+ * propose de la créer. Le numéro de série, lui, se prend au stock quand il y
+ * est, et se saisit librement sinon : un parc repris après coup, posé en 2016,
+ * n'est jamais passé par le stock, et l'exiger reviendrait à inventer une
+ * entrée d'inventaire pour enregistrer un appareil déjà en service.
+ * L'exemplaire est alors créé en coulisse, sans rien demander.
  *
- * Le calendrier des visites appartient au contrat du site : dès qu'il y en a
- * un, la date du prochain contrôle est calculée et n'est plus saisie ici.
+ * Le calendrier des visites appartient au contrat du site, mais la date du
+ * prochain contrôle reste corrigeable à la main : le calcul part de la pose, ce
+ * qui tombe à côté sur un parc ancien.
  *
  * Props :
  *  site     - site propriétaire
@@ -116,7 +119,7 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
   const [loading,  setLoading]  = useState(false)
   const [deleting, setDeleting] = useState(false)
   // Tant que la date de contrôle n'a pas été saisie à la main, elle suit la pose.
-  const [controlTouched, setControlTouched] = useState(false)
+  const [controlTouched, setControlTouched] = useState(!!dea?.nextControlManual)
   // Mise sous contrat depuis cette modale, quand le site n'en a pas encore.
   const [wantContract, setWantContract] = useState(false)
   const [contractNumber, setContractNumber] = useState('')
@@ -167,8 +170,11 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
 
   function clearProduct() {
     setProduct(null)
-    // L'exemplaire choisi appartenait à l'ancien type : il ne vaut plus.
-    if (item && !item.existing) setItem(null)
+    /* L'exemplaire choisi appartenait à l'ancien type : il ne vaut plus. Un
+       numéro saisi librement tombe avec lui — il sera entré au stock sous le
+       type retenu, et l'enregistrer sous un autre modèle serait faux. Seul le
+       numéro d'un DEA déjà enregistré reste : il décrit la machine en place. */
+    if (item && (!item.existing || item.adhoc)) setItem(null)
   }
 
   /* ── Confirmations ── */
@@ -185,6 +191,20 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
     if (!label) return
     setConfirmErr('')
     setConfirm({ kind: 'stock', label })
+  }
+
+  /**
+   * Numéro de série absent du stock, sur un appareil déjà en service.
+   *
+   * Rien à confirmer : l'appareil est là, sur le site, depuis des années. On
+   * retient le numéro tel quel, et l'exemplaire correspondant sera créé en
+   * coulisse à l'enregistrement pour que le stock connaisse lui aussi la machine.
+   */
+  function acceptSerial(serial) {
+    const label = serial.trim()
+    if (!label) return
+    setItem({ _id: null, serialNumber: label, status: 'installe', existing: true, adhoc: true })
+    setSerialQuery('')
   }
 
   async function runConfirm() {
@@ -218,10 +238,14 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
       setError('Choisissez un type dans le catalogue — ou créez-le depuis le champ Type.')
       return
     }
-    // Une saisie laissée en plan dans le champ série serait perdue en silence.
-    if (!item && serialQuery.trim()) {
-      askStockEntry(serialQuery)
-      return
+
+    /* Une saisie laissée en plan dans le champ série serait perdue en silence.
+       Une pose à venir doit sortir d'un exemplaire réel, donc réservé au stock ;
+       un appareil déjà en service se contente du numéro tel qu'il est écrit. */
+    let picked = item
+    if (!picked && serialQuery.trim()) {
+      if (planned) { askStockEntry(serialQuery); return }
+      picked = { serialNumber: serialQuery.trim(), adhoc: true }
     }
 
     if (planned && !form.scheduledDate) {
@@ -231,12 +255,19 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
 
     setLoading(true)
     try {
+      /* Régularisation discrète du stock : l'appareil posé hors inventaire y
+         entre pour que sa fiche article existe. Son échec ne doit pas coûter
+         l'enregistrement du parc, qui est ce que l'utilisateur a demandé. */
+      if (picked?.adhoc) {
+        await addStockItem(product, { serialNumber: picked.serialNumber }).catch(() => {})
+      }
+
       const payload = {
         ...form,
         status,
         product:          product._id,
         deviceType:       product.name,
-        serialNumber:     item?.serialNumber || '',
+        serialNumber:     picked?.serialNumber || '',
         // Une pose seulement prévue n'a pas encore de date d'installation :
         // c'est le compte rendu du technicien qui la fixera.
         installationDate: planned ? null : (form.installationDate || null),
@@ -244,6 +275,8 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
         technician:       planned ? (form.technician || null) : null,
         technicianName:   planned ? form.technicianName : '',
         nextControlDate:  form.nextControlDate  || null,
+        // Corrigée à la main : le calendrier du contrat ne la réécrira plus.
+        nextControlManual: controlTouched && !!form.nextControlDate,
       }
       let updated = isEdit
         ? await updateDea(site._id, dea._id, payload)
@@ -348,20 +381,28 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
 
             <div className="form-group">
               <label className="form-label">
-                N° de série <span className="form-label-opt">(depuis le stock)</span>
+                N° de série{' '}
+                <span className="form-label-opt">
+                  {planned ? '(depuis le stock)' : '(facultatif)'}
+                </span>
               </label>
               <StockPicker
                 items={stockOptions}
                 value={item}
                 onChange={pickItem}
                 onClear={() => setItem(null)}
-                onUnknown={askStockEntry}
+                onUnknown={planned ? askStockEntry : acceptSerial}
                 onQueryChange={setSerialQuery}
                 field="serialNumber"
                 product={product}
+                createLabel={planned ? undefined : q => `Utiliser le n° « ${q} »`}
               />
-              {product && !item && (
-                <p className="form-hint">Seuls les appareils encore en stock sont proposés.</p>
+              {!item && (
+                <p className="form-hint">
+                  {planned
+                    ? 'Seuls les appareils encore en stock sont proposés — la pose les réserve.'
+                    : 'Le stock propose ce qu\'il connaît. Un appareil posé avant son suivi n\'y est pas : tapez son numéro, il sera enregistré tel quel.'}
+                </p>
               )}
             </div>
           </div>
@@ -408,26 +449,27 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
               <input type="date" className="form-input form-input--plain" value={form.installationDate}
                 onChange={e => setInstallationDate(e.target.value)} />
             </div>
+            {/* Le contrat propose l'échéance, il ne l'impose pas : sur un parc
+                repris des années après la pose, le calcul tombe à côté et c'est
+                le terrain qui sait quand la visite est réellement due. */}
             <div className="form-group">
               <label className="form-label">Prochain contrôle</label>
-              {underContract ? (
-                <>
-                  <input className="form-input form-input--plain"
-                    value={fmtDate(dea?.nextControlDate)} disabled />
-                  <p className="form-hint">
-                    Fixé par le contrat {contract.contractNumber || ''} — visites tous les six mois
-                    à partir de la pose.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <input type="date" className="form-input form-input--plain" value={form.nextControlDate}
-                    onChange={e => { setControlTouched(true); set('nextControlDate', e.target.value) }} />
-                  {!controlTouched && form.nextControlDate && (
-                    <p className="form-hint">Première échéance à venir, six mois après la pose — modifiable.</p>
-                  )}
-                </>
-              )}
+              <input type="date" className="form-input form-input--plain" value={form.nextControlDate}
+                onChange={e => { setControlTouched(true); set('nextControlDate', e.target.value) }} />
+              {controlTouched ? (
+                <p className="form-hint">
+                  <Info size={11} /> Date fixée à la main
+                  {underContract && ' — elle remplace celle calculée par le contrat'}.
+                  {' '}Videz le champ pour revenir au calcul automatique.
+                </p>
+              ) : underContract ? (
+                <p className="form-hint">
+                  Calculée par le contrat {contract.contractNumber || ''} — visites tous les six mois
+                  à partir de la pose. Modifiable si elle ne correspond pas.
+                </p>
+              ) : form.nextControlDate ? (
+                <p className="form-hint">Première échéance à venir, six mois après la pose — modifiable.</p>
+              ) : null}
             </div>
           </div>
           )}

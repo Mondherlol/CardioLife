@@ -31,6 +31,21 @@ export const uploadProductImage = (id, file) => {
 export const deleteProductImage = (id, filename) =>
   del(`/products/${id}/images/${encodeURIComponent(filename)}`)
 
+/* ── Import / export Excel du catalogue ──────────────────────────
+   Le fichier exporté se réimporte tel quel : mêmes colonnes des deux côtés. */
+export const exportProducts = (params = {}) => {
+  const qs = new URLSearchParams(params).toString()
+  return get(`/products/export${qs ? `?${qs}` : ''}`)
+}
+
+export function validateProductImport(file) {
+  const form = new FormData()
+  form.append('file', file)
+  return upload('/products/import/validate', form)
+}
+
+export const executeProductImport = (rows) => post('/products/import/execute', { rows })
+
 export const archiveProduct   = (id)       => del(`/products/${id}`)
 export const restoreProduct   = (id)       => put(`/products/${id}/restore`)
 export const destroyProduct   = (id)       => del(`/products/${id}/permanent`)
