@@ -2,6 +2,7 @@ const router = require('express').Router()
 const { body } = require('express-validator')
 const ctrl      = require('../controllers/productsController')
 const importCtrl = require('../controllers/productImportController')
+const imagesCtrl = require('../controllers/productImagesController')
 const upload    = require('../middleware/upload')
 const { protect }                  = require('../middleware/auth')
 const { requirePermissionToWrite } = require('../middleware/permissions')
@@ -25,6 +26,11 @@ router.use(requirePermissionToWrite('canManageStock'))
 router.get('/export',            importCtrl.exportAll)
 router.post('/import/validate',  importCtrl.validate)
 router.post('/import/execute',   importCtrl.execute)
+
+/* Les visuels ne tiennent pas dans un tableur : ils voyagent en archive ZIP,
+   un dossier par produit. */
+router.get('/images/export',     imagesCtrl.exportZip)
+router.post('/images/import',    imagesCtrl.importZip)
 
 router.get('/stats',           ctrl.getStats)
 router.get('/suppliers',       ctrl.getSuppliers)

@@ -4,12 +4,14 @@ import * as XLSX from 'xlsx'
 import {
   ArrowLeft, Upload, Download, FileSpreadsheet, CheckCircle2,
   XCircle, AlertTriangle, ChevronRight, RotateCcw, Check,
-  Info, Boxes, PlusCircle, RefreshCw,
+  Info, Boxes, PlusCircle, RefreshCw, Images,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
   validateProductImport, executeProductImport, exportProducts,
+  exportProductImages, importProductImages,
 } from '../api/products'
+import ProductImagesPanel from '../components/ProductImagesPanel'
 import { getProductCategories } from '../api/productCategories'
 
 /* ── Modèle de fichier ────────────────────────────────────────
@@ -66,6 +68,9 @@ export default function ProductImportPage() {
   const navigate  = useNavigate()
   const fileInput = useRef(null)
 
+  // Deux transferts distincts : les fiches passent par un tableur, les visuels
+  // par une archive — une image ne tient pas dans une cellule.
+  const [tab,        setTab]        = useState('fiches')   // fiches | images
   const [step,       setStep]       = useState('idle')
   const [file,       setFile]       = useState(null)
   const [dragOver,   setDragOver]   = useState(false)
@@ -185,14 +190,34 @@ export default function ProductImportPage() {
             </p>
           </div>
         </div>
-        <button className="btn btn--ghost" onClick={handleExport} disabled={exporting}>
-          {exporting
-            ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Export…</>
-            : <><Download size={14} /> Exporter le catalogue</>}
-        </button>
+        {tab === 'fiches' && (
+          <button className="btn btn--ghost" onClick={handleExport} disabled={exporting}>
+            {exporting
+              ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Export…</>
+              : <><Download size={14} /> Exporter le catalogue</>}
+          </button>
+        )}
       </div>
 
+      <div className="stock-tabs">
+        {[
+          { value: 'fiches', label: 'Fiches produits (Excel)', icon: FileSpreadsheet },
+          { value: 'images', label: 'Images (ZIP)',            icon: Images },
+        ].map(t => (
+          <button key={t.value}
+            className={`stock-tab${tab === t.value ? ' stock-tab--active' : ''}`}
+            onClick={() => setTab(t.value)}>
+            <t.icon size={14} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'images' && (
+        <ProductImagesPanel onExport={exportProductImages} onImport={importProductImages} />
+      )}
+
       {/* Étapes */}
+      {tab === 'fiches' && (
       <div className="ci-steps">
         {['Fichier', 'Validation', 'Import', 'Résultat'].map((label, i) => {
           const stepIdx = { idle: 0, validating: 1, preview: 1, importing: 2, done: 3 }[step]
@@ -207,7 +232,9 @@ export default function ProductImportPage() {
           )
         })}
       </div>
+      )}
 
+      {tab === 'fiches' && (
       <div className="ci-body">
 
         {/* ── IDLE ───────────────────────────────────── */}
@@ -509,6 +536,7 @@ export default function ProductImportPage() {
         )}
 
       </div>
+      )}
     </div>
   )
 }

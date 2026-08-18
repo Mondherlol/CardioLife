@@ -36,9 +36,14 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5174')
 
 app.use(cors({
   origin: allowedOrigins.length === 1 ? allowedOrigins[0] : allowedOrigins,
-  exposedHeaders: ['Content-Disposition'],
+  // Le navigateur ne lit que les en-têtes exposés : le nom du fichier
+  // téléchargé et le compte d'images d'une archive en dépendent.
+  exposedHeaders: ['Content-Disposition', 'X-Image-Count'],
 }))
-app.use(express.json())
+/* Les imports rejouent le fichier validé sous forme de lignes JSON. Un
+   catalogue de quelques dizaines de fiches, descriptions comprises, dépasse
+   largement les 100 ko admis par défaut. */
+app.use(express.json({ limit: '10mb' }))
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
 
 app.use('/api/auth',         authRoutes)

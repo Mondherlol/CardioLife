@@ -30,6 +30,43 @@ export const put   = (path, body)  => request(path, { method: 'PUT',    body: JS
 export const patch = (path, body)  => request(path, { method: 'PATCH',  body: JSON.stringify(body) })
 export const del   = (path)        => request(path, { method: 'DELETE' })
 
+/**
+ * Réponse binaire (archive, PDF…) déclenchée comme un téléchargement.
+ *
+ * Le serveur renvoie du JSON quand il refuse : on le lit pour rendre l'erreur
+ * lisible, au lieu de laisser le navigateur enregistrer un fichier vide.
+ */
+export async function download(path, fallbackName) {
+  const token = sessionStorage.getItem('token')
+  const headers = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const res = await fetch(`${BASE}${path}`, { headers })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    const err = new Error(data.message || 'Erreur serveur.')
+    err.status = res.status
+    throw err
+  }
+
+  // Le serveur nomme le fichier ; sans en-tête exploitable, on retombe sur le
+  // nom proposé par l'appelant.
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const named = disposition.match(/filename="?([^";]+)"?/i)
+
+  const blob = await res.blob()
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = named?.[1] || fallbackName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+
+  return { name: a.download, size: blob.size, count: Number(res.headers.get('X-Image-Count')) || 0 }
+}
+
 // Multipart upload (no Content-Type header — browser sets it with boundary)
 export async function upload(path, formData) {
   const token = sessionStorage.getItem('token')

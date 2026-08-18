@@ -355,7 +355,6 @@ async function main() {
 
       const payload = {
         name: parsed.title || card.title,
-        reference: parsed.reference || `cardiolife:${slug}`,
         brand: parsed.brand,
         description: parsed.description || undefined,
         category: parsed.category,
@@ -367,9 +366,14 @@ async function main() {
         supplier: 'CardioLife Tunisie',
         images,
         isActive: true,
+        // Le slug de la page identifie la fiche vitrine. Il vivait autrefois
+        // dans `reference`, qui doit rester libre pour la vraie référence
+        // fabricant : la colonne est saisie à la main dans l'export Excel.
+        'webCard.slug': slug,
       }
 
-      const existing = await Product.findOne({ reference: payload.reference })
+      const existing = await Product.findOne({ 'webCard.slug': slug })
+        || await Product.findOne({ reference: `cardiolife:${slug}` })
       if (existing) {
         await Product.updateOne({ _id: existing._id }, { $set: payload, $unset: { notes: 1 } })
         updated += 1

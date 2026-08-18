@@ -14209,6 +14209,22 @@ button {
 .dea-chip--expired  { background: var(--red-50);   border-color: var(--red-100);   color: var(--red-700); }
 .dea-chip--unknown  { background: var(--blue-50);  border-color: var(--blue-100);  color: var(--blue-700); }
 
+/* Arborescence d'exemple d'une archive d'images : un bloc monospace discret,
+   qui montre la forme attendue mieux qu'un paragraphe. */
+.ci-tree {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--gray-50);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
 /* Échéance du prochain contrôle — cliquable pour la corriger sans quitter la
    fiche du client. Même grammaire visuelle que les pastilles de consommables. */
 .ctrl-chip {

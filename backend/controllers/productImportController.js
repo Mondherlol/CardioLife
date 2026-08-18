@@ -4,6 +4,7 @@ const Product         = require('../models/Product')
 const ProductCategory = require('../models/ProductCategory')
 const ProductItem     = require('../models/ProductItem')
 const StockMovement   = require('../models/StockMovement')
+const { htmlToText }  = require('../utils/productCleanup')
 
 /**
  * Import / export Excel du catalogue produits.
@@ -321,11 +322,22 @@ function findProduct(row) {
 }
 
 /** Champs à écrire : une colonne vide ne remet rien à zéro. */
-function buildPatch(row, categorySlug) {
+function buildPatch(row, categorySlug, existing) {
   const set = { name: row.name, category: categorySlug }
 
-  for (const key of ['reference', 'brand', 'supplier', 'description', 'notes']) {
+  for (const key of ['reference', 'brand', 'supplier', 'notes']) {
     if (row[key]) set[key] = row[key]
+  }
+
+  /* La description part en texte lisible dans le tableur, alors qu'elle peut
+     être du HTML côté fiche — c'est ce que le site vitrine affiche. Un simple
+     aller-retour la remplacerait par sa propre version aplatie : on ne la
+     reprend donc que si elle a vraiment été retouchée dans Excel. */
+  if (row.description) {
+    const current = existing?.description || ''
+    if (!current || htmlToText(current).trim() !== row.description.trim()) {
+      set.description = row.description
+    }
   }
 
   const mode = toMode(row.deviceMode)
@@ -361,9 +373,9 @@ async function execute(req, res) {
       const category = findCategory(categories, row.category)
       if (!category) throw new Error(`Catégorie inconnue : ${row.category}`)
 
-      const patch   = buildPatch(row, category.slug)
       let   product = await findProduct(row)
       const created = !product
+      const patch   = buildPatch(row, category.slug, product)
 
       if (product) {
         // Mise à jour non destructive : le stock reste géré par les articles.
@@ -455,7 +467,9 @@ async function exportAll(req, res) {
     purchasePrice:        p.purchasePrice ?? '',
     salePrice:            p.salePrice ?? '',
     supplier:             p.supplier || '',
-    description:          p.description || '',
+    // Le HTML du site vitrine est illisible en cellule : il part en texte,
+    // paragraphes et puces conservés.
+    description:          htmlToText(p.description),
     notes:                p.notes || '',
   }))
 

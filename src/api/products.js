@@ -1,4 +1,4 @@
-import { get, post, put, patch, del, upload, STATIC_BASE } from './http'
+import { get, post, put, patch, del, upload, download, STATIC_BASE } from './http'
 
 export function productImageUrl(filename) {
   return `${STATIC_BASE}/uploads/products/${filename}`
@@ -45,6 +45,19 @@ export function validateProductImport(file) {
 }
 
 export const executeProductImport = (rows) => post('/products/import/execute', { rows })
+
+/* Visuels du catalogue : une archive ZIP, un dossier par produit. */
+export const exportProductImages = (params = {}) => {
+  const qs = new URLSearchParams(params).toString()
+  return download(`/products/images/export${qs ? `?${qs}` : ''}`, 'catalogue_images.zip')
+}
+
+export function importProductImages(file, { replace = false } = {}) {
+  const form = new FormData()
+  form.append('file', file)
+  if (replace) form.append('mode', 'remplacer')
+  return upload('/products/images/import', form)
+}
 
 export const archiveProduct   = (id)       => del(`/products/${id}`)
 export const restoreProduct   = (id)       => put(`/products/${id}/restore`)
