@@ -14322,84 +14322,92 @@ button {
 }
 
 /* D'où sort l'échéance proposée dans la fiche DAE : le calendrier théorique
-   énoncé en clair, avec son repère corrigeable. Un calcul qu'on ne peut pas
-   suivre passe pour une erreur — c'est exactement ce qui s'est produit. */
+   énoncé en clair, avec son repère et sa nature corrigeables. Un calcul qu'on
+   ne peut pas suivre passe pour une erreur — c'est ce qui s'est produit.
+   Bloc volontairement dense : c'est une note de bas de page, pas un formulaire. */
 .ctrl-basis {
-  display: flex;
-  gap: 10px;
-  padding: 11px 13px;
+  padding: 9px 11px;
   margin-bottom: 14px;
   border: 1px solid var(--blue-100, #dbeafe);
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--blue-50);
 }
 
-.ctrl-basis-icon {
-  flex: none;
-  margin-top: 1px;
-  color: var(--blue-600);
-}
-
-.ctrl-basis-body { min-width: 0; flex: 1; }
-
 .ctrl-basis-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   margin: 0;
-  font-size: 12.5px;
-  line-height: 1.55;
+  font-size: 12px;
+  line-height: 1.45;
   color: var(--text-secondary);
 }
 
-/* La ligne de calcul : repère + six mois = échéance. Elle se lit d'un coup. */
+.ctrl-basis-line > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--blue-600);
+}
+
+/* Repère → échéance → nature, sur une seule ligne tant que la place le permet. */
 .ctrl-basis-calc {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
-  gap: 10px;
-  margin: 10px 0 8px;
+  gap: 8px;
+  margin: 8px 0 0;
 }
 
 .ctrl-basis-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  font-size: 11px;
+  gap: 2px;
+  font-size: 10.5px;
   font-weight: 600;
-  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
 }
 
 .ctrl-basis-field .form-input {
-  width: 158px;
+  height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
   background: var(--surface);
 }
 
+.ctrl-basis-field input.form-input  { width: 138px; }
+.ctrl-basis-field select.form-input { width: 122px; }
+
 .ctrl-basis-arrow {
-  padding-bottom: 10px;
-  font-size: 15px;
+  padding-bottom: 7px;
+  font-size: 13px;
   color: var(--text-muted);
-  white-space: nowrap;
 }
 
 .ctrl-basis-result {
-  display: inline-block;
-  padding: 8px 12px;
-  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
   background: var(--surface);
   border: 1px solid var(--blue-100, #dbeafe);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   color: var(--blue-700, #1d4ed8);
   white-space: nowrap;
 }
 
 .ctrl-basis-apply {
-  margin-bottom: 2px;
-  align-self: flex-end;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 11.5px;
 }
 
 .ctrl-basis-note {
-  margin: 6px 0 0;
-  font-size: 11.5px;
-  line-height: 1.5;
+  margin: 7px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--text-muted);
 }
 

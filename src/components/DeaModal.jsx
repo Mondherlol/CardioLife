@@ -78,7 +78,12 @@ function controlSchedule(dateStr) {
   for (let i = 1; i <= 120; i++) {
     const due = addMonths(base, i * PERIOD_MONTHS)
     if (due > today) {
-      return { anchor: base, last, next: skipWeekend(due), passed: i - 1 }
+      return {
+        anchor: base, last, next: skipWeekend(due), passed: i - 1,
+        // Une visite sur deux tombe à l'anniversaire de la pose : c'est le
+        // contrôle annuel. Celle du milieu est la semestrielle.
+        type: i % 2 === 0 ? 'annuel' : 'semestriel',
+      }
     }
     last = due
   }
@@ -161,6 +166,8 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
   // Dernière visite déclarée par l'utilisateur, quand le calendrier théorique
   // ne correspond pas à ce qui s'est réellement passé sur le site.
   const [assumedLast, setAssumedLast] = useState('')
+  // Nature de la prochaine visite. Vide = on suit l'alternance du calendrier.
+  const [controlType, setControlType] = useState(dea?.controlType || '')
   // Mise sous contrat depuis cette modale, quand le site n'en a pas encore.
   const [wantContract, setWantContract] = useState(false)
   const [contractNumber, setContractNumber] = useState('')
@@ -232,6 +239,10 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
     setControlTouched(true)
     set('nextControlDate', computedNext)
   }
+
+  /* Le calendrier alterne semestrielle et annuelle ; le terrain peut trancher
+     autrement, notamment sur un parc dont on ignore où en est le cycle. */
+  const nextType = controlType || schedule?.type || ''
 
   /* Prendre un exemplaire au stock renseigne aussi le type : les deux champs
      décrivent le même appareil, les laisser diverger n'aurait pas de sens. */
@@ -351,6 +362,8 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
         nextControlDate:  form.nextControlDate  || null,
         // Corrigée à la main : le calendrier du contrat ne la réécrira plus.
         nextControlManual: controlTouched && !!form.nextControlDate,
+        // Semestrielle ou annuelle — l'alternance proposée, ou le choix du terrain.
+        controlType:      planned ? '' : nextType,
       }
       let updated = isEdit
         ? await updateDea(site._id, dea._id, payload)
@@ -547,30 +560,23 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
               d'une date sortie de nulle part. On la nomme, et on la corrige. */}
           {schedule && (
             <div className="ctrl-basis">
-              <span className="ctrl-basis-icon"><CalendarClock size={15} /></span>
-              <div className="ctrl-basis-body">
-                <p className="ctrl-basis-line">
+              <p className="ctrl-basis-line">
+                <CalendarClock size={13} />
+                <span>
                   Une visite tous les six mois depuis la pose du{' '}
-                  <strong>{fmtDate(schedule.anchor)}</strong>.
-                  {schedule.passed > 0 ? (
-                    <>
-                      {' '}{schedule.passed === 1
-                        ? 'Une visite était déjà due'
-                        : `${schedule.passed} visites étaient déjà dues`}
-                      {' '}avant aujourd'hui — on {schedule.passed === 1 ? 'la' : 'les'} suppose
-                      {' '}faite{schedule.passed === 1 ? '' : 's'}.
-                    </>
-                  ) : (
-                    <> Aucune visite n'est encore due : celle-ci sera la première.</>
-                  )}
-                </p>
+                  <strong>{fmtDate(schedule.anchor)}</strong>
+                  {schedule.passed > 0
+                    ? ` — ${schedule.passed} déjà due${schedule.passed > 1 ? 's' : ''}, supposée${schedule.passed > 1 ? 's' : ''} faite${schedule.passed > 1 ? 's' : ''}.`
+                    : ' — celle-ci sera la première.'}
+                </span>
+              </p>
 
-                {/* Pas de « + 6 mois = » affiché : le pas de six mois se compte
-                    depuis la pose, et un mois plus court décale la somme
-                    (28/02 → 31/08). Une égalité fausse à l'écran est exactement
-                    ce qui a fait douter du calcul. */}
+              {/* Pas de « + 6 mois = » affiché : le pas se compte depuis la pose,
+                  et un mois plus court décale la somme (28/02 → 31/08). Une
+                  égalité fausse à l'écran est ce qui a fait douter du calcul. */}
+              <div className="ctrl-basis-calc">
                 {schedule.passed > 0 && (
-                  <div className="ctrl-basis-calc">
+                  <>
                     <label className="ctrl-basis-field">
                       <span>Dernier contrôle{assumedLast ? '' : ' (supposé)'}</span>
                       <input type="date" className="form-input form-input--plain"
@@ -578,30 +584,45 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
                         onChange={e => setLastControl(e.target.value)} />
                     </label>
                     <span className="ctrl-basis-arrow">→</span>
-                    <span className="ctrl-basis-field">
-                      <span>Prochain contrôle</span>
-                      <span className="ctrl-basis-result">
-                        {computedNext ? fmtDate(computedNext) : '—'}
-                      </span>
-                    </span>
-                    {differs && (
-                      <button type="button" className="btn btn--ghost btn--sm ctrl-basis-apply"
-                        onClick={applyComputed}>
-                        Utiliser cette date
-                      </button>
-                    )}
-                  </div>
+                  </>
                 )}
 
-                <p className="ctrl-basis-note">
-                  {differs
-                    ? `La fiche porte actuellement ${form.nextControlDate ? fmtDate(form.nextControlDate) : 'aucune date'}, qui ne suit pas ce calendrier.`
-                    : schedule.passed > 0
-                      ? "Si le dernier passage a eu lieu à une autre date, corrigez-la : l'échéance suit."
-                      : 'Modifiable directement dans le champ ci-dessus.'}
-                  {underContract && ' Une date posée ici remplace celle du contrat.'}
-                </p>
+                <span className="ctrl-basis-field">
+                  <span>Prochain</span>
+                  <span className="ctrl-basis-result">
+                    {computedNext ? fmtDate(computedNext) : '—'}
+                  </span>
+                </span>
+
+                {/* L'annuelle tombe à l'anniversaire de la pose, la semestrielle
+                    au milieu. L'alternance se déduit du calendrier, mais un parc
+                    repris peut en être ailleurs : on laisse trancher. */}
+                <label className="ctrl-basis-field">
+                  <span>Type de visite</span>
+                  <select className="form-input form-input--plain"
+                    value={nextType}
+                    onChange={e => setControlType(e.target.value)}>
+                    <option value="semestriel">Semestriel</option>
+                    <option value="annuel">Annuel</option>
+                  </select>
+                </label>
+
+                {differs && (
+                  <button type="button" className="btn btn--ghost btn--sm ctrl-basis-apply"
+                    onClick={applyComputed}>
+                    Utiliser cette date
+                  </button>
+                )}
               </div>
+
+              <p className="ctrl-basis-note">
+                {differs
+                  ? `La fiche porte ${form.nextControlDate ? fmtDate(form.nextControlDate) : 'aucune date'}, qui ne suit pas ce calendrier.`
+                  : schedule.passed > 0
+                    ? "Corrigez le dernier passage s'il a eu lieu autrement : l'échéance suit."
+                    : 'Modifiable dans le champ ci-dessus.'}
+                {underContract && ' Une date posée ici remplace celle du contrat.'}
+              </p>
             </div>
           )}
           </>
