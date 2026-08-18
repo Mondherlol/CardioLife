@@ -3,8 +3,38 @@ const fs             = require('fs')
 const Intervention   = require('../models/Intervention')
 const Site           = require('../models/Site')
 const { listInstallations } = require('../utils/deaParc')
+const { syncSiteNextControl } = require('../utils/controls')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
+
+/**
+ * Réaligne l'échéance affichée sur les DAE du site après un changement de visite.
+ *
+ * `Site.deas[].nextControlDate` est une copie de la date de la prochaine visite,
+ * tenue là pour que la fiche client l'affiche sans jointure. Toute écriture qui
+ * déplace cette prochaine visite — clôture, report, création, suppression — doit
+ * donc la rafraîchir. Sans ça la fiche client reste bloquée sur la visite qu'on
+ * vient de terminer, et annonce indéfiniment une date passée.
+ *
+ * Les échéances fixées à la main ne sont pas touchées : `syncSiteNextControl`
+ * les laisse tranquilles.
+ *
+ * La copie n'est qu'un cache : son échec ne doit pas faire échouer une visite
+ * déjà enregistrée. On le trace, et `scripts/resyncControls.js` la reconstruit.
+ */
+async function refreshNextControl(intervention) {
+  try {
+    let siteId = intervention?.site
+    // Visites d'avant les sites : seul l'appareil est connu, le site se déduit.
+    if (!siteId && intervention?.installation) {
+      const site = await Site.findOne({ 'deas._id': intervention.installation }).select('_id').lean()
+      siteId = site?._id
+    }
+    if (siteId) await syncSiteNextControl(siteId)
+  } catch (err) {
+    console.error('Échéance du site non rafraîchie :', err.message)
+  }
+}
 
 function isAdmin(user) {
   return ADMIN_ROLES.includes(user.role) || user.permissions?.canManageInterventions
@@ -178,6 +208,7 @@ async function create(req, res) {
       createdBy: req.user._id,
     })
 
+    await refreshNextControl(intervention)
     res.status(201).json(intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
@@ -228,6 +259,7 @@ async function update(req, res) {
     })
 
     await intervention.save()
+    await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
@@ -258,6 +290,8 @@ async function submitRapport(req, res) {
     })
 
     await intervention.save()
+    // La visite est faite : l'échéance du site passe à la suivante.
+    await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
@@ -442,6 +476,7 @@ async function closeIntervention(req, res) {
     })
 
     await intervention.save()
+    await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
@@ -499,6 +534,7 @@ async function remove(req, res) {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Accès refusé.' })
     const intervention = await Intervention.findByIdAndDelete(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    await refreshNextControl(intervention)
     res.json({ message: 'Supprimée.' })
   } catch (err) {
     res.status(500).json({ message: err.message })

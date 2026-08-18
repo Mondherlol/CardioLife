@@ -3,7 +3,7 @@ import {
   Monitor, Users, MoreHorizontal, Plus, Pencil, Trash2,
   KeyRound, Power, X, Eye, EyeOff, ShieldOff,
   CheckCircle2, AlertTriangle, HardDrive, Save, Boxes,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, Wrench,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
@@ -17,6 +17,7 @@ import {
 } from '../api/productCategories'
 import { categoryIcon } from '../constants/categoryIcons'
 import CategoryModal from '../components/CategoryModal'
+import DevFixPanel from '../components/DevFixPanel'
 
 /* ─── Constants ─────────────────────────────────────────────── */
 
@@ -25,6 +26,9 @@ const TABS = [
   { id: 'utilisateurs',  label: 'Utilisateurs',       icon: Users },
   { id: 'categories',    label: 'Catégories produits', icon: Boxes },
   { id: 'autres',        label: 'Autres',             icon: MoreHorizontal },
+  // Reprises de données : elles réécrivent du métier, l'onglet n'apparaît
+  // même pas pour les autres rôles.
+  { id: 'devfix',        label: 'Dev Fix',            icon: Wrench, superAdminOnly: true },
 ]
 
 const ROLES = ['admin', 'technicien', 'commercial', 'assistante', 'readonly']
@@ -980,7 +984,7 @@ export default function SettingsPage() {
     <div className="sp-root">
       <nav className="sp-nav">
         <p className="sp-nav-section">Paramètres</p>
-        {TABS.map(tab => {
+        {TABS.filter(t => !t.superAdminOnly || currentUser?.role === 'superadmin').map(tab => {
           const Icon = tab.icon
           return (
             <button
@@ -1000,6 +1004,7 @@ export default function SettingsPage() {
         {activeTab === 'utilisateurs' && <UtilisateursTab currentUser={currentUser} />}
         {activeTab === 'categories'   && <CategoriesTab />}
         {activeTab === 'autres'       && <AutresTab currentUser={currentUser} />}
+        {activeTab === 'devfix' && currentUser?.role === 'superadmin' && <DevFixPanel />}
       </div>
     </div>
   )

@@ -14209,6 +14209,102 @@ button {
 .dea-chip--expired  { background: var(--red-50);   border-color: var(--red-100);   color: var(--red-700); }
 .dea-chip--unknown  { background: var(--blue-50);  border-color: var(--blue-100);  color: var(--blue-700); }
 
+/* ═══════════════════════════════════════════════════════════
+   DEV FIX — reprises de données depuis les paramètres
+   ═══════════════════════════════════════════════════════════ */
+
+.devfix-task {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+  background: var(--surface);
+  max-width: 900px;
+}
+
+.devfix-task-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.devfix-task-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--blue-50);
+  color: var(--blue-600);
+}
+
+.devfix-task-title {
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.devfix-task-desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.devfix-opts { margin: 10px 0 4px; }
+
+/* Rappel du mode : simulation (neutre) ou écriture faite (vert). */
+.devfix-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--gray-50);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.devfix-banner--done {
+  background: var(--green-50);
+  border-color: var(--green-100);
+  color: var(--green-700);
+}
+
+.devfix-report { margin-top: 4px; }
+
+/* Les échéances d'un contrat tiennent dans une cellule : en pastilles, elles
+   restent lisibles sans étirer la colonne. */
+.devfix-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.devfix-date {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--gray-50);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.devfix-date em {
+  font-style: normal;
+  opacity: 0.65;
+  font-size: 10px;
+}
+
 /* Arborescence d'exemple d'une archive d'images : un bloc monospace discret,
    qui montre la forme attendue mieux qu'un paragraphe. */
 .ci-tree {
@@ -14223,6 +14319,88 @@ button {
   line-height: 1.6;
   white-space: pre;
   overflow-x: auto;
+}
+
+/* D'où sort l'échéance proposée dans la fiche DAE : le calendrier théorique
+   énoncé en clair, avec son repère corrigeable. Un calcul qu'on ne peut pas
+   suivre passe pour une erreur — c'est exactement ce qui s'est produit. */
+.ctrl-basis {
+  display: flex;
+  gap: 10px;
+  padding: 11px 13px;
+  margin-bottom: 14px;
+  border: 1px solid var(--blue-100, #dbeafe);
+  border-radius: 9px;
+  background: var(--blue-50);
+}
+
+.ctrl-basis-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--blue-600);
+}
+
+.ctrl-basis-body { min-width: 0; flex: 1; }
+
+.ctrl-basis-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* La ligne de calcul : repère + six mois = échéance. Elle se lit d'un coup. */
+.ctrl-basis-calc {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 8px;
+}
+
+.ctrl-basis-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ctrl-basis-field .form-input {
+  width: 158px;
+  background: var(--surface);
+}
+
+.ctrl-basis-arrow {
+  padding-bottom: 10px;
+  font-size: 15px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ctrl-basis-result {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--blue-100, #dbeafe);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--blue-700, #1d4ed8);
+  white-space: nowrap;
+}
+
+.ctrl-basis-apply {
+  margin-bottom: 2px;
+  align-self: flex-end;
+}
+
+.ctrl-basis-note {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 /* Échéance du prochain contrôle — cliquable pour la corriger sans quitter la

@@ -24,27 +24,65 @@ function fmtDate(value) {
   return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
-/**
- * Prochaine échéance hors contrat : on avance de six mois depuis la pose
- * jusqu'à dépasser aujourd'hui. Une date déjà passée ne serait pas « la
- * prochaine ».
- */
-function nextControlAfterInstall(dateStr) {
+const PERIOD_MONTHS = 6
+
+/** Ajoute des mois en restant dans le mois cible (31 août + 6 → 28/29 févr.). */
+function addMonths(date, n) {
+  const d   = new Date(date)
+  const day = d.getDate()
+  d.setMonth(d.getMonth() + n)
+  if (d.getDate() !== day) d.setDate(0)
+  return d
+}
+
+/** Personne ne se déplace le week-end : samedi + 2, dimanche + 1. */
+function skipWeekend(date) {
+  const d  = new Date(date)
+  const wd = d.getDay()
+  if (wd === 6) d.setDate(d.getDate() + 2)
+  else if (wd === 0) d.setDate(d.getDate() + 1)
+  return d
+}
+
+/** Échéance suivant une visite donnée : six mois plus tard, hors week-end. */
+function nextAfter(dateStr) {
   if (!dateStr) return ''
   const base = new Date(dateStr)
   if (Number.isNaN(base.getTime())) return ''
-  const day = base.getDate()
-  const d = new Date(base)
-  for (let i = 0; i < 60; i++) {
-    d.setMonth(d.getMonth() + 6)
-    if (d.getDate() !== day) d.setDate(0)   // 31 août + 6 → 28/29 févr.
-    if (d > new Date()) break
+  return toDateInput(skipWeekend(addMonths(base, PERIOD_MONTHS)))
+}
+
+/**
+ * Calendrier théorique d'un appareil : une visite tous les six mois depuis la
+ * pose.
+ *
+ * Sur un parc repris après coup, la pose est ancienne et le calendrier a déjà
+ * couru : les échéances antérieures à aujourd'hui sont réputées honorées. Dire
+ * « six mois après la pose » serait alors faux — pour une pose de décembre 2025
+ * la prochaine visite tombe un an après, parce qu'une visite a déjà eu lieu
+ * entre-temps. Ce sont ces échéances passées qu'il faut montrer : sans elles le
+ * calcul paraît arbitraire.
+ *
+ * Rend le repère (la dernière visite supposée faite), la prochaine échéance, et
+ * combien de visites le calendrier a déjà réclamées.
+ */
+function controlSchedule(dateStr) {
+  if (!dateStr) return null
+  const base = new Date(dateStr)
+  if (Number.isNaN(base.getTime())) return null
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  let last = null
+  for (let i = 1; i <= 120; i++) {
+    const due = addMonths(base, i * PERIOD_MONTHS)
+    if (due > today) {
+      return { anchor: base, last, next: skipWeekend(due), passed: i - 1 }
+    }
+    last = due
   }
-  // Personne ne se déplace le week-end : samedi + 2, dimanche + 1.
-  const weekday = d.getDay()
-  if (weekday === 6) d.setDate(d.getDate() + 2)
-  else if (weekday === 0) d.setDate(d.getDate() + 1)
-  return toDateInput(d)
+  return null
 }
 
 /**
@@ -120,6 +158,9 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
   const [deleting, setDeleting] = useState(false)
   // Tant que la date de contrôle n'a pas été saisie à la main, elle suit la pose.
   const [controlTouched, setControlTouched] = useState(!!dea?.nextControlManual)
+  // Dernière visite déclarée par l'utilisateur, quand le calendrier théorique
+  // ne correspond pas à ce qui s'est réellement passé sur le site.
+  const [assumedLast, setAssumedLast] = useState('')
   // Mise sous contrat depuis cette modale, quand le site n'en a pas encore.
   const [wantContract, setWantContract] = useState(false)
   const [contractNumber, setContractNumber] = useState('')
@@ -149,14 +190,47 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
 
   function setInstallationDate(value) {
+    // Changer la pose redéroule le calendrier : le repère précédent ne vaut plus.
+    setAssumedLast('')
     setForm(f => ({
       ...f,
       installationDate: value,
-      // Sous contrat, l'échéance est recalculée par le serveur depuis la pose.
-      nextControlDate: (controlTouched || underContract)
+      nextControlDate: controlTouched
         ? f.nextControlDate
-        : nextControlAfterInstall(value),
+        : (controlSchedule(value)?.next ? toDateInput(controlSchedule(value).next) : ''),
     }))
+  }
+
+  /* Repère du calcul : la dernière visite supposée faite. Déduite du calendrier
+     par défaut, corrigible quand le terrain sait mieux — c'est ce que les
+     utilisateurs ont en tête en ouvrant cet écran (« le dernier passage, c'était
+     en mars »), et de là découle tout le reste. */
+  const schedule = useMemo(
+    () => controlSchedule(form.installationDate),
+    [form.installationDate]
+  )
+  const lastControl = assumedLast || (schedule?.last ? toDateInput(schedule.last) : '')
+
+  /* Ce que le calendrier donne, indépendamment de ce qui est enregistré. Les
+     deux peuvent diverger — fiche reprise avec une échéance périmée, date posée
+     à la main autrefois : le bloc montre alors le calcul et propose de s'y
+     ranger, au lieu d'afficher une suite qui se contredit. */
+  const computedNext = assumedLast
+    ? nextAfter(assumedLast)
+    : (schedule?.next ? toDateInput(schedule.next) : '')
+  const differs = !!computedNext && computedNext !== form.nextControlDate
+
+  function setLastControl(value) {
+    setAssumedLast(value)
+    if (!value) return
+    // La date énoncée fait foi : l'échéance qui en découle ne se recalcule plus.
+    setControlTouched(true)
+    set('nextControlDate', nextAfter(value))
+  }
+
+  function applyComputed() {
+    setControlTouched(true)
+    set('nextControlDate', computedNext)
   }
 
   /* Prendre un exemplaire au stock renseigne aussi le type : les deux champs
@@ -443,6 +517,7 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
               </div>
             </div>
           ) : (
+          <>
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Date d'installation</label>
@@ -456,22 +531,80 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
               <label className="form-label">Prochain contrôle</label>
               <input type="date" className="form-input form-input--plain" value={form.nextControlDate}
                 onChange={e => { setControlTouched(true); set('nextControlDate', e.target.value) }} />
-              {controlTouched ? (
+              {controlTouched && (
                 <p className="form-hint">
                   <Info size={11} /> Date fixée à la main
                   {underContract && ' — elle remplace celle calculée par le contrat'}.
-                  {' '}Videz le champ pour revenir au calcul automatique.
                 </p>
-              ) : underContract ? (
-                <p className="form-hint">
-                  Calculée par le contrat {contract.contractNumber || ''} — visites tous les six mois
-                  à partir de la pose. Modifiable si elle ne correspond pas.
-                </p>
-              ) : form.nextControlDate ? (
-                <p className="form-hint">Première échéance à venir, six mois après la pose — modifiable.</p>
-              ) : null}
+              )}
             </div>
           </div>
+
+          {/* D'où sort la date proposée. « Six mois après la pose » est faux dès
+              que le calendrier a déjà couru : pour une pose de 2025, la prochaine
+              visite tombe un an après, parce qu'une autre a eu lieu entre-temps.
+              Cette visite intermédiaire, personne ne la voit — d'où l'impression
+              d'une date sortie de nulle part. On la nomme, et on la corrige. */}
+          {schedule && (
+            <div className="ctrl-basis">
+              <span className="ctrl-basis-icon"><CalendarClock size={15} /></span>
+              <div className="ctrl-basis-body">
+                <p className="ctrl-basis-line">
+                  Une visite tous les six mois depuis la pose du{' '}
+                  <strong>{fmtDate(schedule.anchor)}</strong>.
+                  {schedule.passed > 0 ? (
+                    <>
+                      {' '}{schedule.passed === 1
+                        ? 'Une visite était déjà due'
+                        : `${schedule.passed} visites étaient déjà dues`}
+                      {' '}avant aujourd'hui — on {schedule.passed === 1 ? 'la' : 'les'} suppose
+                      {' '}faite{schedule.passed === 1 ? '' : 's'}.
+                    </>
+                  ) : (
+                    <> Aucune visite n'est encore due : celle-ci sera la première.</>
+                  )}
+                </p>
+
+                {/* Pas de « + 6 mois = » affiché : le pas de six mois se compte
+                    depuis la pose, et un mois plus court décale la somme
+                    (28/02 → 31/08). Une égalité fausse à l'écran est exactement
+                    ce qui a fait douter du calcul. */}
+                {schedule.passed > 0 && (
+                  <div className="ctrl-basis-calc">
+                    <label className="ctrl-basis-field">
+                      <span>Dernier contrôle{assumedLast ? '' : ' (supposé)'}</span>
+                      <input type="date" className="form-input form-input--plain"
+                        value={lastControl}
+                        onChange={e => setLastControl(e.target.value)} />
+                    </label>
+                    <span className="ctrl-basis-arrow">→</span>
+                    <span className="ctrl-basis-field">
+                      <span>Prochain contrôle</span>
+                      <span className="ctrl-basis-result">
+                        {computedNext ? fmtDate(computedNext) : '—'}
+                      </span>
+                    </span>
+                    {differs && (
+                      <button type="button" className="btn btn--ghost btn--sm ctrl-basis-apply"
+                        onClick={applyComputed}>
+                        Utiliser cette date
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <p className="ctrl-basis-note">
+                  {differs
+                    ? `La fiche porte actuellement ${form.nextControlDate ? fmtDate(form.nextControlDate) : 'aucune date'}, qui ne suit pas ce calendrier.`
+                    : schedule.passed > 0
+                      ? "Si le dernier passage a eu lieu à une autre date, corrigez-la : l'échéance suit."
+                      : 'Modifiable directement dans le champ ci-dessus.'}
+                  {underContract && ' Une date posée ici remplace celle du contrat.'}
+                </p>
+              </div>
+            </div>
+          )}
+          </>
           )}
 
           {/* ── Contrat de maintenance du site ── */}
