@@ -41,6 +41,20 @@ function isAdmin(user) {
 }
 
 /**
+ * Qui peut écrire dans la checklist d'une visite.
+ *
+ * Le technicien assigné, d'abord : c'est lui qui est sur place. Et le
+ * superadmin, qui régularise une visite faite mais non saisie — technicien
+ * parti, tablette hors service — sans renvoyer personne sur site. Les autres
+ * rôles la lisent seulement : une fiche de contrôle engage l'entreprise, elle
+ * ne se corrige pas depuis un poste commercial.
+ */
+function canWriteFiche(user, intervention) {
+  if (user.role === 'superadmin') return true
+  return String(intervention.technicien || '') === String(user._id)
+}
+
+/**
  * Parc du site visité, joint à la fiche d'intervention.
  *
  * `installation` n'est plus une collection : c'est l'_id d'un sous-document de
@@ -273,8 +287,7 @@ async function submitRapport(req, res) {
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
     // Technician can only fill their own
-    if (req.user.role === 'technicien' &&
-        String(intervention.technicien) !== String(req.user._id)) {
+    if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
 
@@ -373,8 +386,7 @@ async function saveFiche(req, res) {
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
-    if (req.user.role === 'technicien' &&
-        String(intervention.technicien) !== String(req.user._id)) {
+    if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
 
@@ -428,8 +440,7 @@ async function removeFiche(req, res) {
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
-    if (req.user.role === 'technicien' &&
-        String(intervention.technicien) !== String(req.user._id)) {
+    if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
 
@@ -461,8 +472,7 @@ async function closeIntervention(req, res) {
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
-    if (req.user.role === 'technicien' &&
-        String(intervention.technicien) !== String(req.user._id)) {
+    if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
 
@@ -490,6 +500,12 @@ async function uploadFichePhoto(req, res) {
 
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!canWriteFiche(req.user, intervention)) {
+      // Le fichier est déjà sur le disque quand le refus tombe : multer écrit
+      // avant nous. On le reprend, sinon chaque tentative laisse un orphelin.
+      fs.unlink(req.file.path, () => {})
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
 
     // Les photos illustrent un appareil précis : elles suivent sa fiche.
     ensureFiches(intervention)
@@ -511,6 +527,10 @@ async function deleteFichePhoto(req, res) {
   try {
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    if (!canWriteFiche(req.user, intervention)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
 
     const { filename } = req.params
     ensureFiches(intervention)

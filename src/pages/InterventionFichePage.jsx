@@ -225,7 +225,7 @@ function PctInput({ value, onChange, onBlur, readOnly }) {
 }
 
 /* ─── CloseConfirm ─── */
-function CloseConfirm({ onClose, onConfirm, loading }) {
+function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal--sm">
@@ -237,6 +237,11 @@ function CloseConfirm({ onClose, onConfirm, loading }) {
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
             En clôturant l'intervention, le statut passera à <strong>Terminé</strong> et elle ne pourra plus être modifiée.
           </p>
+          {onBehalf && (
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
+              Vous clôturez à la place du technicien assigné : la clôture sera enregistrée à votre nom dans l'historique, et le technicien ne pourra plus saisir sa fiche.
+            </p>
+          )}
         </div>
         <div className="modal-footer">
           <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
@@ -325,10 +330,16 @@ export default function InterventionFichePage() {
   const goBack   = useGoBack('/interventions')
   const { user } = useAuth()
   const isTech   = user?.role === 'technicien'
+  const isSuper  = user?.role === 'superadmin'
   const isAdmin  = !isTech && (
-    user?.role === 'superadmin' || user?.role === 'admin' ||
+    isSuper || user?.role === 'admin' ||
     user?.permissions?.canManageInterventions
   )
+  /* La checklist appartient au technicien qui fait la visite. Le superadmin y
+     accède quand même — fiche vierge comprise — et peut la saisir et clôturer
+     à sa place : une visite faite mais non saisie (technicien parti, tablette
+     hors service) doit pouvoir être régularisée sans repasser sur site. */
+  const canFill  = isTech || isSuper
 
   /* ── State ── */
   const [iv,             setIv]             = useState(null)
@@ -694,7 +705,10 @@ export default function InterventionFichePage() {
     || (iv.fiches?.length ? [] : iv.fiche?.photos) || []
   const meta          = STATUS_META[iv.status] || STATUS_META.planifie
   const StatusIcon    = meta.Icon
-  const readOnly      = !isTech || isTermine   // fiche fields: tech-only, blocked when done
+  const readOnly      = !canFill || isTermine  // fiche fields: technicien + superadmin, blocked when done
+  /* Aucune fiche enregistrée côté serveur : rien n'a encore été saisi. Les
+     entrées locales, elles, sont pré-remplies depuis le parc et ne disent rien. */
+  const ficheVierge   = !(iv.fiches?.length)
   const adminReadOnly = isTermine              // admin fields: blocked for everyone when done
 
   const deviceImgFile = iv.deviceProduct?.images?.[0]
@@ -819,7 +833,7 @@ export default function InterventionFichePage() {
           >
             <Download size={14} /> PDF
           </button>
-          {isTech && !isTermine && (
+          {canFill && !isTermine && (
             <button className="btn btn--primary" onClick={() => setShowClose(true)}>
               <CheckCircle2 size={14} /> Clôturer l'intervention
             </button>
@@ -1000,9 +1014,23 @@ export default function InterventionFichePage() {
             </div>
           )}
 
-          {/* Fiche appareil — technicien : toujours ; non-technicien : seulement une fois remplie/validée */}
-          {(isTech || isTermine) ? (
+          {/* Fiche appareil — technicien et superadmin : toujours ; les autres :
+              seulement une fois remplie/validée */}
+          {(canFill || isTermine) ? (
           <>
+          {/* Le superadmin qui ouvre une fiche encore vierge doit savoir qu'il
+              saisit à la place du technicien, pas qu'il relit son travail. */}
+          {isSuper && !isTech && !isTermine && (
+            <div className="fiche-admin-notes">
+              <ClipboardList size={13} />
+              <span>
+                {ficheVierge
+                  ? "Fiche non encore remplie par le technicien. En tant que superadmin vous pouvez la saisir et clôturer l'intervention à sa place — chaque saisie est tracée à votre nom dans l'historique."
+                  : "Saisie en cours par le technicien. En tant que superadmin vous pouvez la compléter et clôturer l'intervention — vos modifications sont tracées à votre nom."}
+              </span>
+            </div>
+          )}
+
           {/* Une visite couvre souvent plusieurs DAE du site : chacun a sa
               fiche, et le technicien passe de l'un à l'autre ici. */}
           <FicheDeaTabs
@@ -1357,10 +1385,14 @@ export default function InterventionFichePage() {
             </div>
           )}
 
-          {/* Clôturer — technicien uniquement */}
-          {isTech && !isTermine && (
+          {/* Clôturer — technicien assigné, ou superadmin à sa place */}
+          {canFill && !isTermine && (
             <div className="fiche-close-bar">
-              <p className="fiche-close-hint">Tout est saisi ? Vous pouvez clôturer l'intervention.</p>
+              <p className="fiche-close-hint">
+                {isTech
+                  ? "Tout est saisi ? Vous pouvez clôturer l'intervention."
+                  : "Tout est saisi ? Vous pouvez clôturer l'intervention à la place du technicien."}
+              </p>
               <button className="btn btn--primary" style={{ minWidth: 200 }} onClick={() => setShowClose(true)}>
                 <CheckCircle2 size={15} /> Clôturer l'intervention
               </button>
@@ -1382,6 +1414,7 @@ export default function InterventionFichePage() {
           onClose={() => setShowClose(false)}
           onConfirm={handleClose}
           loading={closing}
+          onBehalf={!isTech}
         />
       )}
 
