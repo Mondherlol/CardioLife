@@ -31,6 +31,27 @@ export function daysUntil(value) {
   return Math.round((t - n) / 86400000)
 }
 
+/**
+ * Ce qu'une date de péremption veut dire, en clair.
+ *
+ * « 01/12/2027 » ne se convertit pas de tête en délai : à la saisie comme à la
+ * lecture, c'est le nombre de jours restants qui dit s'il faut commander la
+ * pièce. La couleur suit les seuils du reste du parc.
+ */
+export function expiryHint(value) {
+  const days = daysUntil(value)
+  if (days == null) return null
+  if (days < 0) {
+    const n = Math.abs(days)
+    return { level: 'expired', text: `Périmé depuis ${n} jour${n > 1 ? 's' : ''}` }
+  }
+  if (days === 0) return { level: 'expired', text: "Périme aujourd'hui" }
+  return {
+    level: days <= 60 ? 'soon' : 'ok',
+    text:  `Périme dans ${days} jour${days > 1 ? 's' : ''}`,
+  }
+}
+
 /* État global d'une liste de consommables : le plus urgent l'emporte. */
 export function itemsStatus(items) {
   if (!items?.length) return { level: 'none', count: 0, soonest: null }
@@ -107,6 +128,66 @@ export function ItemsButton({ kind, items, onClick, full }) {
       onClick={e => { e.stopPropagation(); onClick() }}
     >
       {body}
+    </button>
+  )
+}
+
+/**
+ * État détaillé des consommables d'un DAE, pour la liste des clients.
+ *
+ * La pastille ne disait qu'un nombre : il fallait ouvrir le site pour savoir si
+ * une batterie était à plat ou des électrodes périmées. Or c'est justement
+ * depuis cette liste qu'on décide d'appeler un client — le niveau de charge et
+ * l'échéance doivent donc s'y lire directement.
+ *
+ * La cellule reste cliquable : elle ouvre la gestion de la pièce, comme la
+ * pastille qu'elle remplace.
+ */
+export function ItemsCell({ kind, items, onClick }) {
+  const isBatt = kind === 'batteries'
+  const Icon   = isBatt ? BatteryMedium : Zap
+
+  if (!items?.length) {
+    return (
+      <button type="button" className="items-cell items-cell--empty"
+        title={`Aucune ${isBatt ? 'batterie' : 'électrode'} enregistrée — cliquez pour en ajouter`}
+        onClick={e => { e.stopPropagation(); onClick() }}>
+        <Icon size={12} />
+        <span>Non renseigné</span>
+      </button>
+    )
+  }
+
+  return (
+    <button type="button" className="items-cell"
+      title={`Modifier ${isBatt ? 'les batteries' : 'les électrodes'}`}
+      onClick={e => { e.stopPropagation(); onClick() }}>
+      {items.map((it, i) => {
+        const days  = daysUntil(it.expiryDate)
+        const level = days == null ? 'unknown' : days < 0 ? 'expired' : days <= 60 ? 'soon' : 'ok'
+        // Le niveau de charge a sa propre urgence : une batterie pleine dont la
+        // péremption est lointaine reste à remplacer si elle se vide.
+        const pct      = isBatt ? it.level : null
+        const pctLevel = pct == null ? null : pct < 25 ? 'expired' : pct < 50 ? 'soon' : 'ok'
+
+        return (
+          <span key={it._id || i} className="items-cell-line">
+            <Icon size={11} className="items-cell-icon" />
+            {/* Des électrodes, on veut la péremption : leur genre se lit sur la
+                fiche du DAE, il n'aide pas à décider d'un appel client. */}
+            {isBatt && (
+              <span className="items-cell-main">
+                {pct != null
+                  ? <span className={`items-cell-pct items-cell-pct--${pctLevel}`}>{pct} %</span>
+                  : <span className="items-cell-none">niveau —</span>}
+              </span>
+            )}
+            <span className={`items-cell-date items-cell-date--${level}`}>
+              {it.expiryDate ? formatDate(it.expiryDate) : 'DLC —'}
+            </span>
+          </span>
+        )
+      })}
     </button>
   )
 }

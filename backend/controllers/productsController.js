@@ -230,9 +230,12 @@ async function applyMovementToItems(product, { type, qty, reason, movement, seri
       : []
     const fresh = serialNumbers.filter(sn => !known.includes(sn))
 
+    /* Une pièce reçue = une ligne, avec ou sans numéro de série. Un lot de cinq
+       batteries condensé sur une ligne « × 5 » ne laissait suivre ni le statut
+       ni l'appareil de chacune : on ne savait pas laquelle était posée. */
     const docs = fresh.length
       ? fresh.map(sn => ({ ...base, serialNumber: sn, quantity: 1 }))
-      : [{ ...base, quantity: qty }]
+      : Array.from({ length: Math.max(1, qty) }, () => ({ ...base, quantity: 1 }))
     if (docs.length) await ProductItem.insertMany(docs)
     return
   }

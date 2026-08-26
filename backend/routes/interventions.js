@@ -16,6 +16,8 @@ router.patch('/:id/rapport', ctrl.submitRapport)
 router.patch('/:id/fiche',   ctrl.saveFiche)
 router.delete('/:id/fiche/:deaId', ctrl.removeFiche)
 router.patch('/:id/close',   ctrl.closeIntervention)
+/* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist. */
+router.put('/:id/dea-items/:kind', ctrl.saveDeaItems)
 
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
 router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)

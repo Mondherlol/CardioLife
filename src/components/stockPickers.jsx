@@ -71,15 +71,44 @@ export function useCatalogStock(categories) {
   return { products, stock, reloadStock, addProduct, addStockItem }
 }
 
-/** Ne garde du stock que ce qui est réellement posable pour ce modèle. */
+/**
+ * Ne garde du stock que ce qui est réellement posable pour ce modèle.
+ *
+ * Le stock est tenu pièce par pièce : cinq batteries d'un même lot font cinq
+ * articles. Proposer cinq fois « ABC-123 » n'aide personne — on choisit un lot,
+ * pas une pièce anonyme parmi ses jumelles. Les articles suivis par lot sont
+ * donc regroupés, avec le nombre restant et la DLC la plus proche : c'est elle
+ * qui doit partir en premier.
+ */
 export function stockOptionsFor(stock, { product, field }) {
-  return stock.filter(it => {
+  const usable = stock.filter(it => {
     if (!it[field]) return false
     // Déjà rattaché à un DEA du parc : l'appareil est posé, pas disponible.
     if (it.dea) return false
     if (product && String(it.product?._id || it.product) !== String(product._id)) return false
     return true
   })
+
+  // Un numéro de série ne désigne qu'une pièce : rien à regrouper.
+  if (field !== 'lotNumber') return usable
+
+  const groups = new Map()
+  usable.forEach(it => {
+    const key = `${String(it.product?._id || it.product || '')}|${it.lotNumber}`
+    const found = groups.get(key)
+    const units = it.quantity ?? 1
+    if (!found) {
+      groups.set(key, { ...it, availableCount: units })
+      return
+    }
+    found.availableCount += units
+    // La péremption la plus proche vaut pour le lot entier : c'est elle qui
+    // décide de l'urgence, et elle ne doit pas se perdre dans le regroupement.
+    if (it.expirationDate && (!found.expirationDate || new Date(it.expirationDate) < new Date(found.expirationDate))) {
+      found.expirationDate = it.expirationDate
+    }
+  })
+  return [...groups.values()]
 }
 
 /** Choix d'un modèle au catalogue — jamais de saisie libre. */
@@ -126,14 +155,16 @@ export function StockPicker({
       value={value}
       onChange={onChange}
       onClear={onClear}
-      displayFn={it => it[field] || it.serialNumber || it.lotNumber || '—'}
+      displayFn={it => {
+        const label = it[field] || it.serialNumber || it.lotNumber || '—'
+        // Un lot regroupe plusieurs pièces : dire combien il en reste évite
+        // d'aller compter les lignes du stock avant de choisir.
+        const left = it.availableCount ?? (it.quantity ?? 1)
+        return it.existing || left <= 1 ? label : `${label} (${left} disponibles)`
+      }}
       subtextFn={it => it.existing
         ? 'Déjà en place'
-        : [
-            it.product?.name,
-            itemStatus(it.status).label,
-            it.quantity > 1 ? `reste ${it.quantity}` : '',
-          ].filter(Boolean).join(' · ')}
+        : [it.product?.name, itemStatus(it.status).label].filter(Boolean).join(' · ')}
       placeholder={placeholder || `Rechercher un ${noun} en stock…`}
       onQueryChange={q => { setQuery(q); onQueryChange?.(q) }}
       onCreateNew={onUnknown}

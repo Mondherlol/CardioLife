@@ -11216,6 +11216,17 @@ button {
   line-height: 1.4;
 }
 
+.iv-history-changes {
+  margin: 5px 0 2px;
+  padding-left: 16px;
+  list-style: disc;
+}
+.iv-history-changes li {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .iv-history-meta {
   font-size: 12px;
   color: var(--text-secondary);
@@ -11810,6 +11821,72 @@ button {
   color: var(--green-700);
   flex-shrink: 0;
 }
+
+/* Correction d'une visite déjà clôturée : la barre change de couleur pour
+   qu'on ne saisisse jamais dans un rapport validé sans le savoir. */
+.fiche-done-bar--editing {
+  background: var(--amber-50);
+  border-color: var(--amber-100);
+  color: var(--amber-600);
+}
+
+.fiche-parc-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  background: var(--gray-50);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.fiche-parc-bar > svg { flex-shrink: 0; color: var(--text-muted); }
+.fiche-parc-bar .btn { margin-left: auto; }
+
+/* Pièce inconnue du parc : la section reste verrouillée tant qu'elle n'est
+   pas identifiée — la barre doit se voir, pas se fondre dans la fiche. */
+.fiche-parc-bar--missing {
+  background: var(--amber-50);
+  border: 1px dashed var(--amber-100);
+  color: var(--amber-600);
+}
+.fiche-parc-bar--missing > svg { color: var(--amber-500); }
+
+.fiche-parc-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.fiche-parc-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.fiche-parc-item strong { color: var(--text-primary); font-weight: 600; }
+
+.fiche-correction-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: var(--amber-50);
+  border: 1px dashed var(--amber-100);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--amber-600);
+  flex-shrink: 0;
+}
+.fiche-correction-note svg { flex-shrink: 0; color: var(--amber-500); margin-top: 2px; }
 
 /* ── Lightbox delete button ── */
 .lightbox-delete {
@@ -12562,6 +12639,20 @@ button {
 .pr-dt-pct--ok   { color: #15803d; background: #dcfce7; }
 .pr-dt-pct--warn { color: #b45309; background: #fef3c7; }
 .pr-dt-pct--bad  { color: #dc2626; background: #fee2e2; }
+/* Verdict d'une rubrique : « Valide » se lit d'un coup d'œil sur un rapport
+   imprimé, là où un tiret laissait le lecteur deviner. */
+.pr-dt-etat {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+.pr-dt-etat--ok  { color: #15803d; background: #dcfce7; }
+.pr-dt-etat--bad { color: #dc2626; background: #fee2e2; }
+
 .pr-dt-note {
   display: block;
   font-size: 10.5px;
@@ -12646,6 +12737,14 @@ button {
 
   .pr-device-table {
     page-break-inside: avoid;
+  }
+
+  /* Les pastilles de constat portent leur sens dans leur fond : à l'impression,
+     le navigateur le supprime par défaut et « Valide » perdrait son vert. */
+  .pr-dt-etat,
+  .pr-dt-pct {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
 
@@ -14168,6 +14267,73 @@ button {
   color: var(--red-700);
 }
 
+/* Délai d'une péremption, sous le champ ou la valeur qui la porte. */
+.expiry-hint {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.expiry-hint--ok      { color: var(--text-muted); }
+.expiry-hint--soon    { color: var(--amber-600); }
+.expiry-hint--expired { color: var(--red-600); }
+
+.items-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.items-cell:hover { border-color: var(--border); background: var(--gray-50); }
+
+.items-cell--empty {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.items-cell-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* Sans niveau de charge à afficher — les électrodes — la date ne se laisse pas
+   pousser au bord : elle suit son icône. */
+.items-cell-line > .items-cell-date:nth-child(2) { margin-right: auto; }
+.items-cell-icon { color: var(--text-muted); flex-shrink: 0; }
+.items-cell-main { flex: 1; min-width: 0; }
+.items-cell-none { color: var(--text-muted); }
+
+/* Niveau de charge et péremption ont chacun leur urgence : une batterie pleine
+   peut être périmée, une batterie neuve peut être à plat. */
+.items-cell-pct { font-weight: 700; }
+.items-cell-pct--ok       { color: var(--green-600); }
+.items-cell-pct--soon     { color: var(--amber-600); }
+.items-cell-pct--expired  { color: var(--red-600); }
+
+.items-cell-date {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.items-cell-date--ok      { background: var(--green-50); color: var(--green-700); }
+.items-cell-date--soon    { background: var(--amber-50); color: var(--amber-600); }
+.items-cell-date--expired { background: var(--red-50);   color: var(--red-600); }
+.items-cell-date--unknown { background: var(--gray-100); color: var(--text-muted); }
+
 .dea-cell-chips {
   display: flex;
   gap: 5px;
@@ -15360,35 +15526,105 @@ button {
 
 /* ── Modals DEA ──────────────────────────────── */
 .dea-modal-site {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 14px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-light);
   font-size: 13px;
   color: var(--text-secondary);
 }
+.dea-modal-site strong { color: var(--text-primary); }
+.dea-modal-sep { color: var(--text-muted); }
+
+/* Deux colonnes : le modèle et son numéro tiennent la largeur, la péremption
+   et la catégorie se partagent la ligne suivante. */
+.dea-item-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+.dea-item-grid-wide { grid-column: 1 / -1; }
+.dea-item-more { margin-top: 12px; }
+.dea-item-more-btn { margin: 12px 0 14px; }
+
+@media (min-width: 720px) {
+  /* Le modèle et son numéro se lisent côte à côte dès qu'il y a la place. */
+  .dea-item-grid-wide { grid-column: auto; }
+}
+
+.dea-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dea-chip {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.dea-chip:hover { border-color: var(--brand); color: var(--text-primary); }
+.dea-chip--on {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+.dea-pct {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dea-pct .form-input { width: 90px; }
+.dea-pct span { font-size: 13px; color: var(--text-muted); }
 
 .dea-item-card {
-  margin-top: 10px;
-  padding: 12px 14px;
+  margin-top: 12px;
+  padding: 14px 16px 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--gray-50);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .dea-item-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
+/* Le titre de la ligne prend le nom du modèle dès qu'il est choisi : « #1 » ne
+   disait rien de ce qu'on est en train de saisir. */
 .dea-item-index {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
+
+.dea-item-hint {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* L'ajout d'une deuxième pièce est l'exception : il vit au pied de la modale,
+   à gauche des actions, pas en tête de la saisie. */
+.dea-item-footer { justify-content: space-between; }
+.dea-item-footer .btn { margin-left: 0; }
+.dea-item-footer .add-field-btn { margin-right: auto; }
 
 @media (max-width: 900px) {
   .sites-xl-site { position: static; }
@@ -16477,8 +16713,16 @@ button {
 /* â”€â”€ Tableau des articles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .item-table td { vertical-align: middle; }
 
+/* Libellé et précision empilés : la seconde qualifie le premier, pas le
+   compteur qui la précède. */
+.cat-stat-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
 .cat-stat-hint {
-  margin-left: auto;
   font-size: 10.5px;
   font-weight: 600;
   color: var(--text-muted);

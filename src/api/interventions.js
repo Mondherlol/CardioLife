@@ -16,6 +16,11 @@ export const saveFiche          = (id, data)  => patch(`/interventions/${id}/fic
 export const removeFiche        = (id, deaId) => del(`/interventions/${id}/fiche/${deaId || 'none'}`)
 export const closeIntervention  = (id)        => patch(`/interventions/${id}/close`, {})
 
+/* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist :
+   elles vont au parc du site, pas dans la fiche d'intervention. */
+export const saveDeaItems = (id, kind, dea, items) =>
+  put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items })
+
 export const uploadFichePhoto = (id, file, deaId) => {
   const form = new FormData()
   form.append('photo', file)

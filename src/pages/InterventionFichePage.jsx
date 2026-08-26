@@ -6,18 +6,21 @@ import {
   Camera, Trash2, X, Save, ImagePlus, Hash, Navigation,
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
   ChevronDown, ClipboardList, History, Download, FileText, Building2, Wrench, Check,
+  Pencil, Lock, Unlock, BatteryMedium, AlertTriangle,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
   getIntervention, saveFiche, removeFiche, closeIntervention,
   uploadFichePhoto, deleteFichePhoto, fichePhotoUrl,
-  updateIntervention,
+  updateIntervention, saveDeaItems,
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
 import FicheDeaTabs, { deaLabel as deaLabelOf } from '../components/FicheDeaTabs'
+import DeaItemsModal from '../components/DeaItemsModal'
+import { expiryHint } from '../components/siteHelpers'
 import {
   getReplacements, replacementKind, replacementStatus, replacementReason,
 } from '../api/replacements'
@@ -35,6 +38,8 @@ const ACTION_LABELS = {
   modification:  'Intervention modifiée',
   rapport_soumis:'Fiche soumise',
   cloture:       'Intervention clôturée',
+  correction:    'Correction après clôture',
+  sync_parc:     'Fiche client mise à jour depuis la checklist',
 }
 
 const SIG_PRESETS = ['Complet', 'Incomplet', 'Manquant', 'Remplacé', 'À remplacer', 'Conforme']
@@ -181,7 +186,10 @@ function CheckPoint({ label, value, onChange, readOnly }) {
 }
 
 /* ─── Champ date compact de la checklist ─── */
-function DateField({ label, value, onChange, onBlur, readOnly }) {
+/* `expiry` : la date porte une péremption, on en donne le délai en clair —
+   « 01/12/2027 » ne se convertit pas de tête en nombre de jours. */
+function DateField({ label, value, onChange, onBlur, readOnly, expiry }) {
+  const hint = expiry ? expiryHint(value) : null
   return (
     <div className="fiche-datefield">
       <span className="fiche-datefield-label">{label}</span>
@@ -193,6 +201,7 @@ function DateField({ label, value, onChange, onBlur, readOnly }) {
         onChange={e => !readOnly && onChange(e.target.value)}
         onBlur={onBlur}
       />
+      {hint && <p className={`expiry-hint expiry-hint--${hint.level}`}>{hint.text}</p>}
     </div>
   )
 }
@@ -224,6 +233,60 @@ function PctInput({ value, onChange, onBlur, readOnly }) {
   )
 }
 
+/* ─── Pièce en place sur l'appareil ─── */
+/**
+ * Ce que le parc dit être monté sur le DAE — batterie ou électrodes.
+ *
+ * Contrôler l'état d'une pièce que personne n'a identifiée ne mène nulle part :
+ * on coche « absence de corrosion » sans savoir de quelle batterie il s'agit,
+ * et la fiche client reste vide. Tant que le parc l'ignore, la section reste
+ * verrouillée et cette barre demande l'identification. Elle écrit dans le parc,
+ * pas dans la fiche : ce qui est saisi ici est aussitôt visible côté client.
+ */
+function ParcItemsBar({ kind, items, readOnly, onEdit }) {
+  const isBatt = kind === 'batteries'
+  const Icon   = isBatt ? BatteryMedium : Radio
+  const noun   = isBatt ? 'la batterie' : 'les électrodes'
+
+  if (!items.length) {
+    return (
+      <div className="fiche-parc-bar fiche-parc-bar--missing">
+        <AlertTriangle size={14} />
+        <span>
+          Aucune {isBatt ? 'batterie' : 'électrode'} enregistrée sur cet appareil.
+          {!readOnly && <> Identifiez {noun} en place avant d'en contrôler l'état.</>}
+        </span>
+        {!readOnly && (
+          <button type="button" className="btn btn--primary btn--sm" onClick={onEdit}>
+            <Icon size={13} /> Renseigner {noun}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="fiche-parc-bar">
+      <Icon size={14} />
+      <div className="fiche-parc-items">
+        {items.map((it, i) => (
+          <span key={it._id || i} className="fiche-parc-item">
+            <strong>{it.productName || (isBatt ? 'Batterie' : 'Électrodes')}</strong>
+            {it.kind && <> · {it.kind}</>}
+            {(it.serialNumber || it.lotNumber) && <> · {it.serialNumber || it.lotNumber}</>}
+            {it.expiryDate && <> · exp. {new Date(it.expiryDate).toLocaleDateString('fr-FR')}</>}
+          </span>
+        ))}
+      </div>
+      {!readOnly && (
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onEdit}>
+          <Pencil size={13} /> Modifier
+        </button>
+      )}
+    </div>
+  )
+}
+
 /* ─── CloseConfirm ─── */
 function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
   return (
@@ -235,7 +298,15 @@ function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            En clôturant l'intervention, le statut passera à <strong>Terminé</strong> et elle ne pourra plus être modifiée.
+            En clôturant l'intervention, le statut passera à <strong>Terminé</strong> et la fiche ne sera plus modifiable sur le terrain.
+          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
+            Les relevés de la checklist — péremptions, niveau de batterie, n° de série,
+            emplacement — seront reportés sur la fiche client, et la date de prochain
+            contrôle sur le planning.
+          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
+            Un administrateur pourra encore la rouvrir pour corriger une erreur — la correction est alors tracée dans l'historique.
           </p>
           {onBehalf && (
             <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
@@ -355,6 +426,12 @@ export default function InterventionFichePage() {
   const [uploading,      setUploading]      = useState(false)
   const [deletingPic,    setDeletingPic]    = useState(null)
   const [showClose,      setShowClose]      = useState(false)
+  /* Mode correction : une intervention clôturée reste figée à l'écran tant que
+     l'admin ne demande pas explicitement à la rouvrir. On ne corrige pas une
+     fiche validée par inadvertance. */
+  const [unlocked,       setUnlocked]       = useState(false)
+  // Identification de la pièce montée : 'batteries' | 'electrodes' | null.
+  const [itemsKind,      setItemsKind]      = useState(null)
   const [closing,        setClosing]        = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
   const [deviceOpen,     setDeviceOpen]     = useState(true)
@@ -520,12 +597,24 @@ export default function InterventionFichePage() {
   /* Le parc du site et le visuel de l'appareil sont joints par la lecture
      complète ; les enregistrements partiels ne les renvoient pas. Sans cette
      fusion, la première sauvegarde ferait disparaître la photo et le choix
-     de l'appareil. */
-  function mergeIv(updated) {
+     de l'appareil.
+     Même chose pour les références peuplées : un enregistrement renvoie le
+     document brut, où `site` n'est plus qu'un identifiant. Les écrans qui
+     testent `iv.site?._id` — identification d'une pièce, signalement d'un
+     remplacement — cessaient donc de s'ouvrir dès la première saisie. */
+  const keepPopulated = (prev, next) => (next && next._id ? next : (prev ?? next))
+
+  function mergeIv(updated, { parc = false } = {}) {
     setIv(prev => ({
       ...updated,
-      siteDeas:      prev?.siteDeas      ?? updated.siteDeas,
-      deviceProduct: prev?.deviceProduct ?? updated.deviceProduct,
+      site:          keepPopulated(prev?.site,       updated.site),
+      client:        keepPopulated(prev?.client,     updated.client),
+      technicien:    keepPopulated(prev?.technicien, updated.technicien),
+      contract:      keepPopulated(prev?.contract,   updated.contract),
+      /* `parc` : la réponse porte un parc frais — une pièce vient d'y être
+         identifiée. Sans ça la barre continuerait d'annoncer l'appareil vide. */
+      siteDeas:      parc ? updated.siteDeas      : (prev?.siteDeas      ?? updated.siteDeas),
+      deviceProduct: parc ? updated.deviceProduct : (prev?.deviceProduct ?? updated.deviceProduct),
     }))
   }
 
@@ -678,6 +767,38 @@ export default function InterventionFichePage() {
     }
   }
 
+  /**
+   * Pièce identifiée sur l'appareil : elle va au parc, pas dans la fiche.
+   *
+   * La péremption relevée au catalogue remplit la checklist si elle est encore
+   * vide — le technicien vient de la lire sur l'étiquette, la ressaisir deux
+   * fois n'apporte rien. Une valeur déjà saisie n'est jamais écrasée : c'est
+   * elle qui vient du terrain.
+   */
+  async function handleItemsSaved(kind, updated) {
+    setItemsKind(null)
+    mergeIv(updated, { parc: true })
+
+    const dea = (updated.siteDeas || []).find(d => String(d._id) === activeKey)
+    const prefill = {}
+    if (kind === 'batteries') {
+      const exp = dea?.batteries?.[0]?.expiryDate
+      if (exp && !activeFiche?.batteriePeremption) prefill.batteriePeremption = exp
+    } else {
+      const adulte = dea?.electrodes?.find(e => e.kind === 'adulte' || !e.kind)
+      const enfant = dea?.electrodes?.find(e => e.kind === 'enfant')
+      if (adulte?.expiryDate && !activeFiche?.electrodesPeremptionAdulte) {
+        prefill.electrodesPeremptionAdulte = adulte.expiryDate
+      }
+      if (enfant?.expiryDate && !activeFiche?.electrodesPeremptionPediatrique) {
+        prefill.electrodesPeremptionPediatrique = enfant.expiryDate
+      }
+    }
+    if (!Object.keys(prefill).length) return
+    Object.entries(prefill).forEach(([k, v]) => set(k, v))
+    await saveFields(prefill)
+  }
+
   async function handleClose() {
     setClosing(true)
     try {
@@ -705,11 +826,16 @@ export default function InterventionFichePage() {
     || (iv.fiches?.length ? [] : iv.fiche?.photos) || []
   const meta          = STATUS_META[iv.status] || STATUS_META.planifie
   const StatusIcon    = meta.Icon
-  const readOnly      = !canFill || isTermine  // fiche fields: technicien + superadmin, blocked when done
+  /* Une visite clôturée ne se ressaisit plus : ni le technicien ni le
+     superadmin n'y touchent. Seul l'administrateur peut la rouvrir pour
+     corriger une erreur relevée après coup — chaque passage est tracé. */
+  const canCorrect    = isAdmin && isTermine
+  const correcting    = canCorrect && unlocked
+  const readOnly      = correcting ? false : (!canFill || isTermine)  // fiche fields
   /* Aucune fiche enregistrée côté serveur : rien n'a encore été saisi. Les
      entrées locales, elles, sont pré-remplies depuis le parc et ne disent rien. */
   const ficheVierge   = !(iv.fiches?.length)
-  const adminReadOnly = isTermine              // admin fields: blocked for everyone when done
+  const adminReadOnly = isTermine && !correcting  // admin fields: rouverts en mode correction
 
   const deviceImgFile = iv.deviceProduct?.images?.[0]
   const deviceImg     = deviceImgFile
@@ -721,6 +847,21 @@ export default function InterventionFichePage() {
   const siteDeas   = iv.siteDeas || []
   const activeDea  = siteDeas.find(d => String(d._id) === activeKey) || null
   const addableDeas = siteDeas.filter(d => !fiches.some(f => f.key === String(d._id)))
+
+  /* Le parc dit ce qui est monté sur l'appareil. Tant qu'il l'ignore, l'état de
+     la pièce ne se contrôle pas : on ne coche pas « pas de corrosion » sur une
+     batterie que personne n'a identifiée. */
+  const parcBatteries  = activeDea?.batteries  || []
+  const parcElectrodes = activeDea?.electrodes || []
+  /* Le verrou suppose un appareil connu du parc. Une fiche qui n'est rattachée
+     à aucun DAE — visite d'avant les sites, appareil retiré du parc depuis —
+     se saisit comme avant : la bloquer ne la rendrait pas plus juste. */
+  const parcKnown     = Boolean(activeDea)
+  /* Pièce non identifiée : les points de contrôle ne sont pas grisés, ils ne
+     s'affichent pas. Un formulaire figé sur un appareil vide n'apprend rien à
+     personne et laisse croire qu'il y a quelque chose à lire. */
+  const attendBatterie   = parcKnown && parcBatteries.length === 0
+  const attendElectrodes = parcKnown && parcElectrodes.length === 0
 
   const deviceLabel   = activeDea?.deviceType || fiche.deaLabel || snap.deviceType || 'DAE'
   const siteAddress   = iv.site?.address
@@ -875,20 +1016,34 @@ export default function InterventionFichePage() {
             </div>
           ) : (
             <div className="iv-history">
-              {[...iv.history].reverse().map((h, i) => (
-                <div key={i} className="iv-history-item">
-                  <div className="iv-history-dot" />
-                  <div>
-                    <div className="iv-history-action">
-                      {h.details || ACTION_LABELS[h.action] || h.action}
-                    </div>
-                    <div className="iv-history-meta">
-                      {h.userName && <>{h.userName} · </>}
-                      {fmtTs(h.date)}
+              {[...iv.history].reverse().map((h, i) => {
+                /* Une correction après clôture porte le détail des champs
+                   touchés : on le déplie plutôt que d'aligner une longue
+                   phrase que personne ne relit. */
+                const detailed = h.action === 'correction' || h.action === 'sync_parc'
+                const changes = detailed && h.details
+                  ? h.details.split(' · ').filter(Boolean)
+                  : null
+                return (
+                  <div key={i} className="iv-history-item">
+                    <div className="iv-history-dot" />
+                    <div>
+                      <div className="iv-history-action">
+                        {changes ? ACTION_LABELS[h.action] : (h.details || ACTION_LABELS[h.action] || h.action)}
+                      </div>
+                      {changes && (
+                        <ul className="iv-history-changes">
+                          {changes.map((c, j) => <li key={j}>{c}</li>)}
+                        </ul>
+                      )}
+                      <div className="iv-history-meta">
+                        {h.userName && <>{h.userName} · </>}
+                        {fmtTs(h.date)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -1031,6 +1186,19 @@ export default function InterventionFichePage() {
             </div>
           )}
 
+          {/* Correction après clôture : la fiche redevient saisissable, mais on
+              rappelle en permanence qu'on écrit dans une visite déjà validée. */}
+          {correcting && (
+            <div className="fiche-correction-note">
+              <Unlock size={14} />
+              <span>
+                <strong>Mode correction.</strong> L'intervention reste clôturée : vos
+                modifications sont enregistrées immédiatement et tracées à votre nom
+                dans l'historique.
+              </span>
+            </div>
+          )}
+
           {/* Une visite couvre souvent plusieurs DAE du site : chacun a sa
               fiche, et le technicien passe de l'un à l'autre ici. */}
           <FicheDeaTabs
@@ -1093,9 +1261,19 @@ export default function InterventionFichePage() {
                 </AutoField>
 
                 <AutoField label="Batterie" icon={Battery} saving={savingField === 'batteriePct' || savingField === 'batterieNote'}>
+                  {parcKnown && (
+                    <ParcItemsBar
+                      kind="batteries"
+                      items={parcBatteries}
+                      readOnly={readOnly}
+                      onEdit={() => setItemsKind('batteries')}
+                    />
+                  )}
+                  {!attendBatterie && (<>
                   <DateField
                     label="Date de péremption"
                     value={isoDate(fiche.batteriePeremption)}
+                    expiry
                     onChange={v => set('batteriePeremption', v)}
                     onBlur={() => handleBlur('batteriePeremption')}
                     readOnly={readOnly}
@@ -1132,14 +1310,25 @@ export default function InterventionFichePage() {
                     />
                   </div>
                   {savedField === 'batterieNote' && <span className="fiche-saved-ok">✓</span>}
+                  </>)}
                 </AutoField>
 
                 <AutoField label="Électrodes" icon={Radio} saving={savingField === 'electrodesPct' || savingField === 'electrodesNote'}>
+                  {parcKnown && (
+                    <ParcItemsBar
+                      kind="electrodes"
+                      items={parcElectrodes}
+                      readOnly={readOnly}
+                      onEdit={() => setItemsKind('electrodes')}
+                    />
+                  )}
+                  {!attendElectrodes && (<>
                   {/* Deux jeux distincts sur la checklist : adulte et pédiatrique. */}
                   <div className="fiche-date-row">
                     <DateField
                       label="Péremption adulte"
                       value={isoDate(fiche.electrodesPeremptionAdulte)}
+                      expiry
                       onChange={v => set('electrodesPeremptionAdulte', v)}
                       onBlur={() => handleBlur('electrodesPeremptionAdulte')}
                       readOnly={readOnly}
@@ -1147,6 +1336,7 @@ export default function InterventionFichePage() {
                     <DateField
                       label="Péremption pédiatrique"
                       value={isoDate(fiche.electrodesPeremptionPediatrique)}
+                      expiry
                       onChange={v => set('electrodesPeremptionPediatrique', v)}
                       onBlur={() => handleBlur('electrodesPeremptionPediatrique')}
                       readOnly={readOnly}
@@ -1202,9 +1392,11 @@ export default function InterventionFichePage() {
                     />
                   </div>
                   {savedField === 'electrodesNote' && <span className="fiche-saved-ok">✓</span>}
+                  </>)}
                 </AutoField>
 
                 {/* Kit de secours — absent de la fiche jusqu'ici. */}
+
                 <AutoField label="Kit de secours" icon={Package}>
                   <div className="fiche-check-group">
                     <CheckPoint label="Gants de protection présents"
@@ -1282,6 +1474,11 @@ export default function InterventionFichePage() {
                   {weekendShifted && (
                     <p className="fiche-hint">
                       Date reportée au lundi : les visites ne se font pas le week-end.
+                    </p>
+                  )}
+                  {!readOnly && fiche.prochainControle && (
+                    <p className="fiche-hint">
+                      À la clôture, la prochaine visite du site sera déplacée à cette date dans le planning.
                     </p>
                   )}
                 </AutoField>
@@ -1400,9 +1597,25 @@ export default function InterventionFichePage() {
           )}
 
           {isTermine && (
-            <div className="fiche-done-bar">
-              <CheckCircle2 size={16} />
-              Intervention clôturée le {fmt(iv.completedDate)}
+            <div className={`fiche-done-bar${correcting ? ' fiche-done-bar--editing' : ''}`}>
+              {correcting ? <Unlock size={16} /> : <CheckCircle2 size={16} />}
+              <span>
+                {correcting
+                  ? 'Correction en cours — intervention clôturée le ' + fmt(iv.completedDate)
+                  : 'Intervention clôturée le ' + fmt(iv.completedDate)}
+              </span>
+              {canCorrect && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => setUnlocked(u => !u)}
+                >
+                  {correcting
+                    ? <><Lock size={14} /> Terminer les corrections</>
+                    : <><Pencil size={14} /> Corriger la checklist</>}
+                </button>
+              )}
             </div>
           )}
         </>
@@ -1415,6 +1628,20 @@ export default function InterventionFichePage() {
           onConfirm={handleClose}
           loading={closing}
           onBehalf={!isTech}
+        />
+      )}
+
+      {/* Identification de la pièce montée : la même modale que la fiche
+          client, mais enregistrée par la route de l'intervention — le
+          technicien n'a pas le droit de gestion des clients. */}
+      {itemsKind && iv.site?._id && activeDea && (
+        <DeaItemsModal
+          site={iv.site}
+          dea={activeDea}
+          kind={itemsKind}
+          onClose={() => setItemsKind(null)}
+          save={items => saveDeaItems(id, itemsKind, activeDea._id, items)}
+          onSaved={updated => handleItemsSaved(itemsKind, updated)}
         />
       )}
 

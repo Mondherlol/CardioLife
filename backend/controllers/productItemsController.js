@@ -155,9 +155,12 @@ async function create(req, res) {
     history:   [{ action: 'Entrée en stock', to: 'disponible', note: rest.notes || '', user: req.user._id }],
   }
 
+  /* Une pièce reçue = une ligne. Un lot de cinq batteries tenu sur une seule
+     ligne « × 5 » ne laissait suivre ni le statut ni l'appareil de chacune. Le
+     n° de lot reste porté par chaque ligne : c'est lui qui les rassemble. */
   const docs = serials.length
     ? serials.map(sn => ({ ...base, serialNumber: sn, quantity: 1 }))
-    : [{ ...base, quantity: Math.max(1, Number(quantity) || 1) }]
+    : Array.from({ length: Math.max(1, Number(quantity) || 1) }, () => ({ ...base, quantity: 1 }))
 
   const created = await ProductItem.insertMany(docs)
 
@@ -205,12 +208,65 @@ async function update(req, res) {
   res.json(fresh)
 }
 
+/* Les catégories qui se montent sur un DAE. Ce sont aussi les noms des listes
+   correspondantes dans `Site.deas`. */
+const CONSUMABLE_KINDS = ['batteries', 'electrodes']
+
+/**
+ * Monte l'article sur un DAE du parc et l'inscrit sur la fiche client.
+ *
+ * Sortir une électrode du stock « pour l'École X » ne disait pas sur lequel de
+ * ses appareils elle allait : la fiche client restait vide, et le prochain
+ * technicien trouvait une armoire dont personne n'avait noté la pièce. On écrit
+ * donc la ligne dans le parc, à l'endroit exact où la checklist ira la lire.
+ *
+ * Retourne `null` si l'article n'est pas un consommable ou si le DAE est
+ * introuvable — l'appelant en tire un refus plutôt qu'un rattachement muet.
+ */
+async function mountOnDea(item, { deaId, siteId }) {
+  const kind = CONSUMABLE_KINDS.includes(item.category) ? item.category : null
+  if (!kind) return null
+
+  const site = siteId
+    ? await Site.findById(siteId)
+    : await Site.findOne({ 'deas._id': deaId })
+  const dea = site?.deas?.id(deaId)
+  if (!dea) return null
+
+  const product = await Product.findById(item.product).select('name').lean()
+
+  // Une pièce déjà inscrite sur cet appareil ne s'y ajoute pas deux fois.
+  const already = (dea[kind] || []).some(l =>
+    String(l.product || '') === String(item.product || '')
+    && ((item.serialNumber && l.serialNumber === item.serialNumber)
+      || (item.lotNumber && l.lotNumber === item.lotNumber)))
+
+  if (!already) {
+    dea[kind].push({
+      product:      item.product,
+      productName:  product?.name || '',
+      serialNumber: item.serialNumber || '',
+      lotNumber:    item.lotNumber || '',
+      expiryDate:   item.expirationDate || undefined,
+      // Le genre des électrodes ne se devine pas du stock : il se précise sur
+      // la fiche du DAE, où l'appareil et son usage sont connus.
+      ...(kind === 'electrodes' ? { kind: '' } : {}),
+    })
+    await site.save()
+  }
+
+  item.dea    = dea._id
+  item.site   = site._id
+  item.client = site.client
+  return { site, dea, kind }
+}
+
 /**
  * POST /api/product-items/:id/status — les transitions de la fiche article :
  * réserver, libérer, envoyer en maintenance, remettre en stock, vendre, casser.
  */
 async function changeStatus(req, res) {
-  const { status, note, client, site, contract, until, saleDate, salePrice } = req.body
+  const { status, note, client, site, contract, until, saleDate, salePrice, dea } = req.body
   if (!ProductItem.STATUSES.includes(status)) {
     return res.status(422).json({ message: 'Statut invalide.' })
   }
@@ -223,9 +279,19 @@ async function changeStatus(req, res) {
     return res.status(400).json({ message: `L'article est déjà « ${STATUS_LABELS[status]} ».` })
   }
 
-  item.status = status
+  /* Une pièce désignée pour un appareil précis y est montée : sortir du stock
+     « pour l'École X » sans dire sur quel DAE laissait la fiche client vide, et
+     personne ne savait laquelle de ses trois armoires avait été servie. Le
+     statut suit le geste réel — « Installé », pas « Vendu ». */
+  const mounted = dea ? await mountOnDea(item, { deaId: dea, siteId: site }) : null
+  if (dea && !mounted) {
+    return res.status(404).json({ message: 'DAE introuvable sur ce site.' })
+  }
 
-  if (status === 'reserve') {
+  const effective = mounted ? 'installe' : status
+  item.status = effective
+
+  if (effective === 'reserve') {
     item.reservedFor = {
       client:   client   || undefined,
       // Le site destinataire : sans lui, impossible de savoir où poser.
@@ -241,30 +307,32 @@ async function changeStatus(req, res) {
     item.reservedFor = undefined
   }
 
-  if (status === 'vendu') {
+  if (effective === 'vendu') {
     item.saleDate  = saleDate || new Date()
     item.client    = client || item.client || undefined
     if (salePrice != null && salePrice !== '') item.salePrice = Number(salePrice)
   }
-  if (status === 'disponible') {
+  if (effective === 'disponible') {
     // Retour en stock : on repart d'une ardoise propre côté client.
     item.saleDate = undefined
     item.client   = undefined
     item.site     = undefined
     item.dea      = undefined
-  } else if (status === 'reserve' && client) {
+  } else if (effective === 'reserve' && client) {
     // Réservé : l'article est déjà « promis » à ce client, la fiche client doit
     // le voir sans attendre la pose.
     item.client = client
   }
 
   await logHistory(item, {
-    action: `${STATUS_LABELS[from]} → ${STATUS_LABELS[status]}`,
-    from, to: status, note, user: req.user._id,
+    action: mounted
+      ? `Montée sur un DAE — ${mounted.site.name}`
+      : `${STATUS_LABELS[from]} → ${STATUS_LABELS[effective]}`,
+    from, to: effective, note, user: req.user._id,
   })
 
   // Une transition entre « en stock » et « sorti » déplace le compteur du modèle.
-  if (IN_STOCK_STATUSES.includes(from) !== IN_STOCK_STATUSES.includes(status)) {
+  if (IN_STOCK_STATUSES.includes(from) !== IN_STOCK_STATUSES.includes(effective)) {
     const product = await Product.findById(item.product)
     if (product) {
       const qty = item.quantity ?? 1
@@ -275,7 +343,7 @@ async function changeStatus(req, res) {
         quantity:      qty,
         previousStock: product.stock,
         newStock:      isExit ? product.stock - qty : product.stock + qty,
-        reason:        note || `${STATUS_LABELS[from]} → ${STATUS_LABELS[status]}`,
+        reason:        note || `${STATUS_LABELS[from]} → ${STATUS_LABELS[effective]}`,
         serialNumbers: item.serialNumber ? [item.serialNumber] : [],
         lotNumber:     item.lotNumber || undefined,
         createdBy:     req.user._id,

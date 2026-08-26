@@ -325,8 +325,12 @@ export default function ProductItemsTab({ product, category, onStockChanged }) {
               className={`cat-stat cat-stat--${s.tone}${s.alert && s.value > 0 ? ' cat-stat--alert' : ''}`}>
               <span className="cat-stat-icon"><Icon size={15} strokeWidth={2.2} /></span>
               <span className="cat-stat-value">{s.value}</span>
-              <span className="cat-stat-label">{s.label}</span>
-              {s.hint && <span className="cat-stat-hint">{s.hint}</span>}
+              {/* La précision se lit sous son libellé : rejetée en bout de
+                  ligne, « Prochaine : … » semblait se rapporter au compteur. */}
+              <span className="cat-stat-text">
+                <span className="cat-stat-label">{s.label}</span>
+                {s.hint && <span className="cat-stat-hint">{s.hint}</span>}
+              </span>
             </div>
           )
         })}
@@ -395,10 +399,16 @@ export default function ProductItemsTab({ product, category, onStockChanged }) {
             <thead>
               <tr>
                 <th>Référence</th>
-                <th>N° de série</th>
+                {/* Une catégorie suivie par lot n'a pas de numéro de série :
+                    afficher l'un pour l'autre laissait croire à une erreur de
+                    saisie devant une colonne pourtant juste. */}
+                <th>{category?.tracksSerial ? 'N° de série' : category?.tracksLot ? 'N° de lot' : 'Identifiant'}</th>
                 <th>Fournisseur</th>
                 <th>Date d'entrée</th>
-                <th>Date de vente</th>
+                {/* La mise en service vient de la fiche du DAE : c'est elle qui
+                    intéresse sur un consommable, pas une date de vente que ces
+                    articles n'ont jamais. */}
+                <th>Date d'activation</th>
                 <th>Client</th>
                 {tracksLot && <th>DLC</th>}
                 <th>Statut</th>
@@ -415,12 +425,19 @@ export default function ProductItemsTab({ product, category, onStockChanged }) {
                       {it.serialNumber
                         ? <span className="mv-serial-chip">{it.serialNumber}</span>
                         : isLot
-                          ? <span className="mv-lot-chip">{it.lotNumber} × {it.quantity}</span>
+                          ? (
+                            <span className="mv-lot-chip">
+                              {it.lotNumber}
+                              {/* Une ligne = une pièce depuis la réception unitaire ;
+                                  le « × n » ne subsiste que sur les lots d'avant. */}
+                              {it.quantity > 1 && <> × {it.quantity}</>}
+                            </span>
+                          )
                           : <span className="cell-muted">{it.quantity > 1 ? `${it.quantity} unités` : '—'}</span>}
                     </td>
                     <td className="cell-muted">{it.supplier || '—'}</td>
                     <td className="cell-muted">{formatDate(it.entryDate) || '—'}</td>
-                    <td className="cell-muted">{formatDate(it.saleDate) || '—'}</td>
+                    <td className="cell-muted">{formatDate(it.activationDate) || '—'}</td>
                     <td>
                       {it.client?.name || it.reservedFor?.client?.name
                         ? <span className="cell-primary">{it.client?.name || it.reservedFor.client.name}</span>

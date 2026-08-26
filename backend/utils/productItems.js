@@ -84,7 +84,11 @@ async function logHistory(item, { action, from, to, note, user }) {
  */
 async function findItemForDea(deaId, { product, serialNumber } = {}) {
   if (deaId && mongoose.isValidObjectId(deaId)) {
-    const linked = await ProductItem.findOne({ dea: deaId })
+    /* Le DAE porte aussi ses consommables : sans filtrer sur le modèle, on
+       ramènerait une batterie là où l'appareil est attendu. */
+    const linked = await ProductItem.findOne(
+      product && mongoose.isValidObjectId(product) ? { dea: deaId, product } : { dea: deaId }
+    )
     if (linked) return linked
   }
   const sn = String(serialNumber || '').trim()
@@ -133,8 +137,113 @@ async function syncDeaWithItem(site, dea) {
   if (wasInStock && !IN_STOCK_STATUSES.includes(item.status)) await syncProductStock(item.product)
 }
 
+/** Une ligne du parc et un article de stock désignent-ils la même pièce ? */
+function samePiece(line, item) {
+  if (String(line.product || '') !== String(item.product || '')) return false
+  if (line.serialNumber && item.serialNumber) return line.serialNumber === item.serialNumber
+  if (line.lotNumber && item.lotNumber)       return line.lotNumber === item.lotNumber
+  return false
+}
+
+/**
+ * Détache une unité d'un article de stock qui en porte plusieurs.
+ *
+ * Les réceptions créent une ligne par pièce, mais un lot entré avant ce
+ * changement peut encore en porter cinq : on ne va pas sortir les cinq du stock
+ * parce qu'une seule est montée sur un DAE.
+ */
+async function takeOneUnit(item) {
+  if ((item.quantity ?? 1) <= 1) return item
+
+  const copy = item.toObject()
+  delete copy._id
+  delete copy.createdAt
+  delete copy.updatedAt
+  copy.quantity = 1
+  copy.history  = [{ action: 'Unité détachée du lot', to: item.status, date: new Date() }]
+
+  const [unit] = await ProductItem.insertMany([copy])
+  item.quantity -= 1
+  await item.save()
+  return unit
+}
+
+/**
+ * Aligne le stock sur les consommables déclarés d'un DAE.
+ *
+ * Déclarer la batterie montée sur un appareil, c'est la sortir du stock : elle
+ * est chez le client, pas à l'entrepôt. Sans ce pont, la liste des articles
+ * continuait d'annoncer cinq batteries disponibles alors que l'une d'elles
+ * était posée — et personne ne savait chez qui.
+ *
+ * Le mouvement va dans les deux sens : une pièce retirée de la fiche du DAE
+ * retourne au stock. Une pièce absente du stock (parc repris, saisie
+ * antérieure) ne bloque rien : il n'y a simplement rien à décompter.
+ *
+ * `kind` vaut 'batteries' ou 'electrodes' — c'est aussi le slug de la catégorie
+ * du catalogue, qui distingue ces articles de l'appareil lui-même.
+ */
+async function syncDeaConsumables(site, dea, kind) {
+  const lines = (dea[kind] || []).filter(l => l.product && (l.serialNumber || l.lotNumber))
+  const attached = await ProductItem.find({ dea: dea._id, category: kind })
+
+  // 1. Ce qui n'est plus déclaré sur l'appareil retourne au stock.
+  for (const item of attached) {
+    if (lines.some(l => samePiece(l, item))) continue
+    const from = item.status
+    item.dea = undefined; item.site = undefined; item.client = undefined
+    item.reservedFor = undefined
+    item.activationDate = undefined
+    item.status = 'disponible'
+    await logHistory(item, { action: 'Retour en stock (retirée du DAE)', from, to: 'disponible', note: site.name })
+    await syncProductStock(item.product)
+  }
+
+  // 2. Ce qui vient d'être déclaré sort du stock, une unité par ligne.
+  for (const line of lines) {
+    const already = attached.find(item => samePiece(line, item))
+    if (already) {
+      // Corriger la date d'activation sur la fiche client la corrige au stock.
+      const wanted = line.activationDate ? new Date(line.activationDate).getTime() : null
+      const held   = already.activationDate ? new Date(already.activationDate).getTime() : null
+      if (wanted !== held) {
+        already.activationDate = line.activationDate || undefined
+        await already.save()
+      }
+      continue
+    }
+
+    const query = {
+      product:  line.product,
+      status:   { $in: IN_STOCK_STATUSES },
+      dea:      null,
+      ...(line.serialNumber ? { serialNumber: line.serialNumber } : { lotNumber: line.lotNumber }),
+    }
+    // La DLC la plus proche part la première.
+    const found = await ProductItem.findOne(query).sort({ expirationDate: 1, entryDate: 1 })
+    if (!found) continue
+
+    const unit = await takeOneUnit(found)
+    const from = unit.status
+    unit.dea    = dea._id
+    unit.site   = site._id
+    unit.client = site.client
+    unit.status = 'installe'
+    unit.reservedFor = undefined
+    // La mise en service se saisit sur la fiche du DAE : le stock la recopie
+    // plutôt que d'inventer une date de pose.
+    if (line.activationDate) unit.activationDate = line.activationDate
+    await logHistory(unit, {
+      action: 'Montée sur un DAE',
+      from, to: 'installe',
+      note: [site.name, dea.deviceType || dea.serialNumber].filter(Boolean).join(' · '),
+    })
+    await syncProductStock(unit.product)
+  }
+}
+
 module.exports = {
   modelViewSlugs, summarize,
-  syncProductStock, logHistory, findItemForDea, syncDeaWithItem,
+  syncProductStock, logHistory, findItemForDea, syncDeaWithItem, syncDeaConsumables,
   IN_STOCK_STATUSES,
 }

@@ -32,6 +32,33 @@ function Section({ title, children }) {
   )
 }
 
+/**
+ * Verdict d'une rubrique du rapport, à partir de ses points de contrôle.
+ *
+ * Un tiret ne disait pas si le technicien avait vérifié la pièce et l'avait
+ * trouvée bonne, ou s'il n'avait rien noté. Le lecteur du rapport — client
+ * compris — doit lire le constat, pas l'absence de chiffre.
+ *
+ * `null` seulement quand aucun point n'a été renseigné : là, le tiret est
+ * honnête.
+ */
+function etatVerdict(points) {
+  const known = points.filter(v => v === true || v === false)
+  if (!known.length) return null
+  return known.every(Boolean)
+    ? { ok: true,  label: 'Valide' }
+    : { ok: false, label: 'Non conforme' }
+}
+
+function EtatChip({ verdict }) {
+  if (!verdict) return null
+  return (
+    <span className={`pr-dt-etat pr-dt-etat--${verdict.ok ? 'ok' : 'bad'}`}>
+      {verdict.label}
+    </span>
+  )
+}
+
 function InfoRow({ label, value }) {
   return (
     <tr>
@@ -149,7 +176,12 @@ export default function InterventionPrintPage() {
               </tr>
             </thead>
             <tbody>
-              {fiches.map((fiche, i) => (
+              {fiches.map((fiche, i) => {
+                /* Ce que la visite a constaté : absence de corrosion pour la
+                   batterie, emballage intact et jeu adapté pour les électrodes. */
+                const battEtat = etatVerdict([fiche.batterieEtat])
+                const elecEtat = etatVerdict([fiche.electrodesEmballage, fiche.electrodesAdaptees])
+                return (
                 <tr key={fiche.dea || i}>
                   {/* Type + image */}
                   <td>
@@ -177,6 +209,7 @@ export default function InterventionPrintPage() {
                   {/* Batterie — la pièce posée est nommée : c'est elle qui a
                       quitté le stock. */}
                   <td className="pr-dt-center">
+                    <EtatChip verdict={battEtat} />
                     {fiche.batteriePct != null && (
                       <span className={`pr-dt-pct pr-dt-pct--${
                         fiche.batteriePct >= 80 ? 'ok' : fiche.batteriePct >= 40 ? 'warn' : 'bad'
@@ -192,11 +225,13 @@ export default function InterventionPrintPage() {
                     {fiche.batterieNote && (
                       <span className="pr-dt-note">{fiche.batterieNote}</span>
                     )}
-                    {fiche.batteriePct == null && !fiche.batterieNote && !fiche.batterieRemplacee && '—'}
+                    {!battEtat && fiche.batteriePct == null && !fiche.batterieNote
+                      && !fiche.batterieRemplacee && '—'}
                   </td>
 
                   {/* Électrodes */}
                   <td className="pr-dt-center">
+                    <EtatChip verdict={elecEtat} />
                     {fiche.electrodesPct != null && (
                       <span className={`pr-dt-pct pr-dt-pct--${
                         fiche.electrodesPct >= 80 ? 'ok' : fiche.electrodesPct >= 40 ? 'warn' : 'bad'
@@ -212,13 +247,15 @@ export default function InterventionPrintPage() {
                     {fiche.electrodesNote && (
                       <span className="pr-dt-note">{fiche.electrodesNote}</span>
                     )}
-                    {fiche.electrodesPct == null && !fiche.electrodesNote && !fiche.electrodesRemplacees && '—'}
+                    {!elecEtat && fiche.electrodesPct == null && !fiche.electrodesNote
+                      && !fiche.electrodesRemplacees && '—'}
                   </td>
 
                   {/* Armoire */}
                   <td className="pr-dt-center">{fiche.armoire || '—'}</td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </Section>

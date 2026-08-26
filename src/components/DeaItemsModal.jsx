@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { X, AlertTriangle, Plus, Trash2, Zap, BatteryMedium } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { updateDea } from '../api/sites'
+import { getProductCategories } from '../api/productCategories'
+import { expiryHint } from './siteHelpers'
 import {
   useCatalogStock, stockOptionsFor, ProductPicker, StockPicker, ConfirmUnknown,
   formatApiError,
@@ -13,7 +15,22 @@ function toDateInput(value) {
 }
 
 const EMPTY_ELECTRODE = { productName: '', kind: '', lotNumber: '', expiryDate: '', notes: '' }
-const EMPTY_BATTERY   = { productName: '', serialNumber: '', activationDate: '', expiryDate: '', level: '', notes: '' }
+/* Une batterie qu'on vient de monter est pleine : le technicien corrige à la
+   marge plutôt que de saisir « 100 » à chaque pose. */
+const EMPTY_BATTERY   = { productName: '', serialNumber: '', activationDate: '', expiryDate: '', level: 100, notes: '' }
+
+/** Le délai que représente une date de péremption, sous le champ qui la porte. */
+function ExpiryHint({ value }) {
+  const hint = expiryHint(value)
+  if (!hint) return null
+  return <p className={`expiry-hint expiry-hint--${hint.level}`}>{hint.text}</p>
+}
+
+const ELECTRODE_KINDS = [
+  { value: 'adulte', label: 'Adulte' },
+  { value: 'enfant', label: 'Enfant' },
+  { value: '',       label: 'Non précisé' },
+]
 
 const CONFIG = {
   electrodes: {
@@ -21,11 +38,12 @@ const CONFIG = {
     icon:       Zap,
     empty:      EMPTY_ELECTRODE,
     category:   'electrodes',
-    // Les électrodes se suivent par lot, les batteries à l'exemplaire.
+    // Suivi par défaut, le temps que la catégorie du catalogue réponde.
     field:      'lotNumber',
     addLabel:   'Ajouter une paire',
     emptyHint:  'Aucune électrode enregistrée sur ce DEA.',
     noun:       'modèle d\'électrodes',
+    rowLabel:   'Jeu',
   },
   batteries: {
     title:      'Batteries',
@@ -36,6 +54,7 @@ const CONFIG = {
     addLabel:   'Ajouter une batterie',
     emptyHint:  'Aucune batterie enregistrée sur ce DEA.',
     noun:       'modèle de batterie',
+    rowLabel:   'Batterie',
   },
 }
 
@@ -51,20 +70,48 @@ const CONFIG = {
  *  dea     - DEA concerné
  *  kind    - 'electrodes' | 'batteries'
  *  onClose - () => void
- *  onSaved - (site) => void
+ *  onSaved - (résultat de `save`) => void
+ *  save    - (items) => Promise, optionnel. La fiche d'intervention passe le
+ *            sien : le technicien identifie la pièce sans avoir le droit de
+ *            gestion des clients que demande la route des sites.
  */
-export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
+export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save }) {
   const cfg   = CONFIG[kind]
   const Icon  = cfg.icon
-  const field = cfg.field
 
   const { products, stock, addProduct, addStockItem } = useCatalogStock(cfg.category)
+
+  /* Série ou lot : c'est la catégorie du catalogue qui tranche, pas le type de
+     pièce. Les batteries de ce parc se suivent par lot ; leur demander un n° de
+     série revenait à chercher dans un stock qui n'en porte aucun. */
+  const [tracksSerial, setTracksSerial] = useState(null)
+  useEffect(() => {
+    let alive = true
+    getProductCategories()
+      .then(res => {
+        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : [])
+        const cat  = list.find(c => c.slug === cfg.category)
+        if (alive && cat) setTracksSerial(Boolean(cat.tracksSerial))
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [cfg.category])
+
+  // Tant que la catégorie n'a pas répondu, on garde l'usage historique du type.
+  const field = tracksSerial === null
+    ? cfg.field
+    : (tracksSerial ? 'serialNumber' : 'lotNumber')
+  const numberLabel = field === 'serialNumber' ? 'N° de série' : 'N° de lot'
 
   /* Une ligne porte les champs saisis, plus le modèle et l'article retenus.
      Les lignes déjà enregistrées n'ont que des libellés : on les présente comme
      « déjà en place » le temps de les rattacher au référentiel. */
+  const newRow = () => ({ ...cfg.empty, product: null, stockItem: null, query: '' })
+
+  /* Ouvrir sur une liste vide obligerait à cliquer « Ajouter » avant de
+     pouvoir saisir quoi que ce soit : on ouvre la ligne pour lui. */
   const [items, setItems] = useState(() =>
-    (dea[kind] || []).map(it => ({
+    ((dea[kind] || []).length ? dea[kind] : [null]).map(it => (it === null ? newRow() : {
       ...cfg.empty,
       ...it,
       expiryDate:     toDateInput(it.expiryDate),
@@ -74,8 +121,10 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
       // catalogue complète, résolue une fois le catalogue chargé.
       savedProductId: it.product ? String(it.product._id || it.product) : null,
       product: null,
-      stockItem: it[field]
-        ? { _id: null, [field]: it[field], existing: true }
+      /* Série ou lot : la ligne déjà enregistrée porte l'un ou l'autre, et la
+         catégorie peut ne pas avoir encore répondu. On garde les deux. */
+      stockItem: (it.serialNumber || it.lotNumber)
+        ? { _id: null, serialNumber: it.serialNumber, lotNumber: it.lotNumber, existing: true }
         : null,
       query: '',
     }))
@@ -88,6 +137,8 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
 
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
+  // Lignes dont les champs secondaires sont dépliés : { [index]: true }.
+  const [details, setDetails] = useState({})
 
   /* Rattache les lignes existantes à leur fiche catalogue dès son chargement. */
   useEffect(() => {
@@ -105,7 +156,7 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
     setItems(list => list.map((it, i) => (i === idx ? { ...it, ...changes } : it)))
   }
   function setItem(idx, key, value) { patch(idx, { [key]: value }) }
-  function addItem()       { setItems(list => [...list, { ...cfg.empty, product: null, stockItem: null, query: '' }]) }
+  function addItem()       { setItems(list => [...list, newRow()]) }
   function removeItem(idx) { setItems(list => list.filter((_, i) => i !== idx)) }
 
   /* Prendre un article au stock renseigne aussi le modèle et la péremption :
@@ -201,15 +252,20 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
           expiryDate:  it.expiryDate || null,
           notes:       it.notes,
         }
+        // L'identifiant retenu va dans le champ que suit la catégorie : ranger
+        // un n° de lot dans `serialNumber` rendrait le parc illisible.
+        const number = { serialNumber: '', lotNumber: '', [field]: it.stockItem?.[field] || '' }
+
         return kind === 'batteries'
-          ? { ...base,
-              serialNumber:   it.stockItem?.serialNumber || '',
+          ? { ...base, ...number,
               activationDate: it.activationDate || null,
               level:          it.level === '' ? null : Number(it.level) }
-          : { ...base, kind: it.kind, lotNumber: it.stockItem?.lotNumber || '' }
+          : { ...base, ...number, kind: it.kind }
       })
 
-      const updated = await updateDea(site._id, dea._id, { [kind]: payload })
+      const updated = save
+        ? await save(payload)
+        : await updateDea(site._id, dea._id, { [kind]: payload })
       toast.success(`${cfg.title} mises à jour.`)
       onSaved(updated)
     } catch (err) {
@@ -228,31 +284,30 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
         </div>
         <form onSubmit={handleSubmit} className="modal-body">
           <p className="dea-modal-site">
-            {site.name} · <strong>{dea.deviceType || 'DEA'}</strong>
-            {dea.serialNumber && <span className="inst-sn-chip" style={{ marginLeft: 8 }}>{dea.serialNumber}</span>}
+            <span>{site.name}</span>
+            <span className="dea-modal-sep">·</span>
+            <strong>{dea.deviceType || 'DEA'}</strong>
+            {dea.serialNumber && <span className="inst-sn-chip">{dea.serialNumber}</span>}
           </p>
-
-          <div className="form-label-row">
-            <div className="form-section-title" style={{ margin: 0 }}>{cfg.title} ({items.length})</div>
-            <button type="button" className="add-field-btn" onClick={addItem}>
-              <Plus size={12} /> {cfg.addLabel}
-            </button>
-          </div>
 
           {items.length === 0 && <p className="cd-empty-hint">{cfg.emptyHint}</p>}
 
           {items.map((it, i) => (
             <div key={i} className="dea-item-card">
               <div className="dea-item-head">
-                <span className="dea-item-index">#{i + 1}</span>
+                <span className="dea-item-index">
+                  {it.product?.name || it.productName || `${cfg.rowLabel} ${i + 1}`}
+                </span>
+                {/* Retirer la dernière ligne reste possible : une pièce déposée
+                    et non remplacée doit pouvoir se déclarer. */}
                 <button type="button" className="remove-field-btn" title="Retirer"
                   onClick={() => removeItem(i)}>
                   <Trash2 size={13} />
                 </button>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
+              <div className="dea-item-grid">
+                <div className="form-group dea-item-grid-wide">
                   <label className="form-label">Modèle *</label>
                   <ProductPicker
                     products={products}
@@ -263,11 +318,8 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
                     noun={cfg.noun}
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">
-                    {field === 'serialNumber' ? 'N° de série' : 'N° de lot'}
-                    <span className="form-label-opt"> (depuis le stock)</span>
-                  </label>
+                <div className="form-group dea-item-grid-wide">
+                  <label className="form-label">{numberLabel}</label>
                   <StockPicker
                     items={stockOptionsFor(stock, { product: it.product, field })}
                     value={it.stockItem}
@@ -279,52 +331,73 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved }) {
                     product={it.product}
                   />
                 </div>
-              </div>
 
-              <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Date de péremption</label>
+                  <label className="form-label">Péremption</label>
                   <input type="date" className="form-input form-input--plain" value={it.expiryDate}
                     onChange={e => setItem(i, 'expiryDate', e.target.value)} />
+                  <ExpiryHint value={it.expiryDate} />
                 </div>
+
                 {kind === 'electrodes' ? (
                   <div className="form-group">
                     <label className="form-label">Catégorie</label>
-                    <select className="form-input form-input--plain" value={it.kind}
-                      onChange={e => setItem(i, 'kind', e.target.value)}>
-                      <option value="">Non précisé</option>
-                      <option value="adulte">Adulte</option>
-                      <option value="enfant">Enfant</option>
-                    </select>
+                    {/* Trois choix qu'on touche du doigt : sur tablette, dérouler
+                        une liste pour deux options coûte plus qu'elle ne rapporte. */}
+                    <div className="dea-chips">
+                      {ELECTRODE_KINDS.map(k => (
+                        <button key={k.value} type="button"
+                          className={`dea-chip${it.kind === k.value ? ' dea-chip--on' : ''}`}
+                          onClick={() => setItem(i, 'kind', k.value)}>
+                          {k.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="form-group">
-                    <label className="form-label">Date d'activation</label>
-                    <input type="date" className="form-input form-input--plain" value={it.activationDate}
-                      onChange={e => setItem(i, 'activationDate', e.target.value)} />
+                    <label className="form-label">Niveau de charge</label>
+                    <div className="dea-pct">
+                      <input type="number" min="0" max="100" className="form-input form-input--plain"
+                        value={it.level} onChange={e => setItem(i, 'level', e.target.value)} />
+                      <span>%</span>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {kind === 'batteries' && (
-                <div className="form-group" style={{ maxWidth: '50%' }}>
-                  <label className="form-label">Niveau de charge (%)</label>
-                  <input type="number" min="0" max="100" className="form-input form-input--plain"
-                    value={it.level} onChange={e => setItem(i, 'level', e.target.value)} placeholder="0 – 100" />
+              {/* Date d'activation et note ne servent qu'à la marge : elles ne
+                  méritent pas de tenir la moitié de l'écran à chaque saisie. */}
+              {details[i] ? (
+                <div className="dea-item-grid dea-item-more">
+                  {kind === 'batteries' && (
+                    <div className="form-group">
+                      <label className="form-label">Date d'activation</label>
+                      <input type="date" className="form-input form-input--plain" value={it.activationDate}
+                        onChange={e => setItem(i, 'activationDate', e.target.value)} />
+                    </div>
+                  )}
+                  <div className="form-group dea-item-grid-wide">
+                    <label className="form-label">Note</label>
+                    <input className="form-input form-input--plain" value={it.notes}
+                      onChange={e => setItem(i, 'notes', e.target.value)} placeholder="Remarque…" />
+                  </div>
                 </div>
+              ) : (
+                <button type="button" className="add-field-btn dea-item-more-btn"
+                  onClick={() => setDetails(d => ({ ...d, [i]: true }))}>
+                  <Plus size={12} /> {kind === 'batteries' ? 'Activation, note' : 'Note'}
+                </button>
               )}
-
-              <div className="form-group">
-                <label className="form-label">Notes</label>
-                <input className="form-input form-input--plain" value={it.notes}
-                  onChange={e => setItem(i, 'notes', e.target.value)} placeholder="Remarque…" />
-              </div>
             </div>
           ))}
 
           {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
 
-          <div className="modal-footer">
+          <div className="modal-footer dea-item-footer">
+            <button type="button" className="add-field-btn" onClick={addItem}>
+              <Plus size={12} /> {cfg.addLabel}
+            </button>
             <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
             <button type="submit" className="btn btn--primary" disabled={loading}>
               {loading ? <span className="login-btn-spinner" /> : 'Enregistrer'}

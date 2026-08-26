@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Wrench, Play, Eye, CheckCircle2, AlertTriangle, Info, CalendarClock, Trash2,
+  ClipboardList, Boxes,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getMaintenanceTasks, runMaintenanceTask } from '../api/maintenance'
@@ -194,8 +195,126 @@ function TaskCard({ task }) {
               : <><CheckCircle2 size={14} /> Appliqué en {(report.durationMs / 1000).toFixed(1)} s.</>}
           </div>
           {report.task === 'resync-controls' && <ResyncReport report={report} />}
+          {report.task === 'resync-fiches'   && <FicheSyncReport report={report} />}
+          {report.task === 'split-stock-lots' && <SplitLotsReport report={report} />}
         </>
       )}
+    </div>
+  )
+}
+
+/** Compte rendu d'une remontée des checklists sur le parc. */
+function FicheSyncReport({ report }) {
+  const { totals, sites, dry } = report
+
+  if (!sites.length) {
+    return (
+      <div className="devfix-report">
+        <p className="ci-legend">
+          Les fiches clients sont déjà à jour : aucune visite clôturée n'apporte
+          de valeur que le parc ne connaisse pas.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="devfix-report">
+      <div className="ci-preview-summary">
+        <div className="ci-summary-chip ci-summary-chip--total">
+          <ClipboardList size={14} />
+          <strong>{totals.visits}</strong> visite{totals.visits !== 1 ? 's' : ''} clôturée{totals.visits !== 1 ? 's' : ''}
+        </div>
+        <div className="ci-summary-chip">
+          <CheckCircle2 size={14} />
+          <strong>{totals.changes}</strong> valeur{totals.changes !== 1 ? 's' : ''}
+          {dry ? ' à reporter' : ' reportée' + (totals.changes !== 1 ? 's' : '')}
+          {' '}sur {totals.sites} site{totals.sites !== 1 ? 's' : ''}
+        </div>
+      </div>
+
+      <div className="ci-table-wrap">
+        <table className="ci-preview-table">
+          <thead>
+            <tr>
+              <th>Site</th>
+              <th>Dernière visite</th>
+              <th>{dry ? 'À reporter sur la fiche client' : 'Reporté sur la fiche client'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sites.map((s, i) => (
+              <tr key={i}>
+                <td className="ci-cell-name">{s.site}</td>
+                <td>
+                  {fmtDate(s.date)}
+                  <div className="ci-cell-sub">{s.visits} visite{s.visits !== 1 ? 's' : ''}</div>
+                </td>
+                <td>
+                  <div className="devfix-dates">
+                    {s.changes.map((c, j) => <span key={j} className="devfix-date">{c}</span>)}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/** Compte rendu d'un éclatement des lots en lignes unitaires. */
+function SplitLotsReport({ report }) {
+  const { totals, lines, dry } = report
+
+  if (!lines.length) {
+    return (
+      <div className="devfix-report">
+        <p className="ci-legend">
+          Aucune ligne de stock ne porte plusieurs unités : le stock est déjà
+          tenu pièce par pièce.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="devfix-report">
+      <div className="ci-preview-summary">
+        <div className="ci-summary-chip ci-summary-chip--total">
+          <Boxes size={14} />
+          <strong>{totals.lines}</strong> ligne{totals.lines !== 1 ? 's' : ''} multi-unités
+        </div>
+        <div className="ci-summary-chip">
+          <CheckCircle2 size={14} />
+          <strong>{totals.created}</strong> ligne{totals.created !== 1 ? 's' : ''}
+          {dry ? ' à créer' : ' créée' + (totals.created !== 1 ? 's' : '')}
+        </div>
+      </div>
+
+      <div className="ci-table-wrap">
+        <table className="ci-preview-table">
+          <thead>
+            <tr>
+              <th>Article</th>
+              <th>Lot / n° de série</th>
+              <th>Quantité</th>
+              <th>{dry ? 'Lignes à créer' : 'Lignes créées'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={i}>
+                <td className="ci-cell-name">{l.product}</td>
+                <td>{l.lotNumber}</td>
+                <td>{l.before}</td>
+                <td>+{l.created}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

@@ -1,9 +1,13 @@
-import { Phone, Mail, HeartPulse, ArrowUpRight, Plus } from 'lucide-react'
-import { formatDate, ItemsButton, ContractChip, NoDeaBox, NextControlChip } from './siteHelpers'
+import { ArrowUpRight } from 'lucide-react'
+import { formatDate, ItemsCell, ContractChip, NoDeaBox, NextControlChip } from './siteHelpers'
 
 /**
- * Vue tableau : une ligne par DEA, les colonnes site et responsable fusionnées
- * sur les DEA du site.
+ * Vue tableau : une ligne par DEA, les colonnes du site fusionnées sur ses DEA.
+ *
+ * Les colonnes disent l'état du parc, pas l'annuaire : responsable et lieu
+ * d'installation se lisent sur la fiche du site, alors que le niveau de
+ * batterie et la péremption des électrodes décident d'un appel client — c'est
+ * ici qu'ils doivent être lisibles d'un coup d'œil.
  *
  * Le clic suit la colonne pointée : les cellules du site ouvrent sa fiche,
  * celles d'un DEA ouvrent ce DEA, une pastille de consommables ouvre ses
@@ -26,25 +30,23 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
         <colgroup>
           <col style={{ width: 215 }} />
           <col style={{ width: 80 }} />
-          <col style={{ width: 205 }} />
-          <col style={{ width: 190 }} />
-          <col style={{ width: 165 }} />
+          <col style={{ width: 175 }} />
           <col style={{ width: 145 }} />
           <col style={{ width: 110 }} />
           <col style={{ width: 130 }} />
-          <col style={{ width: 165 }} />
+          <col style={{ width: 175 }} />
+          <col style={{ width: 175 }} />
         </colgroup>
         <thead>
           <tr>
             <th className="sites-xl-site"><div className="th-inner">Site</div></th>
             <th className="sites-xl-ct"><div className="th-inner">Contrat</div></th>
-            <th className="sites-xl-resp"><div className="th-inner">Responsable</div></th>
-            <th><div className="th-inner">Lieu d'installation</div></th>
             <th><div className="th-inner">Type</div></th>
             <th><div className="th-inner">N° de série</div></th>
             <th><div className="th-inner">Installation</div></th>
             <th><div className="th-inner">Prochain contrôle</div></th>
-            <th><div className="th-inner">Consommables</div></th>
+            <th><div className="th-inner">Batteries</div></th>
+            <th><div className="th-inner">Électrodes</div></th>
           </tr>
         </thead>
 
@@ -76,23 +78,6 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                 <ContractChip contract={contracts[String(site._id)]} />
               </td>
 
-              <td className="sites-xl-resp" rowSpan={span}
-                onClick={cellClick(() => act.editContacts(site))}
-                title="Modifier les responsables">
-                {site.contacts?.length ? (
-                  <div className="resp-stack">
-                    {site.contacts.map((c, i) => (
-                      <div key={i} className="resp-block">
-                        {c.name && <span className="resp-name">{c.name}</span>}
-                        {c.phone && <span className="resp-line"><Phone size={10} /> {c.phone}</span>}
-                        {c.email && <span className="resp-line"><Mail size={10} /> {c.email}</span>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="site-cell-empty">Aucun responsable</span>
-                )}
-              </td>
             </>
           )
 
@@ -117,16 +102,11 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                   onContextMenu={e => act.deaMenu(e, site, dea)}>
                   {i === 0 && siteCells}
 
+                  {/* Le numéro d'ordre suivait le lieu d'installation : il
+                      reste utile pour distinguer deux DAE d'un même site. */}
                   <td className="dea-td" onClick={cellClick(() => act.editDea(site, dea))}
                     title="Modifier ce DEA">
-                    <div className="dea-loc-cell">
-                      {deas.length > 1 && <span className="dea-index">{i + 1}</span>}
-                      {dea.location || <span className="site-cell-empty">—</span>}
-                    </div>
-                  </td>
-
-                  <td className="dea-td" onClick={cellClick(() => act.editDea(site, dea))}
-                    title="Modifier ce DEA">
+                    {deas.length > 1 && <span className="dea-index">{i + 1}</span>}
                     {dea.deviceType || <span className="site-cell-empty">—</span>}
                     {dea.status === 'a_installer' && (
                       <span className="dea-pending-tag" title="Pose planifiée, pas encore posée">
@@ -156,12 +136,13 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                   </td>
 
                   <td className="dea-td">
-                    <div className="dea-cell-chips">
-                      <ItemsButton kind="batteries"  items={dea.batteries}
-                        onClick={() => act.items(site, dea, 'batteries')} />
-                      <ItemsButton kind="electrodes" items={dea.electrodes}
-                        onClick={() => act.items(site, dea, 'electrodes')} />
-                    </div>
+                    <ItemsCell kind="batteries" items={dea.batteries}
+                      onClick={() => act.items(site, dea, 'batteries')} />
+                  </td>
+
+                  <td className="dea-td">
+                    <ItemsCell kind="electrodes" items={dea.electrodes}
+                      onClick={() => act.items(site, dea, 'electrodes')} />
                   </td>
                 </tr>
               ))}

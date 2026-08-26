@@ -10,21 +10,28 @@ const Control      = require('../models/Control')
 const Appointment  = require('../models/Appointment')
 const Contract     = require('../models/Contract')
 const Replacement  = require('../models/Replacement')
-const { syncDeaWithItem, syncProductStock, logHistory } = require('../utils/productItems')
+const { syncDeaWithItem, syncDeaConsumables, syncProductStock, logHistory } = require('../utils/productItems')
 const { getOrCreateSiteFolder } = require('../utils/siteDocsFolder')
 const { trainingQuota } = require('../utils/training')
 const { syncSiteControls } = require('../utils/controls')
 
-/** La dépose d'un DEA remet l'exemplaire correspondant en stock. */
+/**
+ * La dépose d'un DEA remet en stock tout ce qui était monté dessus.
+ *
+ * L'appareil, mais aussi ses consommables : depuis que la batterie déclarée
+ * sort du stock, la laisser rattachée à un DAE qui n'existe plus la rendrait
+ * introuvable — ni en stock, ni chez un client.
+ */
 async function releaseItemForDea(deaId) {
-  const item = await ProductItem.findOne({ dea: deaId })
-  if (!item) return
-  const from = item.status
-  item.dea = undefined; item.site = undefined; item.client = undefined
-  item.reservedFor = undefined
-  item.status = 'disponible'
-  await logHistory(item, { action: 'Retour en stock (DEA retiré du parc)', from, to: 'disponible' })
-  await syncProductStock(item.product)
+  const items = await ProductItem.find({ dea: deaId })
+  for (const item of items) {
+    const from = item.status
+    item.dea = undefined; item.site = undefined; item.client = undefined
+    item.reservedFor = undefined
+    item.status = 'disponible'
+    await logHistory(item, { action: 'Retour en stock (DEA retiré du parc)', from, to: 'disponible' })
+    await syncProductStock(item.product)
+  }
 }
 
 function checkValidation(req, res) {
@@ -338,6 +345,11 @@ async function updateDea(req, res) {
   dea.set(req.body)
   await site.save()
   await syncDeaWithItem(site, dea)
+  // Batterie ou électrodes déclarées depuis la fiche client : même pont vers le
+  // stock que depuis la checklist du technicien.
+  for (const kind of ['batteries', 'electrodes']) {
+    if (req.body[kind] !== undefined) await syncDeaConsumables(site, dea, kind)
+  }
   res.json(await refreshSchedule(site, req.user._id))
 }
 

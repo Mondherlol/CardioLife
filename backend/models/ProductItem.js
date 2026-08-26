@@ -72,6 +72,10 @@ const productItemSchema = new mongoose.Schema({
   },
 
   saleDate: { type: Date },
+  /* Mise en service de la pièce chez le client. Elle est saisie sur la fiche du
+     DAE — c'est le terrain qui sait quand la batterie a été activée — et
+     recopiée ici pour que le stock la lise sans passer par le parc. */
+  activationDate: { type: Date },
   client:   { type: mongoose.Schema.Types.ObjectId, ref: 'Client', index: true },
   site:     { type: mongoose.Schema.Types.ObjectId, ref: 'Site' },
   // `_id` du sous-document DEA de `Site.deas` — le pont entre le stock et le parc.

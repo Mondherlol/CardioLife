@@ -4,6 +4,8 @@ const Intervention   = require('../models/Intervention')
 const Site           = require('../models/Site')
 const { listInstallations } = require('../utils/deaParc')
 const { syncSiteNextControl } = require('../utils/controls')
+const { syncFicheToParc } = require('../utils/ficheSync')
+const { syncDeaWithItem, syncDeaConsumables } = require('../utils/productItems')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
 
@@ -45,13 +47,177 @@ function isAdmin(user) {
  *
  * Le technicien assigné, d'abord : c'est lui qui est sur place. Et le
  * superadmin, qui régularise une visite faite mais non saisie — technicien
- * parti, tablette hors service — sans renvoyer personne sur site. Les autres
- * rôles la lisent seulement : une fiche de contrôle engage l'entreprise, elle
- * ne se corrige pas depuis un poste commercial.
+ * parti, tablette hors service — sans renvoyer personne sur site.
+ *
+ * Une fois la visite clôturée, la main passe à l'administration : une erreur
+ * de saisie relevée après coup (péremption inversée, pourcentage erroné) se
+ * corrige au bureau, alors que le technicien, lui, ne revient plus sur une
+ * fiche qu'il a validée. Chaque correction post-clôture est tracée dans
+ * l'historique — voir `logCorrection`.
  */
 function canWriteFiche(user, intervention) {
   if (user.role === 'superadmin') return true
+  if (intervention.status === 'termine') return isAdmin(user)
   return String(intervention.technicien || '') === String(user._id)
+}
+
+/**
+ * Libellés et mise en forme des champs de la checklist.
+ *
+ * L'historique d'une correction ne vaut que s'il dit *ce qui* a changé : une
+ * ligne « Checklist corrigée » n'est pas auditable. On y écrit donc l'ancienne
+ * et la nouvelle valeur, dans les mêmes mots que la fiche papier.
+ */
+const FICHE_LABELS = {
+  deaLabel: 'Appareil', serialNumber: 'N° de série', emplacement: 'Emplacement',
+  signaletique: 'Signalétique',
+
+  batteriePeremption: 'Péremption batterie', batteriePct: 'Niveau batterie',
+  batterieEtat: 'État batterie', batterieRemplacee: 'Batterie remplacée',
+  batterieRemplaceeRef: 'Réf. batterie posée', batterieNote: 'Note batterie',
+
+  electrodesPeremptionAdulte: 'Péremption électrodes adulte',
+  electrodesPeremptionPediatrique: 'Péremption électrodes pédiatriques',
+  electrodesEmballage: 'Emballage électrodes', electrodesAdaptees: 'Électrodes adaptées',
+  electrodesType: "Type d'électrodes", electrodesRemplacees: 'Électrodes remplacées',
+  electrodesRemplaceesRef: 'Réf. électrodes posées', electrodesPct: 'Niveau électrodes',
+  electrodesNote: 'Note électrodes',
+
+  kitGants: 'Kit — gants', kitCiseaux: 'Kit — ciseaux', kitRasoir: 'Kit — rasoir',
+  kitMasque: 'Kit — masque', kitCompresses: 'Kit — compresses',
+  kitRemplace: 'Kit remplacé', kitRemplaceRef: 'Réf. kit posé',
+
+  voyantVert: 'Voyant vert', autotests: 'Autotests', armoire: 'Armoire',
+  armoireAccessible: 'Armoire accessible', armoirePiles: 'Piles armoire',
+
+  dernierControle: 'Dernier contrôle', prochainControle: 'Prochain contrôle',
+  observation: 'Observation',
+
+  dateReception: 'Date de réception', visa: 'Visa',
+  observationGenerale: 'Observation générale',
+}
+
+const DATE_FIELDS = new Set([
+  'batteriePeremption', 'electrodesPeremptionAdulte', 'electrodesPeremptionPediatrique',
+  'dernierControle', 'prochainControle', 'dateReception',
+])
+const PCT_FIELDS  = new Set(['batteriePct', 'electrodesPct'])
+/* Trois familles de booléens, trois vocabulaires : une pièce est posée ou non,
+   un accessoire est là ou non, un point de contrôle est conforme ou non. */
+const YESNO_FIELDS    = new Set(['batterieRemplacee', 'electrodesRemplacees', 'kitRemplace'])
+const PRESENCE_FIELDS = new Set(['kitGants', 'kitCiseaux', 'kitRasoir', 'kitMasque', 'kitCompresses'])
+
+const ELECTRODE_TYPE_LABELS = {
+  capteur_rcp: 'Avec capteur RCP',
+  sans_capteur_rcp: 'Sans capteur RCP',
+  universelle: 'Universelle',
+}
+
+function fmtHistValue(field, v) {
+  if (v === undefined || v === null || v === '') return 'vide'
+  if (typeof v === 'boolean') {
+    if (YESNO_FIELDS.has(field))    return v ? 'oui' : 'non'
+    if (PRESENCE_FIELDS.has(field)) return v ? 'présent' : 'absent'
+    return v ? 'conforme' : 'non conforme'
+  }
+  if (DATE_FIELDS.has(field)) {
+    const d = new Date(v)
+    return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('fr-FR')
+  }
+  if (PCT_FIELDS.has(field)) return `${v} %`
+  if (field === 'electrodesType') return ELECTRODE_TYPE_LABELS[v] || String(v)
+  // Le séparateur de l'historique ne doit pas se retrouver dans une valeur :
+  // il découperait la note saisie en fausses lignes de correction.
+  const str = String(v).trim().replace(/ · /g, ' - ').replace(/ → /g, ' -> ')
+  // Une observation entière rendrait la ligne d'historique illisible.
+  return str.length > 60 ? `${str.slice(0, 60)}…` : str
+}
+
+/** Égalité tolérante : une date relue de Mongo et sa chaîne ISO sont la même. */
+function sameHistValue(a, b) {
+  const empty = v => v === undefined || v === null || v === ''
+  if (empty(a) && empty(b)) return true
+  if (empty(a) !== empty(b)) return false
+  if (a instanceof Date || b instanceof Date) {
+    const da = new Date(a), db = new Date(b)
+    if (!isNaN(da.getTime()) && !isNaN(db.getTime())) return da.getTime() === db.getTime()
+  }
+  if (typeof a === 'number' || typeof b === 'number') return Number(a) === Number(b)
+  if (typeof a === 'boolean' || typeof b === 'boolean') return Boolean(a) === Boolean(b)
+  return String(a) === String(b)
+}
+
+/** « Libellé : avant → après » — la forme lue et fusionnée par l'historique. */
+function describeChange(field, before, after, prefix = '') {
+  const label = FICHE_LABELS[field] || field
+  return `${prefix}${label} : ${fmtHistValue(field, before)} → ${fmtHistValue(field, after)}`
+}
+
+const CHANGE_SEP = ' · '
+const ARROW      = ' → '
+
+/**
+ * Fusionne deux jeux de corrections en gardant, par champ, la valeur d'origine
+ * et la dernière valeur saisie. Sans ça, corriger un même champ deux fois de
+ * suite laisserait dans l'historique un état intermédiaire qui n'a jamais été
+ * celui du rapport.
+ */
+function mergeChangeDetails(previous, changes) {
+  const kept = (previous || '').split(CHANGE_SEP).filter(Boolean)
+
+  changes.forEach(change => {
+    // Les mentions libres (photo ajoutée, fiche retirée) s'empilent telles quelles.
+    if (!change.includes(ARROW)) {
+      if (!kept.includes(change)) kept.push(change)
+      return
+    }
+    const label = change.slice(0, change.indexOf(' : ') + 3)
+    const idx   = kept.findIndex(part => part.includes(ARROW) && part.startsWith(label))
+    if (idx === -1) { kept.push(change); return }
+    // Valeur d'origine de la première correction + valeur finale de celle-ci.
+    const origin = kept[idx].slice(0, kept[idx].indexOf(ARROW))
+    kept[idx] = `${origin}${ARROW}${change.slice(change.indexOf(ARROW) + ARROW.length)}`
+  })
+
+  return kept.join(CHANGE_SEP)
+}
+
+/**
+ * Trace une modification faite après la clôture.
+ *
+ * La checklist s'enregistre champ par champ : une ligne d'historique par
+ * frappe rendrait l'historique illisible. On regroupe donc les corrections
+ * d'un même auteur en une seule entrée tant qu'elles s'enchaînent, en y
+ * accumulant le détail des champs touchés.
+ */
+const CORRECTION_WINDOW_MS = 30 * 60 * 1000
+
+function logCorrection(intervention, user, changes) {
+  if (intervention.status !== 'termine') return
+
+  const list = (Array.isArray(changes) ? changes : [changes]).filter(Boolean)
+  // Un enregistrement qui ne change rien (sortie de champ sans saisie) ne
+  // mérite pas de ligne d'historique.
+  if (!list.length) return
+
+  const last = intervention.history[intervention.history.length - 1]
+  const groupable = last && last.action === 'correction'
+    && String(last.user || '') === String(user._id)
+    && Date.now() - new Date(last.date).getTime() < CORRECTION_WINDOW_MS
+
+  if (groupable) {
+    last.details = mergeChangeDetails(last.details, list)
+    last.date    = new Date()
+    intervention.markModified('history')
+    return
+  }
+
+  intervention.history.push({
+    action:   'correction',
+    user:     user._id,
+    userName: user.fullName || user.username,
+    details:  list.join(CHANGE_SEP),
+  })
 }
 
 /**
@@ -79,6 +245,16 @@ async function parcOf(intervention) {
     serialNumber: d.serialNumber,
     location:     d.location,
     product:      d.product ? { name: d.product.name, images: d.product.images } : null,
+    /* Les consommables montés sur l'appareil : la checklist ne contrôle l'état
+       d'une batterie que si le parc dit laquelle est en place. */
+    batteries:  (d.batteries || []).map(b => ({
+      _id: b._id, productName: b.productName, serialNumber: b.serialNumber,
+      lotNumber: b.lotNumber, expiryDate: b.expiryDate, level: b.level,
+    })),
+    electrodes: (d.electrodes || []).map(e => ({
+      _id: e._id, productName: e.productName, kind: e.kind,
+      lotNumber: e.lotNumber, expiryDate: e.expiryDate,
+    })),
   }))
 
   // L'appareil visé, s'il y en a un ; à défaut le seul du site, qui ne laisse
@@ -280,6 +456,26 @@ async function update(req, res) {
   }
 }
 
+/**
+ * Reporte la visite sur le parc du site, et trace ce qui a bougé.
+ *
+ * Ce que le technicien constate sur place n'a de valeur que s'il arrive
+ * jusqu'à la fiche client : c'est elle qu'on consulte pour appeler un client
+ * avant une péremption. La trace, elle, dit d'où vient la donnée affichée —
+ * sans quoi une fiche client qui change toute seule est incompréhensible.
+ */
+async function pushFicheToParc(intervention, user) {
+  const changes = await syncFicheToParc(intervention, user)
+  if (!changes.length) return
+  intervention.history.push({
+    action:   'sync_parc',
+    user:     user?._id,
+    userName: user?.fullName || user?.username,
+    details:  changes.join(' · '),
+  })
+  await intervention.save()
+}
+
 /* ─── Submit rapport (technicien) ───────────────────────────── */
 async function submitRapport(req, res) {
   try {
@@ -303,7 +499,9 @@ async function submitRapport(req, res) {
     })
 
     await intervention.save()
-    // La visite est faite : l'échéance du site passe à la suivante.
+    // La visite est faite : le parc reprend ce qui a été constaté, et
+    // l'échéance du site passe à la suivante.
+    await pushFicheToParc(intervention, req.user)
     await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
@@ -392,28 +590,42 @@ async function saveFiche(req, res) {
 
     ensureFiches(intervention)
 
+    /* Ce que la saisie déplace réellement, relevé avant écriture : après
+       clôture, c'est ce détail qui part dans l'historique. */
+    const changes = []
+
     const touchesFiche = FICHE_FIELDS.some(k => req.body[k] !== undefined)
     if (touchesFiche) {
       const entry = ficheFor(intervention, req.body.dea || null)
+      // Sur une visite multi-DAE, un « Niveau batterie » sans appareil ne dit rien.
+      const prefix = intervention.fiches.length > 1
+        ? `${entry.deaLabel || entry.serialNumber || 'DAE'} — `
+        : ''
       FICHE_FIELDS.forEach(k => {
-        if (req.body[k] !== undefined) {
-          entry[k] = req.body[k] === '' ? undefined : req.body[k]
-        }
+        if (req.body[k] === undefined) return
+        const next = req.body[k] === '' ? undefined : req.body[k]
+        if (!sameHistValue(entry[k], next)) changes.push(describeChange(k, entry[k], next, prefix))
+        entry[k] = next
       })
     }
 
     if (VISITE_FIELDS.some(k => req.body[k] !== undefined)) {
       if (!intervention.visite) intervention.visite = {}
       VISITE_FIELDS.forEach(k => {
-        if (req.body[k] !== undefined) {
-          intervention.visite[k] = req.body[k] === '' ? undefined : req.body[k]
+        if (req.body[k] === undefined) return
+        const next = req.body[k] === '' ? undefined : req.body[k]
+        if (!sameHistValue(intervention.visite[k], next)) {
+          changes.push(describeChange(k, intervention.visite[k], next))
         }
+        intervention.visite[k] = next
       })
       intervention.markModified('visite')
     }
 
     intervention.markModified('fiches')
     syncLegacyFiche(intervention)
+
+    logCorrection(intervention, req.user, changes)
 
     if (intervention.status === 'planifie') {
       intervention.status = 'en_cours'
@@ -426,6 +638,14 @@ async function saveFiche(req, res) {
     }
 
     await intervention.save()
+
+    /* Une correction après clôture porte sur une visite déjà reportée au
+       parc : la fiche client doit suivre la correction, sinon elle reste sur
+       la valeur erronée qu'on vient justement de reprendre. */
+    if (intervention.status === 'termine' && changes.length) {
+      await pushFicheToParc(intervention, req.user)
+    }
+
     res.json(intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
@@ -459,6 +679,8 @@ async function removeFiche(req, res) {
     if (!intervention.fiches.length) intervention.fiche = {}
     else syncLegacyFiche(intervention)
 
+    logCorrection(intervention, req.user, `Fiche retirée après clôture : ${removed.deaLabel || removed.serialNumber || 'DAE'}`)
+
     await intervention.save()
     res.json(intervention)
   } catch (err) {
@@ -486,6 +708,7 @@ async function closeIntervention(req, res) {
     })
 
     await intervention.save()
+    await pushFicheToParc(intervention, req.user)
     await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
@@ -514,6 +737,7 @@ async function uploadFichePhoto(req, res) {
     entry.photos.push(req.file.filename)
     intervention.markModified('fiches')
     syncLegacyFiche(intervention)
+    logCorrection(intervention, req.user, 'Photo ajoutée après clôture')
 
     await intervention.save()
     res.json(intervention)
@@ -541,8 +765,77 @@ async function deleteFichePhoto(req, res) {
     entry.photos.splice(entry.photos.indexOf(filename), 1)
     intervention.markModified('fiches')
     syncLegacyFiche(intervention)
+    logCorrection(intervention, req.user, 'Photo supprimée après clôture')
     await intervention.save()
     res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Identifier les consommables montés sur le DAE ─────────── */
+/**
+ * Batterie et électrodes en place, saisies depuis la fiche d'intervention.
+ *
+ * Contrôler l'état d'une batterie que le parc ne connaît pas ne mène nulle
+ * part : on coche « absence de corrosion » sur un appareil dont personne ne
+ * sait quel modèle il porte, et la fiche client reste vide. Le technicien
+ * identifie donc la pièce avant de la contrôler, et cette identification va
+ * directement au parc — c'est la même donnée, pas une copie.
+ *
+ * Passe par l'intervention, et non par la fiche client : le technicien n'a pas
+ * le droit de gestion des clients, mais il est le mieux placé pour dire ce
+ * qu'il a sous les yeux.
+ */
+const DEA_ITEM_KINDS = { batteries: 'Batterie', electrodes: 'Électrodes' }
+
+async function saveDeaItems(req, res) {
+  try {
+    const kind = req.params.kind
+    if (!DEA_ITEM_KINDS[kind]) return res.status(400).json({ message: 'Type inconnu.' })
+
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!canWriteFiche(req.user, intervention)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    let siteId = intervention.site
+    if (!siteId && intervention.installation) {
+      const owner = await Site.findOne({ 'deas._id': intervention.installation }).select('_id').lean()
+      siteId = owner?._id
+    }
+    const site = siteId ? await Site.findById(siteId) : null
+    if (!site) return res.status(404).json({ message: 'Site introuvable.' })
+
+    const deaId = req.body.dea || intervention.installation
+    const dea = deaId ? site.deas.id(deaId) : (site.deas.length === 1 ? site.deas[0] : null)
+    if (!dea) return res.status(404).json({ message: 'DAE introuvable.' })
+
+    dea[kind] = Array.isArray(req.body.items) ? req.body.items : []
+    await site.save()
+    // L'exemplaire du stock suit l'appareil sur lequel il est monté : la pièce
+    // déclarée ici est chez le client, elle n'est plus à l'entrepôt.
+    await syncDeaWithItem(site, dea)
+    await syncDeaConsumables(site, dea, kind)
+
+    const listed = dea[kind]
+      .map(it => [it.productName, it.serialNumber || it.lotNumber].filter(Boolean).join(' · '))
+      .filter(Boolean)
+    intervention.history.push({
+      action:   'sync_parc',
+      user:     req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details:  `${DEA_ITEM_KINDS[kind]} du ${dea.deviceType || 'DAE'} : `
+                + (listed.length ? listed.join(' · ') : 'aucune pièce déclarée'),
+    })
+    await intervention.save()
+
+    const json = intervention.toObject()
+    const { deviceProduct, siteDeas } = await parcOf(intervention)
+    json.deviceProduct = deviceProduct
+    json.siteDeas      = siteDeas
+    res.json(json)
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -577,4 +870,5 @@ async function searchInstallations(req, res) {
 module.exports = {
   getAll, getOne, create, update, submitRapport, remove, searchInstallations,
   saveFiche, removeFiche, closeIntervention, uploadFichePhoto, deleteFichePhoto,
+  saveDeaItems,
 }

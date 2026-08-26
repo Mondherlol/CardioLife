@@ -22,6 +22,10 @@ const batterySchema = new mongoose.Schema({
   product:        { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
   productName:    { type: String, trim: true },
   serialNumber:   { type: String, trim: true },
+  /* Les batteries se suivent par lot ou à l'exemplaire selon la catégorie du
+     catalogue. Imposer le numéro de série obligeait à ranger un n° de lot dans
+     un champ qui n'était pas le sien. */
+  lotNumber:      { type: String, trim: true },
   activationDate: Date,
   expiryDate:     Date,
   level:          { type: Number, min: 0, max: 100 },

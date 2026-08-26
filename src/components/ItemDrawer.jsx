@@ -11,7 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import ComboSearch from './ComboSearch'
 import ClientModal from './ClientModal'
 import SiteModal from './SiteModal'
-import { getSites } from '../api/sites'
+import { lookupSites } from '../api/sites'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -73,6 +73,7 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
   const [sites,    setSites]    = useState([])
   const [site,     setSite]     = useState(null)
   const [newSite,  setNewSite]  = useState(false)
+  const [dea,      setDea]      = useState(null)
   const [until,    setUntil]    = useState('')
   const [note,     setNote]     = useState('')
   const [creating, setCreating] = useState(false)
@@ -80,6 +81,11 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
 
   const needsClient = target === 'reserve'
   const wantsClient = needsClient || target === 'vendu'
+  /* Une batterie ou des électrodes qui partent chez un client vont sur un
+     appareil précis. Sans le dire, la fiche client reste vide et le prochain
+     technicien trouve une armoire dont personne n'a noté la pièce. */
+  const isConsumable = ['batteries', 'electrodes'].includes(item.category)
+  const wantsSite    = needsClient || (target === 'vendu' && isConsumable)
   /* La recherche est ouverte à tout utilisateur connecté, la création non :
      sans le droit, on n'affiche pas un bouton qui finirait en 403. */
   const canCreateClient = user?.role === 'superadmin' || !!user?.permissions?.canManageClients
@@ -100,8 +106,11 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
   /* Les sites du client retenu : réserver, c'est réserver pour un lieu précis.
      La liste se recharge à chaque changement de client. */
   useEffect(() => {
-    if (!needsClient || !client?._id) { setSites([]); setSite(null); return }
-    getSites({ client: client._id })
+    if (!wantsSite || !client?._id) { setSites([]); setSite(null); return }
+    /* Le lookup, et non la liste complète : choisir un site depuis le stock ne
+       suppose pas le droit de gérer les clients. Il porte le parc, dont on a
+       besoin pour désigner l'appareil. */
+    lookupSites(client._id)
       .then(list => {
         const arr = Array.isArray(list) ? list : []
         setSites(arr)
@@ -109,10 +118,15 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
         setSite(arr.length === 1 ? arr[0] : null)
       })
       .catch(() => setSites([]))
-  }, [needsClient, client])
+  }, [wantsSite, client])
 
-  // Sans site, la pose ne saurait pas où aller.
-  const canSubmit = !needsClient || (!!client && !!site)
+  useEffect(() => { setDea(null) }, [site])
+
+  const siteDeas = site?.deas || []
+
+  // Sans site, la pose ne saurait pas où aller. Un consommable vendu suit la
+  // même règle : il est monté quelque part.
+  const canSubmit = !wantsSite || (!!client && !!site)
 
   async function submit(e) {
     e.preventDefault()
@@ -123,7 +137,8 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
         status: target,
         note,
         client: wantsClient ? (client?._id || undefined) : undefined,
-        site:   target === 'reserve' ? (site?._id || undefined) : undefined,
+        site:   wantsSite ? (site?._id || undefined) : undefined,
+        dea:    dea?._id || undefined,
         until:  target === 'reserve' && until ? until : undefined,
       })
       toast.success(`Article ${itemStatus(target).label.toLowerCase()}.`)
@@ -144,7 +159,7 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
         {wantsClient && (
           <div className="form-group" style={{ marginBottom: 10 }}>
             <label className="form-label">
-              Client {needsClient
+              Client {wantsSite
                 ? <span style={{ color: 'var(--red-500)' }}>*</span>
                 : <span className="form-label-opt">(optionnel)</span>}
             </label>
@@ -162,7 +177,7 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
           </div>
         )}
 
-        {needsClient && client && (
+        {wantsSite && client && (
           <div className="form-group" style={{ marginBottom: 10 }}>
             <label className="form-label">
               Site <span style={{ color: 'var(--red-500)' }}>*</span>
@@ -181,6 +196,34 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
                 : 'Aucun site à ce nom'}
               emptyCtaLabel={() => 'Créer un site'}
             />
+          </div>
+        )}
+
+        {isConsumable && site && (
+          <div className="form-group" style={{ marginBottom: 10 }}>
+            <label className="form-label">
+              Appareil <span className="form-label-opt">(optionnel)</span>
+            </label>
+            {siteDeas.length === 0 ? (
+              <p className="drawer-note">Ce site n'a aucun DAE enregistré.</p>
+            ) : (
+              <ComboSearch
+                items={siteDeas}
+                value={dea}
+                onChange={setDea}
+                onClear={() => setDea(null)}
+                displayFn={d => d.deviceType || 'DAE'}
+                subtextFn={d => [d.serialNumber, d.location].filter(Boolean).join(' · ')}
+                placeholder="Sur quel DAE cette pièce est-elle montée ?"
+                emptyText="Aucun DAE à ce nom"
+              />
+            )}
+            {dea && (
+              <p className="drawer-note">
+                La pièce sera inscrite sur la fiche de cet appareil et passera en
+                <strong> Installé</strong>.
+              </p>
+            )}
           </div>
         )}
 
@@ -268,9 +311,12 @@ export default function ItemDrawer({ item, category, onClose, onChanged }) {
     { label: 'Référence',   icon: Hash,         value: item.reference },
     { label: 'N° de série', icon: Hash,         value: item.serialNumber, mono: true },
     { label: 'N° de lot',   icon: Layers,       value: item.lotNumber, mono: true },
-    { label: 'Quantité',    icon: Layers,       value: isLot ? `${item.quantity} unité${item.quantity > 1 ? 's' : ''}` : null },
+    // Une pièce par ligne : la quantité ne se lit plus que sur les lots d'avant.
+    { label: 'Quantité',    icon: Layers,       value: isLot && item.quantity > 1 ? `${item.quantity} unités` : null },
     { label: 'Fournisseur', icon: Truck,        value: item.supplier },
     { label: 'Date d\'entrée', icon: CalendarDays, value: formatDate(item.entryDate) },
+    // Mise en service saisie sur la fiche du DAE, recopiée sur l'article.
+    { label: "Date d'activation", icon: CalendarDays, value: formatDate(item.activationDate) },
     { label: 'Date de vente',  icon: ShoppingCart, value: formatDate(item.saleDate) },
     { label: 'Client',      icon: Users,        value: item.client?.name || item.reservedFor?.client?.name },
     { label: 'Site',        icon: MapPin,       value: item.site?.name },
