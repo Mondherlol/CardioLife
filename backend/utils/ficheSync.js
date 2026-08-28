@@ -158,9 +158,9 @@ async function applyNextControl(intervention, date, user, changes, dry) {
   }).sort({ scheduledDate: 1 })
 
   if (next) {
-    if (sameDay(next.scheduledDate, shifted)) return
+    if (sameDay(next.scheduledDate, shifted)) return shifted
     const before = next.scheduledDate
-    if (dry) { changes.push(`Prochaine visite à déplacer au ${fmtDate(shifted)}`); return }
+    if (dry) { changes.push(`Prochaine visite à déplacer au ${fmtDate(shifted)}`); return shifted }
     next.scheduledDate = shifted
     next.manualDate    = true
     next.history.push({
@@ -171,12 +171,12 @@ async function applyNextControl(intervention, date, user, changes, dry) {
     })
     await next.save()
     changes.push(`Prochaine visite déplacée au ${fmtDate(shifted)}`)
-    return
+    return shifted
   }
 
   // Aucune visite ouverte : hors contrat, ou fin de calendrier. La date
   // relevée sur place ne doit pas se perdre pour autant.
-  if (dry) { changes.push(`Prochaine visite à créer au ${fmtDate(shifted)}`); return }
+  if (dry) { changes.push(`Prochaine visite à créer au ${fmtDate(shifted)}`); return shifted }
   await Intervention.create({
     client:        intervention.client,
     clientName:    intervention.clientName,
@@ -198,6 +198,7 @@ async function applyNextControl(intervention, date, user, changes, dry) {
     }],
   })
   changes.push(`Prochaine visite créée au ${fmtDate(shifted)}`)
+  return shifted
 }
 
 /**
@@ -233,7 +234,29 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
     if (changes.length && !dry) await site.save()
 
     const next = planning ? nextControlFromFiches(intervention.fiches) : null
-    if (next && intervention.site) await applyNextControl(intervention, next, user, changes, dry)
+    const planned = next && intervention.site
+      ? await applyNextControl(intervention, next, user, changes, dry)
+      : null
+
+    /* L'échéance de la fiche client est une copie de la prochaine visite — sauf
+       quand elle a été fixée à la main, cas où `syncSiteNextControl` la laisse
+       tranquille. Une date décidée sur place doit pourtant l'emporter : c'est
+       le constat le plus récent, et le technicien y était. On l'écrit donc
+       directement, en la marquant manuelle pour que le calendrier des six mois
+       ne la ramène pas non plus à sa valeur théorique. */
+    if (planned && !dry) {
+      let moved = 0
+      site.deas.forEach(dea => {
+        if (sameDay(dea.nextControlDate, planned)) return
+        dea.nextControlDate  = planned
+        dea.nextControlManual = true
+        moved += 1
+      })
+      if (moved) {
+        await site.save()
+        changes.push(`Échéance de la fiche client portée au ${fmtDate(planned)}`)
+      }
+    }
 
     // La date affichée sur les DAE suit la visite qui vient d'être replanifiée.
     if (!dry) await syncSiteNextControl(siteId)

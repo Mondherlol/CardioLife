@@ -2,7 +2,7 @@ const Contract     = require('../models/Contract')
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
 const { scheduleFor, scheduleAnchor, syncContractControls, syncSiteNextControl } = require('./controls')
-const { applyFicheToDea, resolveDea } = require('./ficheSync')
+const { applyFicheToDea, resolveDea, syncFicheToParc, nextControlFromFiches } = require('./ficheSync')
 const ProductItem  = require('../models/ProductItem')
 /* Chargé pour lui-même : `ProductItem.populate('product')` exige que le modèle
    soit enregistré, ce que les scripts — contrairement au serveur — ne font pas
@@ -124,11 +124,12 @@ async function resyncControls({ dry = false, dropPast = false, userId = null } =
  * dans l'ordre donnerait le même état final, mais réécrirait le parc à chaque
  * lancement — la reprise ne serait plus relançable sans bruit.
  *
- * Le planning n'est pas touché : rejouer la date de prochain passage d'une
- * visite de l'an dernier ramènerait le calendrier d'aujourd'hui à une échéance
- * déjà dépassée. Seules les données du parc remontent.
+ * Le planning n'est touché que si `planning` le demande, et alors seulement
+ * pour la **dernière** visite de chaque site, et seulement si sa date de
+ * prochain passage est encore devant nous : rejouer celle d'une visite de l'an
+ * dernier ramènerait le calendrier d'aujourd'hui à une échéance dépassée.
  */
-async function resyncFiches({ dry = false, userId = null } = {}) {
+async function resyncFiches({ dry = false, planning = false, userId = null } = {}) {
   const visits = await Intervention
     .find({ status: 'termine', 'fiches.0': { $exists: true } })
     .sort({ completedDate: 1, updatedAt: 1 })
@@ -137,7 +138,7 @@ async function resyncFiches({ dry = false, userId = null } = {}) {
     task:   'resync-fiches',
     dry,
     sites:  [],
-    totals: { visits: visits.length, sites: 0, changes: 0 },
+    totals: { visits: visits.length, sites: 0, changes: 0, replanned: 0 },
   }
 
   /* Une visite d'avant les sites ne connaît que son appareil : le site se
@@ -178,9 +179,25 @@ async function resyncFiches({ dry = false, userId = null } = {}) {
 
     const changes = []
     for (const { dea, fiche } of merged.values()) applyFicheToDea(fiche, dea, changes)
+
+    /* Report de l'échéance : seulement celle de la dernière visite, et
+       seulement si elle est encore devant nous. Rejouer les précédentes
+       ramènerait le planning à une date déjà passée. */
+    if (planning) {
+      const last = siteVisits[siteVisits.length - 1]
+      const next = nextControlFromFiches(last?.fiches)
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      if (next && next >= today) {
+        if (changes.length && !dry) { await site.save(); changes.length = 0 }
+        const done = await syncFicheToParc(last, userId ? { _id: userId } : null, { dry, planning: true })
+        changes.push(...done)
+        report.totals.replanned += 1
+      }
+    }
+
     if (!changes.length) continue
 
-    if (!dry) await site.save()
+    if (!dry && site.isModified?.()) await site.save()
 
     report.sites.push({
       site:    site.name,
@@ -290,9 +307,11 @@ const TASKS = {
     detail:
       "Les visites sont rejouées de la plus ancienne à la plus récente : le dernier passage "
       + "a le dernier mot. Un champ laissé vide dans une checklist n'efface jamais la valeur "
-      + "du parc. Le planning n'est pas touché — les dates de prochain contrôle des anciennes "
-      + "visites ne sont pas rejouées.",
-    options: [],
+      + "du parc. L'option de report ne rejoue que la date de prochain contrôle de la dernière "
+      + "visite de chaque site, et seulement si elle est encore à venir.",
+    options: [
+      { id: 'planning', label: 'Reporter aussi la date de prochain contrôle de la dernière visite' },
+    ],
     run: resyncFiches,
   },
 
