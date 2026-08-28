@@ -32,22 +32,32 @@ function Section({ title, children }) {
   )
 }
 
+/* Une batterie sous ce niveau ne tiendra pas jusqu'au prochain contrôle : la
+   rubrique ne peut pas s'annoncer valide en l'affichant. */
+const LOW_BATTERY_PCT = 25
+
 /**
- * Verdict d'une rubrique du rapport, à partir de ses points de contrôle.
+ * Verdict d'une rubrique du rapport.
  *
- * Un tiret ne disait pas si le technicien avait vérifié la pièce et l'avait
- * trouvée bonne, ou s'il n'avait rien noté. Le lecteur du rapport — client
- * compris — doit lire le constat, pas l'absence de chiffre.
+ * Une visite ne relève que les anomalies : le technicien coche ce qui cloche,
+ * pas ce qui va. L'absence de remarque est donc un constat en soi — la pièce a
+ * été vue et trouvée bonne. Le rapport dit « Valide » par défaut, et ne réserve
+ * un autre mot qu'aux défauts réellement constatés : point de contrôle
+ * non conforme, date de péremption dépassée, batterie à plat.
  *
- * `null` seulement quand aucun point n'a été renseigné : là, le tiret est
- * honnête.
+ * `points` : les cases de la checklist (true / false / non renseigné).
+ * `expiries` : les dates de péremption de la rubrique.
+ * `level` : le niveau de charge, pour la batterie seulement.
  */
-function etatVerdict(points) {
-  const known = points.filter(v => v === true || v === false)
-  if (!known.length) return null
-  return known.every(Boolean)
-    ? { ok: true,  label: 'Valide' }
-    : { ok: false, label: 'Non conforme' }
+function etatVerdict({ points = [], expiries = [], level = null } = {}) {
+  if (points.some(v => v === false)) return { ok: false, label: 'Non conforme' }
+
+  const now = new Date()
+  if (expiries.some(d => d && new Date(d) < now)) return { ok: false, label: 'Périmé' }
+
+  if (level != null && level < LOW_BATTERY_PCT) return { ok: false, label: 'Charge faible' }
+
+  return { ok: true, label: 'Valide' }
 }
 
 function EtatChip({ verdict }) {
@@ -177,10 +187,18 @@ export default function InterventionPrintPage() {
             </thead>
             <tbody>
               {fiches.map((fiche, i) => {
-                /* Ce que la visite a constaté : absence de corrosion pour la
-                   batterie, emballage intact et jeu adapté pour les électrodes. */
-                const battEtat = etatVerdict([fiche.batterieEtat])
-                const elecEtat = etatVerdict([fiche.electrodesEmballage, fiche.electrodesAdaptees])
+                /* Ce que la visite a constaté : absence de corrosion et charge
+                   suffisante pour la batterie, emballage intact et jeu adapté
+                   pour les électrodes — plus, des deux côtés, la péremption. */
+                const battEtat = etatVerdict({
+                  points:   [fiche.batterieEtat],
+                  expiries: [fiche.batteriePeremption],
+                  level:    fiche.batteriePct,
+                })
+                const elecEtat = etatVerdict({
+                  points:   [fiche.electrodesEmballage, fiche.electrodesAdaptees],
+                  expiries: [fiche.electrodesPeremptionAdulte, fiche.electrodesPeremptionPediatrique],
+                })
                 return (
                 <tr key={fiche.dea || i}>
                   {/* Type + image */}
@@ -225,20 +243,13 @@ export default function InterventionPrintPage() {
                     {fiche.batterieNote && (
                       <span className="pr-dt-note">{fiche.batterieNote}</span>
                     )}
-                    {!battEtat && fiche.batteriePct == null && !fiche.batterieNote
-                      && !fiche.batterieRemplacee && '—'}
                   </td>
 
                   {/* Électrodes */}
                   <td className="pr-dt-center">
+                    {/* Pas de pourcentage ici : un jeu d'électrodes est bon ou
+                        périmé, il ne se vide pas comme une batterie. */}
                     <EtatChip verdict={elecEtat} />
-                    {fiche.electrodesPct != null && (
-                      <span className={`pr-dt-pct pr-dt-pct--${
-                        fiche.electrodesPct >= 80 ? 'ok' : fiche.electrodesPct >= 40 ? 'warn' : 'bad'
-                      }`}>
-                        {fiche.electrodesPct}%
-                      </span>
-                    )}
                     {fiche.electrodesRemplacees && (
                       <span className="pr-dt-note">
                         Remplacées{fiche.electrodesRemplaceesRef ? ` — ${fiche.electrodesRemplaceesRef}` : ''}
@@ -247,8 +258,6 @@ export default function InterventionPrintPage() {
                     {fiche.electrodesNote && (
                       <span className="pr-dt-note">{fiche.electrodesNote}</span>
                     )}
-                    {!elecEtat && fiche.electrodesPct == null && !fiche.electrodesNote
-                      && !fiche.electrodesRemplacees && '—'}
                   </td>
 
                   {/* Armoire */}
