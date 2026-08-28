@@ -76,6 +76,10 @@ const replacementSchema = new Schema({
   // Réservée à la demande, ou posée quand le remplacement est déjà fait.
   replacementItem:   { type: Schema.Types.ObjectId, ref: 'ProductItem' },
   replacementSerial: { type: String, trim: true },
+  /* Péremption de la pièce posée. Relevée sur l'étiquette au moment de la pose :
+     c'est elle qui part sur la fiche du DAE, et elle ne se déduit de rien quand
+     la pièce vient d'ailleurs que du stock. */
+  replacementExpiry: { type: Date },
   replacedAt:        { type: Date },
 
   notes: { type: String, trim: true },

@@ -6,13 +6,13 @@ import {
   Camera, Trash2, X, Save, ImagePlus, Hash, Navigation,
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
   ChevronDown, ClipboardList, History, Download, FileText, Building2, Wrench, Check,
-  Pencil, Lock, Unlock, BatteryMedium, AlertTriangle,
+  Pencil, Lock, Unlock, BatteryMedium, AlertTriangle, GraduationCap, Minus,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
   getIntervention, saveFiche, removeFiche, closeIntervention,
   uploadFichePhoto, deleteFichePhoto, fichePhotoUrl,
-  updateIntervention, saveDeaItems,
+  updateIntervention, saveDeaItems, saveFormationOutcome,
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
 import { useLoadingBar } from '../hooks/useLoadingBar'
@@ -40,10 +40,14 @@ const ACTION_LABELS = {
   cloture:       'Intervention clôturée',
   correction:    'Correction après clôture',
   sync_parc:     'Fiche client mise à jour depuis la checklist',
+  formation:     'Formation des agents',
 }
 
 const SIG_PRESETS = ['Complet', 'Incomplet', 'Manquant', 'Remplacé', 'À remplacer', 'Conforme']
-const ARM_PRESETS = ['Conforme', 'Non conforme', 'Cassée', 'Rouillée', 'Remplacée', 'Manquante']
+/* « En bon état » plutôt que « Conforme » : c'est le mot qui part dans le
+   rapport remis au client. Les fiches déjà saisies en « Conforme » restent
+   lisibles — le rapport les traduit. */
+const ARM_PRESETS = ['En bon état', 'Non conforme', 'Cassée', 'Rouillée', 'Remplacée', 'Manquante']
 
 const ELECTRODE_TYPES = [
   { value: 'capteur_rcp',      label: 'Avec capteur RCP' },
@@ -74,6 +78,12 @@ function fmtTs(d) {
     hour: '2-digit', minute: '2-digit',
   })
 }
+/** Date courte, pour les rappels de séance et de report. */
+function fmtShort(d) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
 function isoDate(d) {
   if (!d) return ''
   return new Date(d).toISOString().slice(0, 10)
@@ -127,7 +137,7 @@ function Presets({ presets, value, onSelect }) {
    quoi déduire du stock, et le client ne sait pas ce qu'il a reçu. Cocher ouvre
    donc le signalement, où le technicien choisit la pièce posée — ou bascule en
    demande de remplacement, auquel cas rien ne sort du stock. */
-function ReplacedRow({ label, done, reference, readOnly, onDeclare, onClear }) {
+function ReplacedRow({ label, done, reference, readOnly, onDeclare, onClear, disabled, disabledHint }) {
   return (
     <div className="fiche-replaced">
       <span className="fiche-replaced-label">{label}</span>
@@ -143,7 +153,9 @@ function ReplacedRow({ label, done, reference, readOnly, onDeclare, onClear }) {
       ) : readOnly ? (
         <span className="fiche-replaced-none">Non</span>
       ) : (
-        <button type="button" className="fiche-replaced-btn" onClick={onDeclare}>
+        <button type="button" className="fiche-replaced-btn"
+          onClick={onDeclare} disabled={disabled}
+          title={disabled ? disabledHint : 'Consigner la pièce posée'}>
           <Wrench size={12} /> Déclarer un remplacement
         </button>
       )}
@@ -286,6 +298,15 @@ function ParcItemsBar({ kind, items, readOnly, onEdit }) {
     </div>
   )
 }
+
+/* ─── Formation des agents ─── */
+/* Deux issues, et rien d'autre : la séance a eu lieu, ou elle est repoussée.
+   Le lien avec la liste des formations se fait côté serveur, sur la séance
+   ouverte du site — inutile de la faire désigner à qui remplit la checklist. */
+const FORMATION_ETATS = [
+  { id: 'effectuee', label: 'Effectuée', Icon: Check },
+  { id: 'reportee',  label: 'Reportée',  Icon: Calendar },
+]
 
 /* ─── CloseConfirm ─── */
 function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
@@ -432,6 +453,8 @@ export default function InterventionFichePage() {
   const [unlocked,       setUnlocked]       = useState(false)
   // Identification de la pièce montée : 'batteries' | 'electrodes' | null.
   const [itemsKind,      setItemsKind]      = useState(null)
+  const [savingFormation, setSavingFormation] = useState(false)
+  const [formationEtat,  setFormationEtat]  = useState('')
   const [closing,        setClosing]        = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
   const [deviceOpen,     setDeviceOpen]     = useState(true)
@@ -516,6 +539,8 @@ export default function InterventionFichePage() {
         prochainControle: f.prochainControle,
         observation:      f.observation ?? '',
       })
+
+      setFormationEtat(data.formation?.etat || '')
 
       const list = []
       targets.forEach(d => list.push(fromDea(d, byKey.get(String(d._id)) || {})))
@@ -625,7 +650,8 @@ export default function InterventionFichePage() {
         ? { [field]: value ?? null }
         : { dea: activeKey || undefined, deaLabel: activeFiche?.deaLabel, [field]: value ?? null }
       const updated = await saveFiche(id, body)
-      mergeIv(updated)
+      // La réponse porte le parc à jour : la barre des pièces doit le refléter.
+      mergeIv(updated, { parc: true })
       setSavedField(field)
       setTimeout(() => setSavedField(f => f === field ? null : f), 2000)
     } catch {
@@ -644,7 +670,7 @@ export default function InterventionFichePage() {
         dea: activeKey || undefined,
         deaLabel: activeFiche?.deaLabel,
         ...values,
-      }))
+      }), { parc: true })
     } catch {
       toast.error('Erreur de sauvegarde.')
     } finally {
@@ -782,8 +808,16 @@ export default function InterventionFichePage() {
     const dea = (updated.siteDeas || []).find(d => String(d._id) === activeKey)
     const prefill = {}
     if (kind === 'batteries') {
-      const exp = dea?.batteries?.[0]?.expiryDate
-      if (exp && !activeFiche?.batteriePeremption) prefill.batteriePeremption = exp
+      const batt = dea?.batteries?.[0]
+      if (batt?.expiryDate && !activeFiche?.batteriePeremption) {
+        prefill.batteriePeremption = batt.expiryDate
+      }
+      /* Le niveau de charge saisi en identifiant la pièce est le même que celui
+         relevé sur l'appareil : le laisser vide obligeait à le ressaisir juste
+         en dessous, et le rapport annonçait un état inconnu. */
+      if (batt?.level != null && activeFiche?.batteriePct == null) {
+        prefill.batteriePct = batt.level
+      }
     } else {
       const adulte = dea?.electrodes?.find(e => e.kind === 'adulte' || !e.kind)
       const enfant = dea?.electrodes?.find(e => e.kind === 'enfant')
@@ -797,6 +831,36 @@ export default function InterventionFichePage() {
     if (!Object.keys(prefill).length) return
     Object.entries(prefill).forEach(([k, v]) => set(k, v))
     await saveFields(prefill)
+  }
+
+  /**
+   * Formation des agents : effectuée, ou reportée à une date.
+   *
+   * Enregistré à la volée comme le reste de la checklist. Le serveur reporte la
+   * décision sur la séance ouverte du site quand il y en a une — le technicien
+   * n'a pas à savoir laquelle.
+   */
+  async function setFormationState(etat) {
+    setFormationEtat(etat)
+    await saveFormationState({ etat })
+  }
+
+  async function saveFormationState(payload) {
+    setSavingFormation(true)
+    try {
+      const updated = await saveFormationOutcome(id, payload)
+      setIv(prev => ({
+        ...updated,
+        siteDeas:      prev?.siteDeas      ?? updated.siteDeas,
+        deviceProduct: prev?.deviceProduct ?? updated.deviceProduct,
+      }))
+      setSavedField('formation')
+      setTimeout(() => setSavedField(f => (f === 'formation' ? null : f)), 2000)
+    } catch (err) {
+      toast.error(err.message || 'Enregistrement impossible.')
+    } finally {
+      setSavingFormation(false)
+    }
   }
 
   async function handleClose() {
@@ -844,6 +908,13 @@ export default function InterventionFichePage() {
 
   /* Parc du site : il alimente l'en-tête de l'appareil et la liste de ceux qui
      restent à ajouter à la visite. */
+  /* Le site tel que l'attendent les modales : un objet, même quand la dernière
+     réponse ne portait que son identifiant. `null` quand la visite n'est
+     rattachée à aucun site — cas des interventions d'avant les sites. */
+  const siteRef = iv.site && typeof iv.site === 'object'
+    ? iv.site
+    : (iv.site ? { _id: iv.site, name: iv.siteName || '' } : null)
+
   const siteDeas   = iv.siteDeas || []
   const activeDea  = siteDeas.find(d => String(d._id) === activeKey) || null
   const addableDeas = siteDeas.filter(d => !fiches.some(f => f.key === String(d._id)))
@@ -1065,7 +1136,7 @@ export default function InterventionFichePage() {
 
           {/* Une panne se signale au moment où on la constate, pas après coup :
               le bouton reste à portée tant que l'intervention est ouverte. */}
-          {!isTermine && iv.site?._id && (
+          {!isTermine && siteRef && (
             <div className="fiche-report-bar">
               <div className="fiche-report-text">
                 <Wrench size={14} />
@@ -1287,6 +1358,8 @@ export default function InterventionFichePage() {
                       done={fiche.batterieRemplacee}
                       reference={fiche.batterieRemplaceeRef}
                       readOnly={readOnly}
+                      disabled={!siteRef}
+                      disabledHint="Cette visite n'est rattachée à aucun site : le remplacement se signale depuis la fiche du client." 
                       onDeclare={() => setDeclaring({
                         kind: 'batterie', field: 'batterieRemplacee',
                         refField: 'batterieRemplaceeRef',
@@ -1313,7 +1386,7 @@ export default function InterventionFichePage() {
                   </>)}
                 </AutoField>
 
-                <AutoField label="Électrodes" icon={Radio} saving={savingField === 'electrodesPct' || savingField === 'electrodesNote'}>
+                <AutoField label="Électrodes" icon={Radio} saving={savingField === 'electrodesNote'}>
                   {parcKnown && (
                     <ParcItemsBar
                       kind="electrodes"
@@ -1368,6 +1441,8 @@ export default function InterventionFichePage() {
                       done={fiche.electrodesRemplacees}
                       reference={fiche.electrodesRemplaceesRef}
                       readOnly={readOnly}
+                      disabled={!siteRef}
+                      disabledHint="Cette visite n'est rattachée à aucun site : le remplacement se signale depuis la fiche du client." 
                       onDeclare={() => setDeclaring({
                         kind: 'electrodes', field: 'electrodesRemplacees',
                         refField: 'electrodesRemplaceesRef',
@@ -1376,14 +1451,10 @@ export default function InterventionFichePage() {
                     />
                   </div>
 
-                  <span className="fiche-sub-label">État général</span>
+                  {/* Pas de pourcentage sur un jeu d'électrodes : il est bon ou
+                      périmé, il ne se vide pas comme une batterie. */}
+                  <span className="fiche-sub-label">Note</span>
                   <div className="fiche-two-fields">
-                    <PctInput
-                      value={fiche.electrodesPct}
-                      onChange={v => set('electrodesPct', v)}
-                      onBlur={() => handleBlur('electrodesPct')}
-                      readOnly={readOnly}
-                    />
                     <textarea
                       {...field('electrodesNote', fiche.electrodesNote, 'Note sur les électrodes…')}
                       className={`fiche-input fiche-textarea-sm${readOnly ? ' fiche-input--ro' : ''}`}
@@ -1426,15 +1497,28 @@ export default function InterventionFichePage() {
                   </div>
                 </AutoField>
 
+                {/* Le résultat des auto-tests figure en colonne du rapport :
+                    il se lit « Valide » ou « Non valide », pas coché / décoché. */}
+                <AutoField label="Résultat des auto-tests" icon={Shield} saving={savingField === 'autotests'}>
+                  <div className="fiche-presets">
+                    {[{ v: true, label: 'Valide' }, { v: false, label: 'Non valide' }].map(o => (
+                      <button key={String(o.v)} type="button"
+                        className={`fiche-preset-chip${fiche.autotests === o.v ? ' fiche-preset-chip--active' : ''}`}
+                        disabled={readOnly}
+                        onClick={() => checkPoint('autotests', fiche.autotests === o.v ? undefined : o.v)}>
+                        {o.v ? <Check size={12} /> : <X size={12} />} {o.label}
+                      </button>
+                    ))}
+                  </div>
+                  {savedField === 'autotests' && <span className="fiche-saved-ok">✓</span>}
+                </AutoField>
+
                 {/* État général de l'appareil et de son armoire. */}
                 <AutoField label="État général du DAE" icon={Shield}>
                   <div className="fiche-check-group">
                     <CheckPoint label="Voyant de fonctionnement au vert"
                       value={fiche.voyantVert} readOnly={readOnly}
                       onChange={v => checkPoint('voyantVert', v)} />
-                    <CheckPoint label="Autotests réalisés correctement"
-                      value={fiche.autotests} readOnly={readOnly}
-                      onChange={v => checkPoint('autotests', v)} />
                     <CheckPoint label="Armoire accessible et correctement signalée"
                       value={fiche.armoireAccessible} readOnly={readOnly}
                       onChange={v => checkPoint('armoireAccessible', v)} />
@@ -1559,6 +1643,21 @@ export default function InterventionFichePage() {
                   {savedField === 'visa' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
               </div>
+              {/* Formation des agents : le technicien dit seulement si la séance
+                  a eu lieu ou si elle est repoussée. */}
+              <AutoField label="Formation" icon={GraduationCap} saving={savingFormation}>
+                <div className="fiche-presets">
+                  {FORMATION_ETATS.map(e => (
+                    <button key={e.id} type="button"
+                      className={`fiche-preset-chip${formationEtat === e.id ? ' fiche-preset-chip--active' : ''}`}
+                      disabled={readOnly}
+                      onClick={() => setFormationState(formationEtat === e.id ? '' : e.id)}>
+                      <e.Icon size={12} /> {e.label}
+                    </button>
+                  ))}
+                </div>
+              </AutoField>
+
               <AutoField label="Observation générale" icon={StickyNote} saving={savingField === 'observationGenerale'}>
                 <textarea
                   {...visiteField('observationGenerale', 'Observations générales sur cette intervention…')}
@@ -1569,6 +1668,7 @@ export default function InterventionFichePage() {
               </AutoField>
             </div>
           </div>
+
           </>
           ) : (
             <div className="fiche-page-section">
@@ -1634,9 +1734,9 @@ export default function InterventionFichePage() {
       {/* Identification de la pièce montée : la même modale que la fiche
           client, mais enregistrée par la route de l'intervention — le
           technicien n'a pas le droit de gestion des clients. */}
-      {itemsKind && iv.site?._id && activeDea && (
+      {itemsKind && siteRef && activeDea && (
         <DeaItemsModal
-          site={iv.site}
+          site={siteRef}
           dea={activeDea}
           kind={itemsKind}
           onClose={() => setItemsKind(null)}
@@ -1645,9 +1745,9 @@ export default function InterventionFichePage() {
         />
       )}
 
-      {replaceOpen && iv.site?._id && (
+      {replaceOpen && siteRef && (
         <ReplacementModal
-          site={iv.site}
+          site={siteRef}
           deas={siteDeas}
           dea={activeDea || (iv.installation ? siteDeas.find(d => String(d._id) === String(iv.installation)) : null)}
           intervention={iv}
@@ -1658,9 +1758,9 @@ export default function InterventionFichePage() {
 
       {/* Déclaration d'une pièce posée depuis la checklist : la même modale,
           ouverte sur le bon élément et déjà en « déjà remplacé ». */}
-      {declaring && iv.site?._id && (
+      {declaring && siteRef && (
         <ReplacementModal
-          site={iv.site}
+          site={siteRef}
           deas={siteDeas}
           dea={activeDea}
           presetKind={declaring.kind}

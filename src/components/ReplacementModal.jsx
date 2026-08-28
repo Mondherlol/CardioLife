@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, AlertTriangle, Wrench, Zap, BatteryMedium, HeartPulse, Package } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
   createReplacement, REPLACEMENT_KINDS, REPLACEMENT_REASONS, replacementKind,
 } from '../api/replacements'
 import { useCatalogStock, stockOptionsFor, StockPicker, formatApiError } from './stockPickers'
+import { getProductCategories } from '../api/productCategories'
+import { toDateInput } from './siteHelpers'
 
 const KIND_ICONS = { dae: HeartPulse, batterie: BatteryMedium, electrodes: Zap }
 
@@ -41,30 +43,87 @@ export default function ReplacementModal({
     reason: 'defectueux',
     dea:    dea?._id || (deas.length === 1 ? deas[0]._id : ''),
     number: '',
+    // Série ou lot : le champ dépend de la pièce réellement montée, pas du type.
+    numberField: '',
     productName: '',
     replacementSerial: '',
+    replacementExpiry: '',
     notes: '',
   })
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
+  /* Pièce du parc désignée comme défaillante — '' tant qu'on n'a rien choisi,
+     'autre' pour une pièce que le parc ne connaît pas. */
+  const [piece, setPiece] = useState('')
 
   const cfg       = replacementKind(form.kind)
   const isLot     = cfg.field === 'lotNumber'
   const alreadyDone = form.status === 'remplace'
   const selectedDea = deas.find(d => String(d._id) === String(form.dea))
 
+  /* Un appareil porte souvent plusieurs pièces du même type : demander « le
+     numéro de lot » sans dire laquelle revenait à le faire recopier depuis un
+     autre écran, au risque de désigner la mauvaise. */
+  const parcPieces = form.kind === 'dae' ? [] : (
+    form.kind === 'electrodes' ? selectedDea?.electrodes : selectedDea?.batteries
+  ) || []
+  const pieceLabel = it => [
+    it.productName || (form.kind === 'electrodes' ? 'Électrodes' : 'Batterie'),
+    it.serialNumber || it.lotNumber,
+    it.expiryDate ? `exp. ${new Date(it.expiryDate).toLocaleDateString('fr-FR')}` : '',
+  ].filter(Boolean).join(' · ')
+
+  /* Désigner la pièce remplit ce qui l'identifie : numéro, champ porteur et
+     modèle. Le technicien n'a plus qu'à dire pourquoi. */
+  function pickPiece(key) {
+    setPiece(key)
+    if (key === '' || key === 'autre') {
+      setForm(f => ({ ...f, number: '', numberField: '', productName: key === 'autre' ? f.productName : '' }))
+      return
+    }
+    const it = parcPieces[Number(key)]
+    if (!it) return
+    setForm(f => ({
+      ...f,
+      number:      it.serialNumber || it.lotNumber || '',
+      numberField: it.serialNumber ? 'serialNumber' : 'lotNumber',
+      productName: it.productName || f.productName,
+    }))
+  }
+
   /* La pièce posée se choisit dans le stock : c'est ce choix qui la sort de
      l'entrepôt. La saisie libre reste possible pour du matériel non suivi. */
   const { stock } = useCatalogStock(KIND_CATEGORY[form.kind] || 'batteries')
   const [pickedItem, setPickedItem] = useState(null)
-  const stockOptions = stockOptionsFor(stock, { field: cfg.field })
+
+  /* Série ou lot : c'est la catégorie du catalogue qui tranche, pas le type de
+     pièce. Les batteries de ce parc se suivent par lot — chercher un n° de série
+     ne ramènerait rien. */
+  const [tracksSerial, setTracksSerial] = useState(null)
+  useEffect(() => {
+    let alive = true
+    getProductCategories()
+      .then(res => {
+        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : [])
+        const cat  = list.find(c => c.slug === (KIND_CATEGORY[form.kind] || 'batteries'))
+        if (alive && cat) setTracksSerial(Boolean(cat.tracksSerial))
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [form.kind])
+
+  const stockField  = tracksSerial === null ? cfg.field : (tracksSerial ? 'serialNumber' : 'lotNumber')
+  const stockIsLot  = stockField === 'lotNumber'
+  const stockOptions = stockOptionsFor(stock, { field: stockField })
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
 
   /* Changer de type change ce qu'on identifie : le numéro saisi ne vaut plus. */
   function setKind(kind) {
+    setPiece('')
     setForm(f => ({
       ...f,
+      numberField: '',
       kind,
       // Un DEA défectueux se désigne par le numéro de l'appareil du parc.
       number: kind === 'dae' ? (selectedDea?.serialNumber || '') : '',
@@ -73,8 +132,10 @@ export default function ReplacementModal({
 
   function pickDea(id) {
     const d = deas.find(x => String(x._id) === String(id))
+    setPiece('')
     setForm(f => ({
       ...f,
+      numberField: '',
       dea: id,
       number: f.kind === 'dae' ? (d?.serialNumber || '') : f.number,
     }))
@@ -85,9 +146,11 @@ export default function ReplacementModal({
     setError('')
 
     if (!form.number.trim()) {
-      setError(isLot
-        ? 'Indiquez le numéro de lot de l\'élément concerné.'
-        : 'Indiquez le numéro de série de l\'élément concerné.')
+      setError(parcPieces.length > 0 && piece !== 'autre'
+        ? 'Désignez la pièce concernée sur cet appareil.'
+        : isLot
+          ? 'Indiquez le numéro de lot de l\'élément concerné.'
+          : 'Indiquez le numéro de série de l\'élément concerné.')
       return
     }
     if (alreadyDone && !form.replacementSerial.trim()) {
@@ -103,9 +166,10 @@ export default function ReplacementModal({
         kind:   form.kind,
         status: form.status,
         reason: form.reason,
-        [cfg.field]: form.number.trim(),
+        [form.numberField || cfg.field]: form.number.trim(),
         productName: form.productName.trim(),
         replacementSerial: alreadyDone ? form.replacementSerial.trim() : undefined,
+        replacementExpiry: alreadyDone && form.replacementExpiry ? form.replacementExpiry : undefined,
         notes: form.notes.trim(),
         intervention: intervention?._id || undefined,
       })
@@ -167,7 +231,26 @@ export default function ReplacementModal({
             </div>
           )}
 
+          {/* Ce que le parc dit être monté sur cet appareil : on désigne la
+              pièce plutôt que d'en recopier le numéro. */}
+          {parcPieces.length > 0 && (
+            <div className="form-group">
+              <label className="form-label">Pièce concernée *</label>
+              <select className="form-input form-input--plain" value={piece}
+                onChange={e => pickPiece(e.target.value)}>
+                <option value="">— Choisir la pièce montée —</option>
+                {parcPieces.map((it, i) => (
+                  <option key={it._id || i} value={String(i)}>{pieceLabel(it)}</option>
+                ))}
+                <option value="autre">Autre — non enregistrée sur cet appareil</option>
+              </select>
+            </div>
+          )}
+
           <div className="form-row">
+            {/* Le numéro se saisit à la main quand le parc ne connaît pas la
+                pièce ; sinon il vient de la pièce désignée. */}
+            {(parcPieces.length === 0 || piece === 'autre') && (
             <div className="form-group">
               <label className="form-label">
                 {isLot ? 'N° de lot' : 'N° de série'} *
@@ -179,6 +262,7 @@ export default function ReplacementModal({
                 S'il correspond à un article du stock, il passera automatiquement hors service.
               </p>
             </div>
+            )}
             <div className="form-group">
               <label className="form-label">Motif</label>
               <select className="form-input form-input--plain" value={form.reason}
@@ -192,11 +276,16 @@ export default function ReplacementModal({
 
           <div className="form-group">
             <label className="form-label">
-              Modèle <span className="form-label-opt">(si le numéro est inconnu du stock)</span>
+              Modèle de la pièce
+              <span className="form-label-opt"> (à commander si elle est inconnue du stock)</span>
             </label>
             <input className="form-input form-input--plain" value={form.productName}
               onChange={e => set('productName', e.target.value)}
               placeholder="Ex : Batterie Zoll AED 3" />
+            <p className="form-hint">
+              Quand le numéro saisi ne correspond à aucun article, c'est ce libellé
+              qui dit au magasin quoi préparer.
+            </p>
           </div>
 
           {/* Demande ou constat : le seul embranchement du formulaire. */}
@@ -226,21 +315,40 @@ export default function ReplacementModal({
               <StockPicker
                 items={stockOptions}
                 value={pickedItem}
-                field={cfg.field}
+                field={stockField}
                 onChange={it => {
                   setPickedItem(it)
-                  set('replacementSerial', it?.[cfg.field] || it?.serialNumber || it?.lotNumber || '')
+                  set('replacementSerial', it?.[stockField] || it?.serialNumber || it?.lotNumber || '')
+                  // La péremption de l'article choisi épargne une saisie ; elle
+                  // reste corrigeable, l'étiquette fait foi.
+                  if (it?.expirationDate) set('replacementExpiry', toDateInput(it.expirationDate))
                 }}
                 onClear={() => { setPickedItem(null); set('replacementSerial', '') }}
-                placeholder={`Rechercher un ${isLot ? 'n° de lot' : 'n° de série'} en stock…`}
+                placeholder={`Rechercher un ${stockIsLot ? 'n° de lot' : 'n° de série'} en stock…`}
               />
               <input className="form-input form-input--plain" style={{ marginTop: 6 }}
                 value={form.replacementSerial}
                 onChange={e => { setPickedItem(null); set('replacementSerial', e.target.value) }}
-                placeholder={isLot ? 'ou saisir le n° de lot posé' : 'ou saisir le n° de série posé'} />
+                placeholder={stockIsLot
+                  ? 'ou saisir le n° de lot posé (pièce hors stock)'
+                  : 'ou saisir le n° de série posé (pièce hors stock)'} />
+
+              {/* La péremption de la pièce posée part sur la fiche du DAE : sans
+                  elle, le parc garderait celle de la pièce qu'on vient de retirer. */}
+              <div style={{ marginTop: 8 }}>
+                <label className="form-label">
+                  Péremption de la pièce posée
+                  <span className="form-label-opt"> (relevée sur l'étiquette)</span>
+                </label>
+                <input type="date" className="form-input form-input--plain"
+                  value={form.replacementExpiry}
+                  onChange={e => set('replacementExpiry', e.target.value)} />
+              </div>
+
               <p className="form-hint">
-                <Package size={11} /> L'article choisi passe en « installé » sur ce site
-                et sort du stock. Un numéro inconnu du stock reste purement déclaratif.
+                <Package size={11} /> L'article choisi passe en « installé » sur ce site,
+                sort du stock et remplace l'ancienne pièce sur la fiche du DAE. Un numéro
+                absent du stock reste accepté : la pièce est notée sans mouvement de stock.
               </p>
             </div>
           ) : (

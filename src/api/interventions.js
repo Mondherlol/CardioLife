@@ -21,6 +21,11 @@ export const closeIntervention  = (id)        => patch(`/interventions/${id}/clo
 export const saveDeaItems = (id, kind, dea, items) =>
   put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items })
 
+/* Sort de la formation des agents : `etat` vaut 'effectuee', 'reportee' ou
+   'non_prevue'. La séance concernée suit — date déplacée, statut confirmé. */
+export const saveFormationOutcome = (id, data) =>
+  patch(`/interventions/${id}/formation`, data)
+
 export const uploadFichePhoto = (id, file, deaId) => {
   const form = new FormData()
   form.append('photo', file)

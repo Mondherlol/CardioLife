@@ -190,6 +190,9 @@ async function syncDeaConsumables(site, dea, kind) {
   // 1. Ce qui n'est plus déclaré sur l'appareil retourne au stock.
   for (const item of attached) {
     if (lines.some(l => samePiece(l, item))) continue
+    /* Une pièce déclarée hors service ne revient pas au stock parce qu'elle a
+       quitté la fiche du DAE : elle est cassée, pas rangée. */
+    if (!IN_STOCK_STATUSES.includes(item.status) && item.status !== 'installe') continue
     const from = item.status
     item.dea = undefined; item.site = undefined; item.client = undefined
     item.reservedFor = undefined
@@ -203,13 +206,25 @@ async function syncDeaConsumables(site, dea, kind) {
   for (const line of lines) {
     const already = attached.find(item => samePiece(line, item))
     if (already) {
-      // Corriger la date d'activation sur la fiche client la corrige au stock.
-      const wanted = line.activationDate ? new Date(line.activationDate).getTime() : null
-      const held   = already.activationDate ? new Date(already.activationDate).getTime() : null
-      if (wanted !== held) {
+      /* La pièce montée et sa fiche article sont le même objet : ce que le
+         terrain corrige sur le DAE — péremption relevée sur l'étiquette, date
+         de mise en service — doit se lire à l'identique dans le stock. Sans
+         ça, la fiche produit annonçait encore la date de la réception. */
+      const time = d => (d ? new Date(d).getTime() : null)
+      let touched = false
+
+      if (time(line.activationDate) !== time(already.activationDate)) {
         already.activationDate = line.activationDate || undefined
-        await already.save()
+        touched = true
       }
+      // Une péremption effacée sur le DAE ne vide pas celle de l'article : on
+      // ne perd pas une donnée du stock sur une case laissée vide.
+      if (line.expiryDate && time(line.expiryDate) !== time(already.expirationDate)) {
+        already.expirationDate = line.expiryDate
+        touched = true
+      }
+
+      if (touched) await already.save()
       continue
     }
 

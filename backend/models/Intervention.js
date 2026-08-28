@@ -141,6 +141,23 @@ const interventionSchema = new Schema({
     observationGenerale: { type: String, trim: true },
   },
 
+  /**
+   * Sort de la formation des agents, tranché pendant la visite.
+   *
+   * Le technicien est le seul à savoir si la séance a réellement eu lieu ce
+   * jour-là. La séance elle-même vit dans `Formation` — ce bloc en garde la
+   * trace côté rapport, qui doit rester lisible même si la formation est
+   * modifiée ou supprimée plus tard.
+   */
+  formation: {
+    etat:      { type: String, enum: ['', 'effectuee', 'reportee'], default: '' },
+    // Date de réalisation, ou date à laquelle la séance est reportée.
+    date:      Date,
+    formation: { type: Schema.Types.ObjectId, ref: 'Formation' },
+    titre:     { type: String, trim: true },
+    note:      { type: String, trim: true },
+  },
+
   history:  { type: [historySchema], default: [] },
   notes:    { type: String, trim: true },
   createdBy:{ type: Schema.Types.ObjectId, ref: 'User' },

@@ -2,7 +2,7 @@ const mongoose    = require('mongoose')
 const Replacement = require('../models/Replacement')
 const ProductItem = require('../models/ProductItem')
 const Site        = require('../models/Site')
-const { syncProductStock, logHistory } = require('../utils/productItems')
+const { syncProductStock, logHistory, IN_STOCK_STATUSES } = require('../utils/productItems')
 
 const POPULATE = [
   { path: 'client',          select: 'name' },
@@ -40,7 +40,7 @@ function deaLabelOf(dea) {
  * Retrouve l'article du stock désigné par le numéro saisi. Le technicien lit un
  * numéro sur l'appareil : il ne sait pas s'il correspond à une fiche de stock.
  */
-async function findItemByNumber({ serialNumber, lotNumber, site }) {
+async function findItemByNumber({ serialNumber, lotNumber, site, exclude, inStock }) {
   const sn  = String(serialNumber || '').trim()
   const lot = String(lotNumber || '').trim()
   if (!sn && !lot) return null
@@ -49,9 +49,64 @@ async function findItemByNumber({ serialNumber, lotNumber, site }) {
   if (sn)  or.push({ serialNumber: sn })
   if (lot) or.push({ lotNumber: lot })
 
+  const base = { $or: or }
+  // La pièce déposée ne peut pas être aussi la pièce posée — et c'est le cas
+  // courant quand les deux portent le même numéro de lot.
+  if (exclude) base._id = { $ne: exclude }
+
+  /* Une pièce qu'on vient de monter sort forcément du stock : chercher d'abord
+     parmi les articles disponibles évite de « poser » un article déjà hors
+     service ou installé ailleurs. */
+  if (inStock) {
+    const free = await ProductItem.findOne({ ...base, status: { $in: IN_STOCK_STATUSES } })
+      .sort({ expirationDate: 1, entryDate: 1 })
+    if (free) return free
+  }
+
   // Un lot peut être partagé entre plusieurs sites : celui du site prime.
-  return (site && await ProductItem.findOne({ $or: or, site })) ||
-         ProductItem.findOne({ $or: or })
+  return (site && await ProductItem.findOne({ ...base, site })) ||
+         ProductItem.findOne(base)
+}
+
+/**
+ * Échange la pièce sur la fiche du DAE : la déposée s'en va, la posée prend sa
+ * place.
+ *
+ * Sans ça, la fiche client continuait d'afficher la pièce défectueuse et le
+ * technicien suivant contrôlait un lot qui n'était plus là. Le DAE lui-même
+ * n'est pas concerné : remplacer un appareil change son numéro de série, ce qui
+ * se décide depuis la fiche du site.
+ */
+const KIND_LIST = { batterie: 'batteries', electrodes: 'electrodes' }
+
+async function swapDeaPiece(doc, item, { expiry } = {}) {
+  const list = KIND_LIST[doc.kind]
+  if (!list || !doc.dea) return
+
+  const site = await Site.findById(doc.site)
+  const dea  = site?.deas?.id(doc.dea)
+  if (!dea) return
+
+  const number = String(doc.serialNumber || doc.lotNumber || '').trim()
+  if (number) {
+    const idx = (dea[list] || []).findIndex(l =>
+      l.serialNumber === number || l.lotNumber === number)
+    if (idx !== -1) dea[list].splice(idx, 1)
+  }
+
+  const posed = String(doc.replacementSerial || '').trim()
+  if (posed) {
+    dea[list].push({
+      product:      item?.product || doc.product || undefined,
+      productName:  item?.productName || doc.productName || '',
+      serialNumber: item ? (item.serialNumber || '') : (doc.kind === 'batterie' ? posed : ''),
+      lotNumber:    item ? (item.lotNumber || '')    : (doc.kind === 'electrodes' ? posed : ''),
+      expiryDate:   expiry || item?.expirationDate || undefined,
+      ...(list === 'electrodes' ? { kind: '' } : {}),
+    })
+  }
+
+  await site.save()
 }
 
 /**
@@ -120,7 +175,7 @@ async function create(req, res) {
   const {
     site: siteId, dea: deaId, kind, status, reason,
     serialNumber, lotNumber, productName, product,
-    replacementSerial, notes, intervention,
+    replacementSerial, replacementExpiry, notes, intervention,
   } = req.body
 
   if (!Replacement.KINDS.includes(kind)) {
@@ -166,6 +221,9 @@ async function create(req, res) {
     const from = faulty.status
     faulty.status = 'hs'
     faulty.reservedFor = undefined
+    // Déposée : elle n'est plus montée sur l'appareil. Le client et le site
+    // restent, eux — c'est de chez eux qu'elle vient.
+    faulty.dea = undefined
     await logHistory(faulty, {
       action: 'Signalé hors service lors d\'un contrôle',
       from, to: 'hs', note: notes, user: req.user._id,
@@ -174,7 +232,7 @@ async function create(req, res) {
   }
 
   if (doc.status === 'remplace') {
-    await applyReplacement(doc, { replacementSerial }, req)
+    await applyReplacement(doc, { replacementSerial, replacementExpiry }, req)
   } else {
     const reserved = await reserveReplacement(doc, req)
     if (reserved) {
@@ -194,15 +252,23 @@ async function create(req, res) {
  * Le parc n'est pas réécrit ici — remplacer un DEA change son numéro de série,
  * ce qui se fait depuis la fiche du site en connaissance de cause.
  */
-async function applyReplacement(doc, { replacementSerial }, req) {
+async function applyReplacement(doc, { replacementSerial, replacementExpiry }, req) {
   doc.status     = 'remplace'
   doc.replacedAt = new Date()
   if (replacementSerial) doc.replacementSerial = replacementSerial
+  if (replacementExpiry) doc.replacementExpiry = replacementExpiry
 
-  // Le numéro saisi désigne la pièce posée ; à défaut, celle qu'on avait réservée.
+  /* Le numéro saisi désigne la pièce posée ; à défaut, celle qu'on avait
+     réservée. La pièce déposée est écartée de la recherche : elle porte souvent
+     le même numéro de lot, et se serait « posée » elle-même. */
   let item = null
-  if (replacementSerial) {
-    item = await findItemByNumber({ serialNumber: replacementSerial, lotNumber: replacementSerial })
+  if (doc.replacementSerial) {
+    item = await findItemByNumber({
+      serialNumber: doc.replacementSerial,
+      lotNumber:    doc.replacementSerial,
+      exclude:      doc.faultyItem,
+      inStock:      true,
+    })
   }
   if (!item && doc.replacementItem) item = await ProductItem.findById(doc.replacementItem)
 
@@ -213,6 +279,9 @@ async function applyReplacement(doc, { replacementSerial }, req) {
     item.client      = doc.client
     item.reservedFor = undefined
     if (doc.dea) item.dea = doc.dea
+    // La péremption relevée sur la pièce posée fait foi : c'est celle qu'on a
+    // sous les yeux, pas celle du bon de livraison.
+    if (doc.replacementExpiry) item.expirationDate = doc.replacementExpiry
     await logHistory(item, {
       action: 'Posé en remplacement',
       from, to: 'installe', user: req.user._id,
@@ -221,6 +290,9 @@ async function applyReplacement(doc, { replacementSerial }, req) {
     doc.replacementItem   = item._id
     doc.replacementSerial = doc.replacementSerial || item.serialNumber || item.lotNumber
   }
+
+  // La fiche du DAE suit : la pièce déposée s'en va, la posée prend sa place.
+  await swapDeaPiece(doc, item, { expiry: doc.replacementExpiry })
 
   trace(doc, req, { action: 'Marqué remplacé', to: 'remplace', note: doc.replacementSerial })
   await doc.save()
@@ -235,7 +307,7 @@ async function update(req, res) {
   const doc = await Replacement.findById(req.params.id)
   if (!doc) return res.status(404).json({ message: 'Demande introuvable.' })
 
-  const { status, replacementSerial, notes, reason } = req.body
+  const { status, replacementSerial, replacementExpiry, notes, reason } = req.body
   if (notes  !== undefined) doc.notes  = notes
   if (reason !== undefined && Replacement.REASONS.includes(reason)) doc.reason = reason
 
@@ -244,7 +316,7 @@ async function update(req, res) {
       return res.status(422).json({ message: 'Statut invalide.' })
     }
     if (status === 'remplace') {
-      await applyReplacement(doc, { replacementSerial }, req)
+      await applyReplacement(doc, { replacementSerial, replacementExpiry }, req)
     } else {
       // Annulation : le remplaçant réservé retourne au stock, il n'a pas servi.
       if (status === 'annule' && doc.replacementItem) {

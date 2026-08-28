@@ -18,6 +18,8 @@ router.delete('/:id/fiche/:deaId', ctrl.removeFiche)
 router.patch('/:id/close',   ctrl.closeIntervention)
 /* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist. */
 router.put('/:id/dea-items/:kind', ctrl.saveDeaItems)
+/* Formation des agents : effectuée ou reportée, tranché pendant la visite. */
+router.patch('/:id/formation', ctrl.saveFormation)
 
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
 router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)

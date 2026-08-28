@@ -1,6 +1,7 @@
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
 const { skipWeekend, syncSiteNextControl } = require('./controls')
+const { syncDeaConsumables } = require('./productItems')
 
 /**
  * Remontée de la checklist vers le parc et le planning.
@@ -225,13 +226,24 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
     const site = await Site.findById(siteId)
     if (!site) return changes
 
+    const touched = []
     for (const fiche of intervention.fiches || []) {
       const dea = resolveDea(site, intervention, fiche)
       if (!dea) continue
       applyFicheToDea(fiche, dea, changes)
+      if (!touched.some(d => String(d._id) === String(dea._id))) touched.push(dea)
     }
 
-    if (changes.length && !dry) await site.save()
+    if (changes.length && !dry) {
+      await site.save()
+      /* La chaîne va jusqu'au stock : la péremption relevée sur le terrain
+         arrive sur la fiche du DAE, puis sur la fiche de l'article monté. Les
+         trois écrans doivent dire la même date. */
+      for (const dea of touched) {
+        await syncDeaConsumables(site, dea, 'batteries')
+        await syncDeaConsumables(site, dea, 'electrodes')
+      }
+    }
 
     const next = planning ? nextControlFromFiches(intervention.fiches) : null
     const planned = next && intervention.site

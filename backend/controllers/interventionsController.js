@@ -2,6 +2,7 @@ const path           = require('path')
 const fs             = require('fs')
 const Intervention   = require('../models/Intervention')
 const Site           = require('../models/Site')
+const Formation      = require('../models/Formation')
 const { listInstallations } = require('../utils/deaParc')
 const { syncSiteNextControl } = require('../utils/controls')
 const { syncFicheToParc } = require('../utils/ficheSync')
@@ -266,6 +267,28 @@ async function parcOf(intervention) {
   return { deviceProduct: target?.product || null, siteDeas }
 }
 
+/**
+ * Séances de formation rattachées à la visite.
+ *
+ * Une visite d'entretien est souvent l'occasion de former les agents du site :
+ * le technicien est le seul à savoir si la séance a eu lieu ce jour-là, ou si
+ * elle a été repoussée. On lui présente donc les séances du site — à défaut
+ * celles du client, les formations d'avant les sites n'en ayant pas — pour
+ * qu'il tranche sans quitter sa fiche.
+ */
+async function formationsOf(intervention) {
+  const query = intervention.site
+    ? { $or: [{ site: intervention.site._id || intervention.site }, { client: intervention.client, site: null }] }
+    : (intervention.client ? { client: intervention.client } : null)
+  if (!query) return []
+
+  return Formation.find(query)
+    .select('title date end status attestationDelivered participants participantsCount siteName clientName')
+    .sort({ date: -1 })
+    .limit(20)
+    .lean()
+}
+
 /* ─── List ─────────────────────────────────────────────────── */
 async function getAll(req, res) {
   try {
@@ -341,6 +364,7 @@ async function getOne(req, res) {
     const { deviceProduct, siteDeas } = await parcOf(intervention)
     json.deviceProduct = deviceProduct
     json.siteDeas      = siteDeas
+    json.formations    = await formationsOf(intervention)
 
     // Fiches d'avant les visites multi-DAE : présentées comme une liste d'une
     // seule entrée, pour que l'écran n'ait qu'une forme à connaître.
@@ -644,9 +668,24 @@ async function saveFiche(req, res) {
        la valeur erronée qu'on vient justement de reprendre. */
     if (intervention.status === 'termine' && changes.length) {
       await pushFicheToParc(intervention, req.user)
+    } else if (changes.length) {
+      /* Visite en cours : ce qui est relevé descend aussitôt sur la fiche du
+         DAE et sur l'article monté. Attendre la clôture laissait trois écrans
+         se contredire pendant toute la visite — la péremption corrigée ici,
+         l'ancienne encore affichée côté client et côté stock.
+         Le planning, lui, attend la clôture : déplacer une visite à chaque
+         frappe n'aurait aucun sens. L'historique n'est pas alourdi non plus,
+         la ligne de correction dit déjà ce qui a changé. */
+      await syncFicheToParc(intervention, req.user, { planning: false })
     }
 
-    res.json(intervention)
+    /* La réponse porte le parc rafraîchi : l'écran affiche la pièce telle
+       qu'elle vient d'être mise à jour, sans attendre un rechargement. */
+    const json = intervention.toObject()
+    const { deviceProduct, siteDeas } = await parcOf(intervention)
+    json.deviceProduct = deviceProduct
+    json.siteDeas      = siteDeas
+    res.json(json)
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -841,6 +880,132 @@ async function saveDeaItems(req, res) {
   }
 }
 
+/* ─── Sort de la formation, tranché depuis la visite ────────── */
+/**
+ * « Effectuée » ou « reportée » : le technicien tranche, la séance suit.
+ *
+ * La formation vivait dans son propre écran, alimenté par l'assistante. Mais
+ * c'est sur place qu'on apprend qu'une séance n'a pas pu se tenir — agents
+ * indisponibles, site en travaux — et personne ne revenait le dire. La fiche
+ * de visite porte donc la décision, et la répercute sur la séance elle-même :
+ * une formation confirmée passe en « Terminé » et attend ses attestations ;
+ * une formation reportée change de date sans quitter le planning.
+ *
+ * La trace reste des deux côtés : sur la séance, pour l'assistante ; sur la
+ * visite, pour le rapport, qui doit rester lisible même si la séance est
+ * modifiée ou supprimée plus tard.
+ */
+/* Deux issues et le retrait de la mention : la checklist ne propose rien de
+   plus, et le rapport n'a rien d'autre à dire. */
+const FORMATION_ETATS = ['', 'effectuee', 'reportee']
+
+async function saveFormation(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!canWriteFiche(req.user, intervention)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    const { etat = '', date, note } = req.body
+    if (!FORMATION_ETATS.includes(etat)) {
+      return res.status(400).json({ message: 'État de formation inconnu.' })
+    }
+
+    let formation = req.body.formation
+      ? await Formation.findById(req.body.formation)
+      : null
+    if (req.body.formation && !formation) {
+      return res.status(404).json({ message: 'Formation introuvable.' })
+    }
+
+    /* La séance sur laquelle cette visite s'est déjà prononcée, d'abord :
+       sans elle, corriger « Effectuée » en « Reportée » ne rouvrirait rien —
+       la séance étant passée en « Terminé », elle ne fait plus partie des
+       séances ouvertes qu'on va chercher ensuite. */
+    if (!formation && intervention.formation?.formation) {
+      formation = await Formation.findById(intervention.formation.formation)
+    }
+
+    /* Personne ne désigne la séance : la checklist ne demande que l'issue. On
+       prend la séance encore ouverte du site — la plus proche de la visite,
+       c'est celle dont on parle. Sans séance ouverte, la décision reste sur la
+       visite seule : elle n'a rien à déplacer. */
+    if (!formation && intervention.site && etat) {
+      const ouvertes = await Formation.find({
+        site:   intervention.site,
+        status: { $in: ['planifie', 'en_cours'] },
+      }).sort({ date: 1 })
+
+      if (ouvertes.length) {
+        const repere = new Date(intervention.completedDate || intervention.scheduledDate || Date.now()).getTime()
+        formation = ouvertes.reduce((best, f) => (
+          Math.abs(new Date(f.date).getTime() - repere) < Math.abs(new Date(best.date).getTime() - repere)
+            ? f : best
+        ))
+      }
+    }
+
+    const who = req.user.fullName || req.user.username
+    const visitDate = intervention.completedDate || intervention.scheduledDate || new Date()
+
+    if (formation) {
+      if (etat === 'effectuee') {
+        // La séance a eu lieu : les attestations restent à préparer.
+        formation.status = 'fait'
+        formation.date   = date || formation.date || visitDate
+        formation.history.push({
+          action: 'Formation confirmée effectuée',
+          by: req.user._id,
+          details: `Confirmée lors de la visite du ${new Date(visitDate).toLocaleDateString('fr-FR')}`,
+        })
+      } else if (etat === 'reportee') {
+        /* Reportée sans date : la séance reste à programmer et repasse en
+           « Programmé ». C'est à l'assistante de lui trouver un nouveau
+           créneau — le technicien constate, il ne prend pas le rendez-vous. */
+        formation.status = 'planifie'
+        formation.history.push({
+          action: 'Formation reportée',
+          by: req.user._id,
+          details: `Séance non tenue lors de la visite du `
+                 + `${new Date(visitDate).toLocaleDateString('fr-FR')} — à reprogrammer`,
+        })
+      }
+      if (etat === 'effectuee' || etat === 'reportee') await formation.save()
+    }
+
+    intervention.formation = {
+      etat,
+      // Seule la réalisation porte une date : celle de la visite.
+      date:      etat === 'effectuee' ? (date || visitDate) : undefined,
+      formation: formation?._id,
+      titre:     formation?.title || '',
+      note:      note || '',
+    }
+    intervention.markModified('formation')
+
+    const LABELS = {
+      effectuee: 'Formation effectuée',
+      reportee:  'Formation reportée',
+      '':        'Mention de formation retirée',
+    }
+    intervention.history.push({
+      action:   'formation',
+      user:     req.user._id,
+      userName: who,
+      details:  LABELS[etat] + (formation ? ` — ${formation.title}` : ''),
+    })
+
+    await intervention.save()
+
+    const json = intervention.toObject()
+    json.formations = await formationsOf(intervention)
+    res.json(json)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
 /* ─── Delete ────────────────────────────────────────────────── */
 async function remove(req, res) {
   try {
@@ -870,5 +1035,5 @@ async function searchInstallations(req, res) {
 module.exports = {
   getAll, getOne, create, update, submitRapport, remove, searchInstallations,
   saveFiche, removeFiche, closeIntervention, uploadFichePhoto, deleteFichePhoto,
-  saveDeaItems,
+  saveDeaItems, saveFormation,
 }
