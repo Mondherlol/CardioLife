@@ -209,6 +209,20 @@ export function ContractChip({ contract }) {
     )
 }
 
+/** Le site bénéficie-t-il d'un pack ? Oui ou non, comme pour le contrat. */
+export function PackChip({ on }) {
+  return on
+    ? (
+      <span className="ct-chip ct-chip--on" title="Pack inclus sur ce site">
+        <Check size={12} /> Oui
+      </span>
+    ) : (
+      <span className="ct-chip ct-chip--none" title="Aucun pack sur ce site">
+        <Minus size={12} /> Non
+      </span>
+    )
+}
+
 /**
  * Ce qu'on montre à la place du parc quand un site n'a encore aucun DEA.
  *

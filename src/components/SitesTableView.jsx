@@ -1,5 +1,5 @@
 import { ArrowUpRight } from 'lucide-react'
-import { formatDate, ItemsCell, ContractChip, NoDeaBox, NextControlChip } from './siteHelpers'
+import { formatDate, ItemsCell, ContractChip, PackChip, NoDeaBox, NextControlChip } from './siteHelpers'
 
 /**
  * Vue tableau : une ligne par DEA, les colonnes du site fusionnées sur ses DEA.
@@ -30,6 +30,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
         <colgroup>
           <col style={{ width: 215 }} />
           <col style={{ width: 80 }} />
+          <col style={{ width: 70 }} />
           <col style={{ width: 175 }} />
           <col style={{ width: 145 }} />
           <col style={{ width: 110 }} />
@@ -41,6 +42,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
           <tr>
             <th className="sites-xl-site"><div className="th-inner">Site</div></th>
             <th className="sites-xl-ct"><div className="th-inner">Contrat</div></th>
+            <th className="sites-xl-ct"><div className="th-inner">Pack</div></th>
             <th><div className="th-inner">Type</div></th>
             <th><div className="th-inner">N° de série</div></th>
             <th><div className="th-inner">Installation</div></th>
@@ -76,6 +78,14 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                 onClick={cellClick(() => act.openSite(site))}
                 title="Ouvrir la fiche du site">
                 <ContractChip contract={contracts[String(site._id)]} />
+              </td>
+
+              {/* Pack inclus ou non : la question se pose site par site, la
+                  réponse se corrige sur la fiche du site. */}
+              <td className="sites-xl-ct" rowSpan={span}
+                onClick={cellClick(() => act.editSite(site))}
+                title="Modifier le site">
+                <PackChip on={site.hasPack} />
               </td>
 
             </>

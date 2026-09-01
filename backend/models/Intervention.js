@@ -93,6 +93,12 @@ const historySchema = new Schema({
   details:  { type: String },
 }, { _id: false })
 
+/* Natures d'intervention du bon signé par le client. */
+const BON_NATURES = [
+  '', 'controle_semestriel', 'controle_annuel',
+  'remplacement_consommables', 'installation', 'hors_delai',
+]
+
 const interventionSchema = new Schema({
   client:     { type: Schema.Types.ObjectId, ref: 'Client' },
   clientName: { type: String, trim: true },
@@ -158,6 +164,20 @@ const interventionSchema = new Schema({
     note:      { type: String, trim: true },
   },
 
+  /**
+   * Bon d'intervention — le document que le client signe en fin de visite.
+   *
+   * Il ne redit pas la checklist : il atteste qu'une intervention a eu lieu,
+   * de quelle nature, et que le client l'a constatée. La nature est déclarée
+   * ici plutôt que déduite du `controlType`, qui ne connaît ni les poses ni les
+   * remplacements de consommables.
+   */
+  bon: {
+    nature:     { type: String, enum: BON_NATURES, default: '' },
+    signataire: { type: String, trim: true },
+    signedAt:   Date,
+  },
+
   history:  { type: [historySchema], default: [] },
   notes:    { type: String, trim: true },
   createdBy:{ type: Schema.Types.ObjectId, ref: 'User' },
@@ -168,3 +188,4 @@ interventionSchema.index({ client: 1, scheduledDate: -1 })
 interventionSchema.index({ status: 1 })
 
 module.exports = mongoose.model('Intervention', interventionSchema)
+module.exports.BON_NATURES = BON_NATURES

@@ -257,8 +257,67 @@ async function syncDeaConsumables(site, dea, kind) {
   }
 }
 
+/* Les catégories qui se montent sur un DAE — ce sont aussi les noms des listes
+   correspondantes dans `Site.deas`. */
+const CONSUMABLE_LISTS = ['batteries', 'electrodes']
+
+/**
+ * Détache du parc un article qui rentre à l'entrepôt.
+ *
+ * Remettre une pièce en stock depuis la fiche produit, c'est dire qu'elle n'est
+ * plus chez le client. La fiche client doit le refléter : sans ça, le même
+ * appareil s'affichait à la fois disponible au magasin et posé chez le client,
+ * et le prochain technicien partait le contrôler.
+ *
+ * Deux cas, deux gestes :
+ *  — un consommable quitte la liste de son DAE ;
+ *  — un défibrillateur quitte le parc du site, comme le ferait « Retirer ce
+ *    DEA » depuis la fiche client. Le calendrier des contrôles se réaligne.
+ *
+ * Retourne ce qui a été retiré, pour la trace.
+ */
+async function detachItemFromParc(item, { userId } = {}) {
+  if (!item?.dea) return null
+
+  const Site = require('../models/Site')
+  const site = await Site.findOne({ 'deas._id': item.dea })
+  const dea  = site?.deas?.id(item.dea)
+  if (!dea) return null
+
+  /* L'article est-il l'appareil lui-même, ou une pièce montée dessus ? Le
+     numéro de série tranche, le modèle sert de repli. */
+  const isDevice = (item.serialNumber && item.serialNumber === dea.serialNumber)
+    || (dea.product && String(dea.product) === String(item.product) && !CONSUMABLE_LISTS.includes(item.category))
+
+  if (isDevice) {
+    const label = dea.deviceType || dea.serialNumber || 'DAE'
+    dea.deleteOne()
+    await site.save()
+    // Plus d'appareil, plus de calendrier : les visites du site se réalignent.
+    try {
+      const { syncSiteControls } = require('./controls')
+      await syncSiteControls(site._id, userId)
+    } catch (err) {
+      console.error('Calendrier du site non réaligné :', err.message)
+    }
+    return { kind: 'dae', label, site }
+  }
+
+  const list = CONSUMABLE_LISTS.find(k => k === item.category)
+  if (!list) return null
+  const idx = (dea[list] || []).findIndex(l =>
+    (item.serialNumber && l.serialNumber === item.serialNumber)
+    || (item.lotNumber && l.lotNumber === item.lotNumber))
+  if (idx === -1) return null
+
+  const [removed] = dea[list].splice(idx, 1)
+  await site.save()
+  return { kind: list, label: removed.productName || item.serialNumber || item.lotNumber, site }
+}
+
 module.exports = {
   modelViewSlugs, summarize,
   syncProductStock, logHistory, findItemForDea, syncDeaWithItem, syncDeaConsumables,
+  detachItemFromParc,
   IN_STOCK_STATUSES,
 }

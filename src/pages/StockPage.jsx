@@ -1197,7 +1197,8 @@ export default function StockPage() {
           <div className="table-toolbar cat-filters">
             <div className="search-wrap">
               <Search size={14} className="search-icon" />
-              <input className="search-input" placeholder="Rechercher dans la catégorie…"
+              <input className="search-input"
+                placeholder="Nom, référence, marque, n° de série ou de lot…"
                 value={search} onChange={e => setSearch(e.target.value)} />
               {search && <button className="search-clear" onClick={() => setSearch('')}><X size={13} /></button>}
             </div>

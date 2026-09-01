@@ -3,7 +3,7 @@ import {
   Plus, Pencil, Trash2, X, AlertTriangle, ChevronRight,
   Zap, BatteryMedium, Building2, UserPlus, Settings2,
   Table2, LayoutGrid, ArrowUpRight, HeartPulse, FileText,
-  CalendarClock,
+  CalendarClock, Package,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -18,9 +18,10 @@ import ContextMenu from './ContextMenu'
 import DeleteDeaConfirm from './DeleteDeaConfirm'
 import SitesTableView from './SitesTableView'
 import InstallationPlanModal from './InstallationPlanModal'
-import { getProductItems } from '../api/productItems'
+import { getProductItems, itemStatus } from '../api/productItems'
+import { productImageUrl } from '../api/products'
 import SitesCardsView from './SitesCardsView'
-import { formatApiError } from './siteHelpers'
+import { formatApiError, expiryHint } from './siteHelpers'
 
 const VIEW_KEY = 'cardiotrack.sites.view'
 
@@ -174,8 +175,12 @@ export default function SitesClientTab({ clientId, onCountChange }) {
 
   useEffect(() => { load() }, [load])
 
+  /* Tout ce qui est assigné au client sans être monté sur un DAE : réservé en
+     attente de pose, ou déposé hors service. Ces pièces existaient dans le
+     stock et nulle part côté client — le commercial ne voyait ni ce qui était
+     promis, ni ce qui avait été retiré. */
   const loadReserved = useCallback(() => {
-    getProductItems({ client: clientId, status: 'reserve' })
+    getProductItems({ client: clientId, status: 'reserve,hs,vendu,installe' })
       .then(res => setReserved(Array.isArray(res.data) ? res.data : []))
       .catch(() => setReserved([]))
   }, [clientId])
@@ -232,6 +237,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
        pour un site précis n'apparaît que sur celui-ci ; sans site désigné, il
        concerne encore n'importe lequel. */
     reservedFor: site => reserved.filter(it => {
+      if (it.status !== 'reserve') return false
       const s = it.reservedFor?.site?._id || it.reservedFor?.site || it.site?._id || it.site
       return !s || String(s) === String(site._id)
     }),
@@ -294,6 +300,9 @@ export default function SitesClientTab({ clientId, onCountChange }) {
   if (loading) return <div className="table-loading"><span className="spinner" /></div>
 
   const deaTotal  = sites.reduce((n, s) => n + (s.deas?.length || 0), 0)
+  /* Monté sur un DAE, l'article se lit déjà sur la ligne de l'appareil : cette
+     section ne montre que ce qui n'apparaît nulle part ailleurs. */
+  const offParc = reserved.filter(it => !it.dea)
   const viewProps = { sites, act, contracts }
 
 
@@ -351,6 +360,58 @@ export default function SitesClientTab({ clientId, onCountChange }) {
             </button>
           </div>
         </>
+      )}
+
+      {/* Matériel du client qui ne figure sur aucun DAE : il n'apparaissait
+          nulle part côté client alors qu'il lui est bel et bien assigné. */}
+      {offParc.length > 0 && (
+        <div className="cd-tab-section">
+          <div className="cd-tab-section-head">
+            <Package size={14} />
+            <h3 className="cd-tab-title">Autre matériel ({offParc.length})</h3>
+            <p className="cd-tab-hint">
+              Assigné à ce client mais monté sur aucun appareil : vendu, réservé en
+              attente de pose, ou déposé hors service.
+            </p>
+          </div>
+          <div className="offparc-list">
+            {offParc.map(it => {
+              const img  = it.product?.images?.[0]
+              const site = it.reservedFor?.site?.name || it.site?.name
+              const exp  = it.expirationDate ? expiryHint(it.expirationDate) : null
+              return (
+                <button key={it._id} type="button" className="offparc-row"
+                  title="Ouvrir la fiche du produit"
+                  onClick={() => it.product?._id && navigate(`/stock/${it.product._id}`)}>
+                  {/* Le visuel du produit : on reconnaît une armoire d'un DAE
+                      d'un coup d'œil, là où un nom demande à être lu. */}
+                  <span className="offparc-img">
+                    {img
+                      ? <img src={productImageUrl(img)} alt=""
+                          onError={e => { e.target.style.display = 'none' }} />
+                      : <Package size={16} />}
+                  </span>
+
+                  <span className="offparc-main">
+                    <span className="offparc-name">{it.product?.name || 'Article'}</span>
+                    <span className="offparc-sub">
+                      {(it.serialNumber || it.lotNumber) && (
+                        <span className="offparc-num">{it.serialNumber || it.lotNumber}</span>
+                      )}
+                      {site && <span>{site}</span>}
+                      {exp && <span className={`offparc-exp offparc-exp--${exp.level}`}>{exp.text}</span>}
+                    </span>
+                  </span>
+
+                  <span className={`item-chip item-chip--${itemStatus(it.status).tone}`}>
+                    {itemStatus(it.status).label}
+                  </span>
+                  <ChevronRight size={14} className="offparc-go" />
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       {menu && (

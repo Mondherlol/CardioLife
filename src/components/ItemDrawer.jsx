@@ -39,8 +39,10 @@ export function ItemStatusChip({ status }) {
 }
 
 /* Transitions offertes depuis l'état courant — on ne propose que ce qui a du
-   sens : inutile de « vendre » un appareil déjà posé chez un client. */
-function actionsFor(status) {
+   sens : inutile de « vendre » un appareil déjà posé chez un client. Exporté
+   pour que la fiche de l'article propose exactement les mêmes gestes que le
+   tiroir : deux listes divergentes finiraient par se contredire. */
+export function actionsFor(status) {
   const all = {
     reserve:     { label: 'Réserver',            icon: Clock,        status: 'reserve' },
     maintenance: { label: 'Envoyer en maintenance', icon: Wrench,    status: 'maintenance' },
@@ -85,7 +87,9 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
      appareil précis. Sans le dire, la fiche client reste vide et le prochain
      technicien trouve une armoire dont personne n'a noté la pièce. */
   const isConsumable = ['batteries', 'electrodes'].includes(item.category)
-  const wantsSite    = needsClient || (target === 'vendu' && isConsumable)
+  /* Vendre, c'est vendre à quelqu'un, et le matériel part sur un site précis :
+     sans lui, la fiche client ne peut rien afficher de cette vente. */
+  const wantsSite    = needsClient || target === 'vendu'
   /* La recherche est ouverte à tout utilisateur connecté, la création non :
      sans le droit, on n'affiche pas un bouton qui finirait en 403. */
   const canCreateClient = user?.role === 'superadmin' || !!user?.permissions?.canManageClients
@@ -124,9 +128,17 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
 
   const siteDeas = site?.deas || []
 
+  /* Retour à l'entrepôt : l'article quitte le client. Le serveur refuse tant
+     qu'une visite est ouverte sur le site — on propose alors de confirmer. */
+  const leavingClient = ['disponible', 'maintenance'].includes(target)
+    && Boolean(item.dea || item.client)
+  const [force, setForce] = useState(false)
+
   // Sans site, la pose ne saurait pas où aller. Un consommable vendu suit la
   // même règle : il est monté quelque part.
-  const canSubmit = !wantsSite || (!!client && !!site)
+  const canSubmit = (!wantsSite || (!!client && !!site))
+    // Un retrait sans motif ne s'explique plus six mois après.
+    && (!leavingClient || note.trim().length > 0)
 
   async function submit(e) {
     e.preventDefault()
@@ -134,6 +146,7 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
     setSaving(true)
     try {
       const updated = await setItemStatus(item._id, {
+        force: force || undefined,
         status: target,
         note,
         client: wantsClient ? (client?._id || undefined) : undefined,
@@ -144,6 +157,8 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
       toast.success(`Article ${itemStatus(target).label.toLowerCase()}.`)
       onDone(updated)
     } catch (err) {
+      // Le refus n'est pas une impasse : le magasin peut passer outre en connaissance de cause.
+      if (err?.needsConfirmation || /visite est en cours/i.test(err?.message || '')) setForce(true)
       toast.error(formatApiError(err))
       setSaving(false)
     }
@@ -227,6 +242,17 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
           </div>
         )}
 
+        {leavingClient && (
+          <div className="drawer-warn">
+            <AlertTriangle size={13} />
+            <span>
+              Cet article est chez un client : il sera retiré de sa fiche
+              {item.dea ? " et de l'appareil sur lequel il est monté" : ''}.
+              Indiquez le motif du retour.
+            </span>
+          </div>
+        )}
+
         {target === 'reserve' && (
           <div className="form-group" style={{ marginBottom: 10 }}>
             <label className="form-label">Réservé jusqu'au <span className="form-label-opt">(optionnel)</span></label>
@@ -241,7 +267,9 @@ export function StatusConfirm({ item, target, onCancel, onDone }) {
 
         <input
           className="form-input form-input--plain"
-          placeholder="Motif (optionnel) — Entrée pour valider"
+          placeholder={leavingClient
+            ? 'Motif du retour — obligatoire'
+            : 'Motif (optionnel) — Entrée pour valider'}
           value={note}
           onChange={e => setNote(e.target.value)}
           autoFocus={!wantsClient}

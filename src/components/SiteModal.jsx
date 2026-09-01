@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { X, AlertTriangle, Plus, Trash2 } from 'lucide-react'
+import { X, AlertTriangle, Plus, Trash2, Package } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { createSite, updateSite } from '../api/sites'
 
@@ -26,6 +26,7 @@ export default function SiteModal({ clientId, site, focus, onClose, onSaved }) {
   const [form, setForm] = useState({
     name:    site?.name || '',
     notes:   site?.notes || '',
+    hasPack: Boolean(site?.hasPack),
     address: {
       street: site?.address?.street || '',
       city:   site?.address?.city   || '',
@@ -151,6 +152,23 @@ export default function SiteModal({ clientId, site, focus, onClose, onSaved }) {
                 onChange={e => setAddress('city', e.target.value)} placeholder="Ex : Sfax" />
             </div>
           </div>
+
+          {/* Un réglage qui se lit d'un coup d'œil : la case perdue dans la
+              colonne de gauche ne se voyait pas, alors que la réponse est
+              affichée en clair dans la liste des sites. */}
+          <label className="opt-card">
+            <span className="opt-card-text">
+              <span className="opt-card-title"><Package size={14} /> Pack inclus</span>
+              <span className="opt-card-sub">
+                Le site bénéficie d'un pack ou non.
+              </span>
+            </span>
+            <span className="perm-toggle">
+              <input type="checkbox" checked={form.hasPack}
+                onChange={e => set('hasPack', e.target.checked)} />
+              <span className="perm-toggle-track" />
+            </span>
+          </label>
 
           <div className="form-group">
             <label className="form-label">Notes</label>

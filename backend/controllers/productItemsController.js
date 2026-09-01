@@ -3,7 +3,8 @@ const ProductItem     = require('../models/ProductItem')
 const Product         = require('../models/Product')
 const StockMovement   = require('../models/StockMovement')
 const Site            = require('../models/Site')
-const { summarize, syncProductStock, logHistory } = require('../utils/productItems')
+const Intervention  = require('../models/Intervention')
+const { summarize, syncProductStock, logHistory, detachItemFromParc } = require('../utils/productItems')
 
 const { IN_STOCK_STATUSES, OUT_STATUSES, STATUS_LABELS } = ProductItem
 
@@ -261,6 +262,28 @@ async function mountOnDea(item, { deaId, siteId }) {
   return { site, dea, kind }
 }
 
+/* Ce qui ramène l'article à l'entrepôt : il quitte alors le parc du client. */
+const BACK_TO_WAREHOUSE = ['disponible', 'maintenance']
+
+/**
+ * Une visite est-elle en cours sur l'appareil que l'on s'apprête à retirer ?
+ *
+ * Reprendre un DAE dont le contrôle est ouvert laisse une checklist qui décrit
+ * un appareil absent, et un technicien qui se déplace pour rien. On refuse, en
+ * nommant la visite — le magasin sait alors qui appeler.
+ */
+async function pendingVisitFor(item) {
+  if (!item.dea && !item.site) return null
+  const query = {
+    status: { $ne: 'termine' },
+    $or: [
+      ...(item.dea  ? [{ installation: item.dea }] : []),
+      ...(item.site ? [{ site: item.site }] : []),
+    ],
+  }
+  return Intervention.findOne(query).sort({ scheduledDate: 1 }).select('scheduledDate siteName status').lean()
+}
+
 /**
  * POST /api/product-items/:id/status — les transitions de la fiche article :
  * réserver, libérer, envoyer en maintenance, remettre en stock, vendre, casser.
@@ -289,6 +312,28 @@ async function changeStatus(req, res) {
   }
 
   const effective = mounted ? 'installe' : status
+
+  /* Retour à l'entrepôt : l'article quitte le client. On vérifie d'abord qu'on
+     ne lui reprend pas un appareil dont la visite est en cours, puis on le
+     détache du parc — sans quoi la fiche client continuerait de l'afficher. */
+  let detached = null
+  if (BACK_TO_WAREHOUSE.includes(effective) && (item.dea || item.client)) {
+    if (!req.body.force) {
+      const visit = await pendingVisitFor(item)
+      if (visit) {
+        const when = visit.scheduledDate
+          ? new Date(visit.scheduledDate).toLocaleDateString('fr-FR')
+          : 'sans date'
+        return res.status(409).json({
+          message: `Une visite est en cours sur ce site (${visit.siteName || 'site'}, ${when}). `
+                 + 'Clôturez-la, ou confirmez le retrait malgré tout.',
+          needsConfirmation: true,
+        })
+      }
+    }
+    detached = await detachItemFromParc(item, { userId: req.user._id })
+  }
+
   item.status = effective
 
   if (effective === 'reserve') {
@@ -328,7 +373,13 @@ async function changeStatus(req, res) {
     action: mounted
       ? `Montée sur un DAE — ${mounted.site.name}`
       : `${STATUS_LABELS[from]} → ${STATUS_LABELS[effective]}`,
-    from, to: effective, note, user: req.user._id,
+    from, to: effective, user: req.user._id,
+    note: [
+      note,
+      detached && (detached.kind === 'dae'
+        ? `Retiré du parc de ${detached.site.name}`
+        : `Détaché du DAE de ${detached.site.name}`),
+    ].filter(Boolean).join(' · '),
   })
 
   // Une transition entre « en stock » et « sorti » déplace le compteur du modèle.

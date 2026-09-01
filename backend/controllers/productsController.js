@@ -1,3 +1,4 @@
+const mongoose      = require('mongoose')
 const { validationResult } = require('express-validator')
 const path          = require('path')
 const fs            = require('fs')
@@ -21,11 +22,23 @@ async function getAll(req, res) {
   if (q) {
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = { $regex: escaped, $options: 'i' }
+
+    /* Un numéro de série ou de lot est lu sur l'appareil, pas dans le
+       catalogue : celui qui le cherche veut retrouver le modèle qui le porte.
+       On remonte donc des exemplaires vers leurs modèles avant de filtrer. */
+    const items = await ProductItem
+      .find({ $or: [{ serialNumber: re }, { lotNumber: re }] })
+      .select('product')
+      .limit(500)
+      .lean()
+    const fromItems = [...new Set(items.map(i => String(i.product)))]
+
     filter.$or = [
       { name:      re },
       { reference: re },
       { brand:     re },
       { supplier:  re },
+      ...(fromItems.length ? [{ _id: { $in: fromItems.map(id => new mongoose.Types.ObjectId(id)) } }] : []),
     ]
   }
   if (lowStock === 'true')    filter.$expr = { $lte: ['$stock', '$alertThreshold'] }

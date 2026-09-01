@@ -6,7 +6,7 @@ import {
   Camera, Trash2, X, Save, ImagePlus, Hash, Navigation,
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
   ChevronDown, ClipboardList, History, Download, FileText, Building2, Wrench, Check,
-  Pencil, Lock, Unlock, BatteryMedium, AlertTriangle, GraduationCap, Minus,
+  Pencil, Lock, Unlock, BatteryMedium, AlertTriangle, GraduationCap, Minus, HeartPulse,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -1045,6 +1045,14 @@ export default function InterventionFichePage() {
           >
             <Download size={14} /> PDF
           </button>
+          {/* Le bon est le document que le client signe : il ne se confond pas
+              avec le rapport, et se sort donc par son propre bouton. */}
+          <button
+            className="btn btn--ghost"
+            onClick={() => window.open(`/interventions/${id}/bon`, '_blank')}
+          >
+            <FileText size={14} /> Bon d'intervention
+          </button>
           {canFill && !isTermine && (
             <button className="btn btn--primary" onClick={() => setShowClose(true)}>
               <CheckCircle2 size={14} /> Clôturer l'intervention
@@ -1134,18 +1142,28 @@ export default function InterventionFichePage() {
             </div>
           )}
 
-          {/* Une panne se signale au moment où on la constate, pas après coup :
-              le bouton reste à portée tant que l'intervention est ouverte. */}
-          {!isTermine && siteRef && (
+          {/* Une panne se signale au moment où on la constate : les boutons
+              suivent la fiche, pas son statut. Une visite clôturée puis
+              rouverte en correction doit pouvoir consigner le remplacement
+              qu'on avait oublié de noter. */}
+          {!readOnly && siteRef && (
             <div className="fiche-report-bar">
               <div className="fiche-report-text">
                 <Wrench size={14} />
                 <span>Une pièce est défectueuse, périmée ou manquante ?</span>
               </div>
-              <button type="button" className="btn btn--ghost btn--sm"
-                onClick={() => setReplaceOpen(true)}>
-                Signaler un remplacement
-              </button>
+              <div className="fiche-report-actions">
+                <button type="button" className="btn btn--ghost btn--sm"
+                  onClick={() => setReplaceOpen('batterie')}>
+                  Signaler un remplacement
+                </button>
+                {/* Remplacer l'appareil est un geste à part : il ne se cherche
+                    pas au fond d'une liste de consommables. */}
+                <button type="button" className="btn btn--ghost btn--sm"
+                  onClick={() => setReplaceOpen('dae')}>
+                  <HeartPulse size={13} /> Remplacer un DEA
+                </button>
+              </div>
             </div>
           )}
 
@@ -1321,6 +1339,17 @@ export default function InterventionFichePage() {
                 <AutoField label="Emplacement" icon={Navigation} saving={savingField === 'emplacement'}>
                   <input {...field('emplacement', fiche.emplacement, "ex. Hall d'entrée, 2e étage…")} />
                   {savedField === 'emplacement' && <span className="fiche-saved-ok">✓</span>}
+                </AutoField>
+
+                {/* La pose est déjà connue du parc : on l'affiche, on ne la
+                    redemande pas. Elle se corrige depuis la fiche client, seul
+                    endroit où elle fait autorité. */}
+                <AutoField label="Date d'installation" icon={Calendar}>
+                  <div className="fiche-input fiche-input--ro fiche-readonly-value">
+                    {activeDea?.installationDate
+                      ? fmt(activeDea.installationDate)
+                      : <span className="fiche-readonly-empty">Non renseignée sur la fiche client</span>}
+                  </div>
                 </AutoField>
 
                 <AutoField label="État signalétique" icon={Shield} saving={savingField === 'signaletique'}>
@@ -1748,6 +1777,8 @@ export default function InterventionFichePage() {
       {replaceOpen && siteRef && (
         <ReplacementModal
           site={siteRef}
+          presetKind={replaceOpen === 'dae' ? 'dae' : undefined}
+          clientId={iv.client?._id || iv.client}
           deas={siteDeas}
           dea={activeDea || (iv.installation ? siteDeas.find(d => String(d._id) === String(iv.installation)) : null)}
           intervention={iv}
@@ -1765,6 +1796,7 @@ export default function InterventionFichePage() {
           dea={activeDea}
           presetKind={declaring.kind}
           presetStatus="remplace"
+          clientId={iv.client?._id || iv.client}
           intervention={iv}
           onClose={() => setDeclaring(null)}
           onSaved={applyReplacement}

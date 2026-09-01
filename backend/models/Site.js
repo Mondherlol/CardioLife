@@ -84,6 +84,11 @@ const siteSchema = new mongoose.Schema({
   contacts: { type: [contactSchema], default: [] },
   deas:     { type: [deaSchema],     default: [] },
 
+  /* Le site bénéficie-t-il d'un pack ? Oui ou non — le détail de ce que le pack
+     contient vit dans la rubrique Packs, ici on ne répond qu'à la question que
+     se pose le commercial devant sa liste de sites. */
+  hasPack:   { type: Boolean, default: false },
+
   notes:     { type: String, trim: true },
   isActive:  { type: Boolean, default: true },
   // Dossier « Clients/<client>/Sites/<site> » de l'arborescence documentaire.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { AlertTriangle, X, PackagePlus, Tag } from 'lucide-react'
 import { getProducts, createProduct } from '../api/products'
 import { getProductItems, createProductItems, itemStatus } from '../api/productItems'
@@ -80,12 +80,17 @@ export function useCatalogStock(categories) {
  * donc regroupés, avec le nombre restant et la DLC la plus proche : c'est elle
  * qui doit partir en premier.
  */
-export function stockOptionsFor(stock, { product, field }) {
+export function stockOptionsFor(stock, { product, field, client }) {
   const usable = stock.filter(it => {
     if (!it[field]) return false
     // Déjà rattaché à un DEA du parc : l'appareil est posé, pas disponible.
     if (it.dea) return false
     if (product && String(it.product?._id || it.product) !== String(product._id)) return false
+    /* Réservé pour quelqu'un d'autre : le proposer ici reviendrait à poser chez
+       un client le matériel promis à un autre. Une réservation faite pour ce
+       client-ci, elle, est exactement ce qu'on vient chercher. */
+    const held = it.reservedFor?.client?._id || it.reservedFor?.client
+    if (held && String(held) !== String(client || '')) return false
     return true
   })
 
@@ -111,19 +116,41 @@ export function stockOptionsFor(stock, { product, field }) {
   return [...groups.values()]
 }
 
-/** Choix d'un modèle au catalogue — jamais de saisie libre. */
+/**
+ * Choix d'un modèle au catalogue — jamais de saisie libre.
+ *
+ * `stock` : les articles posables, pour annoncer ce qui reste de chaque modèle.
+ * Chercher un modèle sans savoir s'il en reste oblige à ouvrir le stock dans un
+ * autre onglet avant de pouvoir choisir.
+ */
 export function ProductPicker({
   products, value, onChange, onClear, onUnknown, onQueryChange,
-  placeholder, noun = 'modèle',
+  placeholder, noun = 'modèle', stock,
 }) {
   const [query, setQuery] = useState('')
+
+  const counts = useMemo(() => {
+    const out = new Map()
+    ;(stock || []).forEach(it => {
+      const key = String(it.product?._id || it.product || '')
+      out.set(key, (out.get(key) || 0) + (it.quantity ?? 1))
+    })
+    return out
+  }, [stock])
+
+  const withCount = (p) => {
+    if (!stock) return p.name
+    const n = counts.get(String(p._id)) || 0
+    return `${p.name} (${n} en stock)`
+  }
+
   return (
     <ComboSearch
       items={products}
       value={value}
       onChange={onChange}
       onClear={onClear}
-      displayFn={p => p.name}
+      displayFn={withCount}
       subtextFn={p => [p.brand, p.reference].filter(Boolean).join(' · ')}
       placeholder={placeholder || `Rechercher un ${noun}…`}
       onQueryChange={q => { setQuery(q); onQueryChange?.(q) }}

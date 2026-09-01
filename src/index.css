@@ -1829,6 +1829,14 @@ button {
   min-height: 70px;
 }
 
+/* Valeur reprise d'ailleurs : elle se lit, elle ne se corrige pas ici. */
+.form-input--ro {
+  background: var(--gray-100);
+  color: var(--text-secondary);
+  cursor: default;
+}
+.form-input--ro:focus { border-color: var(--border); box-shadow: none; }
+
 .delete-confirm-text {
   font-size: 14px;
   color: var(--text-secondary);
@@ -4052,6 +4060,38 @@ button {
   color: var(--text-secondary);
   gap: 8px;
 }
+
+/* Option d'un formulaire présentée comme une carte : le libellé, ce qu'elle
+   change, et l'interrupteur. Une case à cocher nue se perdait dans la colonne. */
+.opt-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--gray-50);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.opt-card:hover { border-color: var(--brand); background: var(--surface); }
+.opt-card:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-light);
+}
+
+.opt-card-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.opt-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.opt-card-title > svg { color: var(--brand); }
+.opt-card-sub { font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
 
 .perm-toggle {
   position: relative;
@@ -11852,6 +11892,16 @@ button {
   color: var(--text-secondary);
 }
 
+/* Valeur reprise du parc, affichée sans être saisissable : elle a la ligne
+   d'un champ pour rester alignée sur ses voisins, sans en avoir l'air. */
+.fiche-readonly-value {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  cursor: default;
+}
+.fiche-readonly-empty { color: var(--text-muted); font-size: 12.5px; }
+
 .fiche-parc-bar {
   display: flex;
   align-items: center;
@@ -14330,6 +14380,92 @@ button {
 .expiry-hint--ok      { color: var(--text-muted); }
 .expiry-hint--soon    { color: var(--amber-600); }
 .expiry-hint--expired { color: var(--red-600); }
+
+/* Matériel assigné au client mais monté sur aucun appareil. */
+.cd-tab-section { margin-top: 22px; }
+.cd-tab-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.cd-tab-section-head > svg { color: var(--text-muted); }
+.cd-tab-section-head .cd-tab-title { margin: 0; }
+.cd-tab-section-head .cd-tab-hint { margin: 0; flex-basis: 100%; }
+
+/* Avertissement d'un changement d'état qui touche la fiche client. */
+.drawer-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--amber-100);
+  border-radius: 9px;
+  background: var(--amber-50);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--amber-600);
+}
+.drawer-warn > svg { flex-shrink: 0; margin-top: 2px; color: var(--amber-500); }
+
+.offparc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Une ligne = un article, cliquable comme le reste des listes de l'application. */
+.offparc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.06s;
+}
+.offparc-row:hover {
+  border-color: var(--brand);
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.06);
+}
+.offparc-row:active { transform: translateY(1px); }
+
+.offparc-img {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  border: 1px solid var(--border-light);
+  background: var(--gray-50);
+  color: var(--text-muted);
+  overflow: hidden;
+}
+.offparc-img img { width: 100%; height: 100%; object-fit: contain; }
+
+.offparc-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.offparc-name { font-weight: 600; color: var(--text-primary); }
+.offparc-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.offparc-num { font-family: ui-monospace, monospace; color: var(--text-secondary); }
+.offparc-exp--ok      { color: var(--text-muted); }
+.offparc-exp--soon    { color: var(--amber-600); font-weight: 600; }
+.offparc-exp--expired { color: var(--red-600); font-weight: 600; }
+.offparc-go { color: var(--text-muted); flex-shrink: 0; }
 
 .items-cell {
   display: flex;
@@ -18438,6 +18574,12 @@ button {
   background: var(--orange-50);
 }
 
+.fiche-report-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .fiche-report-text {
   display: inline-flex;
   align-items: center;
@@ -19962,3 +20104,183 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
   cursor: pointer;
 }
 .sp-reset-opt input { margin-top: 2px; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════
+   Bon d'intervention — document A4 signé par le client
+   ═══════════════════════════════════════ */
+
+.bi-wrap {
+  min-height: 100vh;
+  background: var(--gray-100);
+  padding: 20px 16px 60px;
+}
+
+/* Réglages d'avant impression : ils ne font pas partie du document. */
+.bi-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  max-width: 210mm;
+  margin: 0 auto 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.bi-bar-group { display: flex; flex-direction: column; gap: 5px; min-width: 220px; flex: 1; }
+.bi-bar-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.bi-bar-actions { display: flex; gap: 8px; margin-left: auto; }
+
+/* La page : A4 exact, pour que l'aperçu écran soit l'aperçu papier. */
+.bi-page {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 18mm 16mm;
+  background: #fff;
+  color: #111827;
+  box-shadow: 0 2px 18px rgba(15, 23, 42, 0.12);
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+}
+
+.bi-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #111827;
+}
+.bi-logo { height: 54px; width: auto; object-fit: contain; }
+.bi-title-block { margin-left: auto; text-align: right; }
+.bi-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  text-transform: uppercase;
+}
+.bi-ref { margin: 2px 0 0; font-size: 11px; color: #6b7280; }
+
+/* Identité de la visite : deux colonnes de couples libellé / valeur. */
+.bi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 26px;
+  margin: 16px 0 4px;
+}
+.bi-field { display: flex; flex-direction: column; gap: 2px; }
+.bi-field-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.bi-field-value { font-size: 13px; font-weight: 600; }
+
+.bi-section { margin-top: 18px; }
+.bi-section-title {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #374151;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.bi-table { width: 100%; border-collapse: collapse; }
+.bi-table th {
+  text-align: left;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+  padding: 5px 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+}
+.bi-table td {
+  padding: 7px 8px;
+  border: 1px solid #e5e7eb;
+  font-size: 12px;
+}
+.bi-mono { font-family: ui-monospace, "SFMono-Regular", monospace; }
+
+/* Les cinq natures sont imprimées, une seule cochée : le client voit ce qui a
+   été retenu et ce qui ne l'a pas été, comme sur le formulaire papier. */
+.bi-natures { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bi-nature { display: flex; align-items: center; gap: 9px; font-size: 12.5px; }
+.bi-nature--on { font-weight: 700; }
+.bi-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border: 1.4px solid #111827;
+  border-radius: 3px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.bi-note { margin: 0; white-space: pre-wrap; }
+
+.bi-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: auto;
+  padding-top: 26px;
+}
+.bi-sign { display: flex; flex-direction: column; gap: 4px; }
+.bi-sign-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.bi-sign-name { font-size: 12.5px; font-weight: 600; min-height: 18px; }
+.bi-sign-box {
+  height: 70px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fcfcfd;
+}
+
+.bi-footer {
+  margin-top: 14px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 9.5px;
+  color: #9ca3af;
+  text-align: center;
+}
+
+@media print {
+  .bi-wrap { background: #fff; padding: 0; }
+  .bi-page {
+    width: auto;
+    min-height: auto;
+    margin: 0;
+    padding: 12mm 14mm;
+    box-shadow: none;
+  }
+  /* Les aplats du document doivent survivre à la génération du PDF. */
+  .bi-table th, .bi-sign-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @page { size: A4; margin: 0; }
+}
+
+@media (max-width: 820px) {
+  .bi-page { width: auto; min-height: auto; padding: 16px; }
+  .bi-grid, .bi-signatures { grid-template-columns: 1fr; }
+}

@@ -7,13 +7,12 @@ import {
   History, User, ExternalLink, Save, Pencil, HeartPulse, Trash2,
 } from 'lucide-react'
 import {
-  getProductItem, updateProductItem, deleteProductItem,
-  itemStatus, ITEM_STATUSES,
+  getProductItem, updateProductItem, deleteProductItem, itemStatus,
 } from '../api/productItems'
 import { getProductCategories } from '../api/productCategories'
 import { productImageUrl } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
-import { ItemStatusChip, StatusConfirm, expiryLevel, formatDate } from '../components/ItemDrawer'
+import { ItemStatusChip, StatusConfirm, actionsFor, expiryLevel, formatDate } from '../components/ItemDrawer'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -330,11 +329,17 @@ export default function ProductItemPage() {
               />
             ) : (
               <div className="drawer-actions">
-                {ITEM_STATUSES.filter(s => s.value !== item.status).map(s => {
-                  const Icon = STATUS_ICONS[s.value] || Package
+                {/* Les gestes qui ont un sens depuis l'état courant, et eux
+                    seuls : « installer » ou « réserver » un article déjà vendu
+                    n'en a aucun, et la liste complète noyait les deux actions
+                    réellement utiles. */}
+                {actionsFor(item.status).map(a => {
+                  const Icon = a.icon || STATUS_ICONS[a.status] || Package
                   return (
-                    <button key={s.value} className="drawer-action" onClick={() => setPending(s.value)}>
-                      <Icon size={14} /> Passer en « {s.label.toLowerCase()} »
+                    <button key={a.status}
+                      className={`drawer-action${a.danger ? ' drawer-action--danger' : ''}`}
+                      onClick={() => setPending(a.status)}>
+                      <Icon size={14} /> {a.label}
                     </button>
                   )
                 })}

@@ -20,6 +20,8 @@ router.patch('/:id/close',   ctrl.closeIntervention)
 router.put('/:id/dea-items/:kind', ctrl.saveDeaItems)
 /* Formation des agents : effectuée ou reportée, tranché pendant la visite. */
 router.patch('/:id/formation', ctrl.saveFormation)
+/* Bon d'intervention : nature du passage et signature du client. */
+router.patch('/:id/bon', ctrl.saveBon)
 
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
 router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)

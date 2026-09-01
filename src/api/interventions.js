@@ -26,6 +26,9 @@ export const saveDeaItems = (id, kind, dea, items) =>
 export const saveFormationOutcome = (id, data) =>
   patch(`/interventions/${id}/formation`, data)
 
+/* Bon d'intervention : nature du passage et signature recueillie sur place. */
+export const saveBon = (id, data) => patch(`/interventions/${id}/bon`, data)
+
 export const uploadFichePhoto = (id, file, deaId) => {
   const form = new FormData()
   form.append('photo', file)

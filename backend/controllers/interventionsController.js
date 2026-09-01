@@ -245,7 +245,9 @@ async function parcOf(intervention) {
     deviceType:   d.deviceType,
     serialNumber: d.serialNumber,
     location:     d.location,
-    product:      d.product ? { name: d.product.name, images: d.product.images } : null,
+    // La pose est déjà connue du parc : la checklist l'affiche sans la demander.
+    installationDate: d.installationDate,
+    product:      d.product ? { _id: d.product._id, name: d.product.name, images: d.product.images } : null,
     /* Les consommables montés sur l'appareil : la checklist ne contrôle l'état
        d'une batterie que si le parc dit laquelle est en place. */
     batteries:  (d.batteries || []).map(b => ({
@@ -1006,6 +1008,44 @@ async function saveFormation(req, res) {
   }
 }
 
+/* ─── Bon d'intervention ────────────────────────────────────── */
+/**
+ * Nature de l'intervention et signature du client.
+ *
+ * Le bon est le seul document que le client garde : il atteste du passage, de
+ * sa nature et de son constat. Ces deux champs vivent sur la visite plutôt que
+ * dans le PDF, pour qu'un bon réimprimé six mois plus tard dise la même chose
+ * que le premier.
+ */
+async function saveBon(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!canWriteFiche(req.user, intervention)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    const { nature, signataire } = req.body
+    if (nature !== undefined && !Intervention.BON_NATURES.includes(nature)) {
+      return res.status(400).json({ message: "Nature d'intervention inconnue." })
+    }
+
+    if (!intervention.bon) intervention.bon = {}
+    if (nature !== undefined) intervention.bon.nature = nature
+    if (signataire !== undefined) {
+      intervention.bon.signataire = signataire
+      // La signature vaut à la date où elle est recueillie, pas à l'impression.
+      intervention.bon.signedAt = signataire ? new Date() : undefined
+    }
+    intervention.markModified('bon')
+    await intervention.save()
+
+    res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
 /* ─── Delete ────────────────────────────────────────────────── */
 async function remove(req, res) {
   try {
@@ -1035,5 +1075,5 @@ async function searchInstallations(req, res) {
 module.exports = {
   getAll, getOne, create, update, submitRapport, remove, searchInstallations,
   saveFiche, removeFiche, closeIntervention, uploadFichePhoto, deleteFichePhoto,
-  saveDeaItems, saveFormation,
+  saveDeaItems, saveFormation, saveBon,
 }

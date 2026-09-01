@@ -23,6 +23,7 @@ import PlanningPage             from './pages/PlanningPage'
 import MaintenancePage          from './pages/MaintenancePage'
 import InterventionFichePage    from './pages/InterventionFichePage'
 import InterventionPrintPage    from './pages/InterventionPrintPage'
+import InterventionBonPage      from './pages/InterventionBonPage'
 import ProfilePage              from './pages/ProfilePage'
 import Sidebar        from './components/Sidebar'
 import TopBar         from './components/TopBar'
@@ -114,6 +115,7 @@ export default function App() {
               </Route>
             </Route>
             <Route path="/interventions/:id/print" element={<InterventionPrintPage />} />
+            <Route path="/interventions/:id/bon"   element={<InterventionBonPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </SidebarProvider>
