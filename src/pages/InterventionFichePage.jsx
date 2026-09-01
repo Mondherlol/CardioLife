@@ -1658,7 +1658,7 @@ export default function InterventionFichePage() {
                 </div>
               </AutoField>
 
-              <AutoField label="Observation générale" icon={StickyNote} saving={savingField === 'observationGenerale'}>
+              <AutoField label="Recommandation" icon={StickyNote} saving={savingField === 'observationGenerale'}>
                 <textarea
                   {...visiteField('observationGenerale', 'Observations générales sur cette intervention…')}
                   className={`fiche-input fiche-textarea${readOnly ? ' fiche-input--ro' : ''}`}
