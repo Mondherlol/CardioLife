@@ -18,7 +18,9 @@ const uploadMultiple = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } 
 const POPULATE_OPTS = [
   // `contacts` : le responsable du site est le destinataire naturel des
   // attestations — la fiche formation l'affiche sans requête supplémentaire.
-  { path: 'site',                   select: 'name address contacts' },
+  // `deas.deviceType` alimente la colonne DEA du tableau : on forme les agents
+  // sur le modèle posé chez eux.
+  { path: 'site',                   select: 'name address contacts deas.deviceType' },
   { path: 'createdBy',              select: 'fullName' },
   { path: 'attestationDeliveredBy', select: 'fullName' },
   { path: 'documents.uploadedBy',   select: 'fullName' },

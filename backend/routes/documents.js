@@ -1,8 +1,10 @@
 const router = require('express').Router()
 const ctrl   = require('../controllers/documentsController')
 const { protect } = require('../middleware/auth')
+const { requireModule } = require('../middleware/access')
 
 router.use(protect)
+router.use(requireModule('documents'))
 
 router.get('/tree',  ctrl.getTree)
 router.get('/stats', ctrl.getStats)

@@ -7,10 +7,12 @@ import {
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
   ChevronDown, ClipboardList, History, Download, FileText, Building2, Wrench, Check,
   Pencil, Lock, Unlock, BatteryMedium, AlertTriangle, GraduationCap, Minus, HeartPulse,
+  PlayCircle,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
-  getIntervention, saveFiche, removeFiche, closeIntervention,
+  getIntervention, saveFiche, removeFiche, closeIntervention, reopenIntervention,
+  startIntervention,
   uploadFichePhoto, deleteFichePhoto, fichePhotoUrl,
   updateIntervention, saveDeaItems, saveFormationOutcome,
 } from '../api/interventions'
@@ -38,6 +40,7 @@ const ACTION_LABELS = {
   modification:  'Intervention modifiée',
   rapport_soumis:'Fiche soumise',
   cloture:       'Intervention clôturée',
+  reouverture:   'Intervention rouverte',
   correction:    'Correction après clôture',
   sync_parc:     'Fiche client mise à jour depuis la checklist',
   formation:     'Formation des agents',
@@ -97,6 +100,88 @@ function isoDateTime(d) {
 function fmtTime(d) {
   if (!d) return ''
   return new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+}
+
+/* ─── Décompte avant la visite ──────────────────────────────── */
+
+const SECONDE = 1000
+const MINUTE  = 60 * SECONDE
+const HEURE   = 60 * MINUTE
+const JOUR    = 24 * HEURE
+
+/**
+ * Découpe un écart en millisecondes en segments affichables.
+ *
+ * Les unités vides en tête sont retirées — « 39min 32s » plutôt que
+ * « 0j 0h 39min 32s » — mais jamais celles du milieu : sauter les minutes
+ * entre les heures et les secondes rendrait le compte illisible.
+ */
+function segmentsFrom(ms) {
+  const total = Math.max(0, ms)
+  const parts = [
+    { valeur: Math.floor(total / JOUR),           unite: 'j' },
+    { valeur: Math.floor((total % JOUR) / HEURE), unite: 'h' },
+    { valeur: Math.floor((total % HEURE) / MINUTE), unite: 'min' },
+    { valeur: Math.floor((total % MINUTE) / SECONDE), unite: 's' },
+  ]
+  const premier = parts.findIndex(p => p.valeur > 0)
+  // Tout à zéro : on garde les secondes plutôt qu'un compteur vide.
+  return premier === -1 ? parts.slice(-1) : parts.slice(premier)
+}
+
+/**
+ * Compte à rebours jusqu'à l'heure planifiée, rafraîchi à la seconde.
+ *
+ * L'horloge ne tourne que tant qu'elle sert : au-delà d'une semaine la date
+ * suffit, et une seconde qui défile pour rien réveille l'écran inutilement.
+ */
+function Countdown({ date }) {
+  const cible = useMemo(() => (date ? new Date(date).getTime() : null), [date])
+  const [maintenant, setMaintenant] = useState(() => Date.now())
+
+  const lointain = cible != null && cible - maintenant > 7 * JOUR
+
+  useEffect(() => {
+    if (cible == null) return
+    /* Au-delà d'une semaine on ne montre pas les secondes : un battement par
+       minute suffit, et il permet quand même de basculer sur le décompte fin
+       si l'écran reste ouvert jusqu'à l'approche de l'échéance. */
+    const id = setInterval(() => setMaintenant(Date.now()), lointain ? MINUTE : SECONDE)
+    return () => clearInterval(id)
+  }, [cible, lointain])
+
+  if (cible == null) return null
+
+  const ecart   = cible - maintenant
+  const enRetard = ecart < 0
+
+  if (lointain) {
+    return (
+      <div className="iv-countdown">
+        <span className="iv-countdown-label">Intervention planifiée</span>
+        <span className="iv-countdown-value">le {fmt(date)} à {fmtTime(date)}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`iv-countdown${enRetard ? ' iv-countdown--late' : ''}`}>
+      <span className="iv-countdown-label">
+        <span className="iv-countdown-dot" />
+        {enRetard ? 'Intervention attendue depuis' : 'Intervention dans'}
+      </span>
+      <span className="iv-countdown-value">
+        {segmentsFrom(Math.abs(ecart)).map(({ valeur, unite }, i) => (
+          <span key={unite} className="iv-countdown-seg">
+            {/* Les segments suivants sont sur deux chiffres : sans cela la
+                largeur saute à chaque passage sous la dizaine. */}
+            <span className="iv-countdown-num">{i === 0 ? valeur : String(valeur).padStart(2, '0')}</span>
+            <span className="iv-countdown-unit">{unite}</span>
+          </span>
+        ))}
+      </span>
+    </div>
+  )
 }
 
 /* ─── AutoField ─── */
@@ -319,7 +404,7 @@ function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            En clôturant l'intervention, le statut passera à <strong>Terminé</strong> et la fiche ne sera plus modifiable sur le terrain.
+            En clôturant l'intervention, le statut passera à <strong>Terminé</strong> et la fiche ne sera plus modifiable tant qu'elle n'est pas rouverte.
           </p>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
             Les relevés de la checklist — péremptions, niveau de batterie, n° de série,
@@ -327,7 +412,9 @@ function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
             contrôle sur le planning.
           </p>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
-            Un administrateur pourra encore la rouvrir pour corriger une erreur — la correction est alors tracée dans l'historique.
+            Un oubli reste réparable : vous pourrez la rouvrir depuis cette page pour
+            reprendre la checklist, puis la clôturer à nouveau — chaque passage est tracé
+            dans l'historique.
           </p>
           {onBehalf && (
             <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
@@ -339,6 +426,52 @@ function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
           <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
           <button className="btn btn--primary" onClick={onConfirm} disabled={loading}>
             {loading ? <span className="login-btn-spinner" /> : <><CheckCircle2 size={14} /> Clôturer</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Réouverture après clôture ─────────────────────────────── */
+/**
+ * Un oubli constaté juste après la clôture — une photo, une péremption — se
+ * répare sur place. Le motif est facultatif : l'exiger ferait écrire « oubli »
+ * à tout le monde, alors que la trace de la réouverture suffit à comprendre.
+ */
+function ReopenConfirm({ onClose, onConfirm, loading }) {
+  const [motif, setMotif] = useState('')
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--sm">
+        <div className="modal-header">
+          <h2 className="modal-title"><Unlock size={16} /> Rouvrir l'intervention</h2>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            L'intervention repassera <strong>En cours</strong> et la checklist redeviendra
+            modifiable. Il faudra la clôturer à nouveau une fois la correction faite.
+          </p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
+            La réouverture est enregistrée à votre nom dans l'historique, ainsi que la
+            nouvelle clôture.
+          </p>
+          <label className="form-label" style={{ marginTop: 14 }}>Motif (facultatif)</label>
+          <input
+            className="fiche-input"
+            value={motif}
+            autoFocus
+            maxLength={120}
+            placeholder="Ex. : photo du DAE oubliée"
+            onChange={e => setMotif(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && !loading && onConfirm(motif)}
+          />
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn--ghost" onClick={onClose}>Annuler</button>
+          <button className="btn btn--primary" onClick={() => onConfirm(motif)} disabled={loading}>
+            {loading ? <span className="login-btn-spinner" /> : <><Unlock size={14} /> Rouvrir</>}
           </button>
         </div>
       </div>
@@ -456,6 +589,9 @@ export default function InterventionFichePage() {
   const [savingFormation, setSavingFormation] = useState(false)
   const [formationEtat,  setFormationEtat]  = useState('')
   const [closing,        setClosing]        = useState(false)
+  const [showReopen,     setShowReopen]     = useState(false)
+  const [reopening,      setReopening]      = useState(false)
+  const [starting,       setStarting]       = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
   const [deviceOpen,     setDeviceOpen]     = useState(true)
   const [replaceOpen,    setReplaceOpen]    = useState(false)
@@ -678,6 +814,23 @@ export default function InterventionFichePage() {
     }
   }
 
+  /**
+   * Démarrer la visite. C'est ce clic — et non l'ouverture de l'écran ou une
+   * case cochée par mégarde — qui marque l'arrivée sur site et déverrouille la
+   * checklist. Le serveur refuse toute saisie tant qu'il n'a pas eu lieu.
+   */
+  async function handleStart() {
+    setStarting(true)
+    try {
+      mergeIv(await startIntervention(id), { parc: true })
+      toast.success('Intervention démarrée.')
+    } catch (err) {
+      toast.error(err.message || "Impossible de démarrer l'intervention.")
+    } finally {
+      setStarting(false)
+    }
+  }
+
   function handleBlur(field) { autoSave(field, activeFiche?.[field]) }
   function handleVisiteBlur(field) { autoSave(field, visite[field], { visite: true }) }
 
@@ -877,6 +1030,23 @@ export default function InterventionFichePage() {
     }
   }
 
+  /* Réouverture : la visite repasse « en cours » et la checklist se ressaisit
+     par son chemin normal — pas de mode parallèle à maintenir. */
+  async function handleReopen(motif) {
+    setReopening(true)
+    try {
+      const updated = await reopenIntervention(id, motif)
+      mergeIv(updated)
+      setShowReopen(false)
+      setUnlocked(false)
+      toast.success('Intervention rouverte — pensez à la clôturer après vos modifications.')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setReopening(false)
+    }
+  }
+
   /* ── Early return ── */
   if (loading || !iv) {
     return <div className="page-content"><div className="table-loading"><span className="spinner" /></div></div>
@@ -894,8 +1064,16 @@ export default function InterventionFichePage() {
      superadmin n'y touchent. Seul l'administrateur peut la rouvrir pour
      corriger une erreur relevée après coup — chaque passage est tracé. */
   const canCorrect    = isAdmin && isTermine
+  /* Le technicien, lui, rouvre franchement la visite : un oubli constaté en
+     repartant du site se corrige mieux sur place qu'au bureau. La visite
+     repasse « en cours », et l'aller-retour reste lisible dans l'historique. */
+  const canReopen     = isTermine && canFill
   const correcting    = canCorrect && unlocked
-  const readOnly      = correcting ? false : (!canFill || isTermine)  // fiche fields
+  /* Visite pas encore démarrée : la checklist s'affiche — le technicien doit
+     pouvoir préparer sa tournée et voir ce qui l'attend — mais ne se saisit
+     pas. Le verrou tombe au clic sur « Démarrer l'intervention ». */
+  const notStarted    = iv.status === 'planifie'
+  const readOnly      = correcting ? false : (!canFill || isTermine || notStarted)
   /* Aucune fiche enregistrée côté serveur : rien n'a encore été saisi. Les
      entrées locales, elles, sont pré-remplies depuis le parc et ne disent rien. */
   const ficheVierge   = !(iv.fiches?.length)
@@ -1053,7 +1231,13 @@ export default function InterventionFichePage() {
           >
             <FileText size={14} /> Bon d'intervention
           </button>
-          {canFill && !isTermine && (
+          {canFill && notStarted && (
+            <button className="btn btn--primary" onClick={handleStart} disabled={starting}>
+              {starting ? <span className="spinner spinner--sm" /> : <PlayCircle size={14} />}
+              Démarrer l'intervention
+            </button>
+          )}
+          {canFill && !isTermine && !notStarted && (
             <button className="btn btn--primary" onClick={() => setShowClose(true)}>
               <CheckCircle2 size={14} /> Clôturer l'intervention
             </button>
@@ -1262,6 +1446,37 @@ export default function InterventionFichePage() {
               seulement une fois remplie/validée */}
           {(canFill || isTermine) ? (
           <>
+          {/* Visite pas encore démarrée : la checklist est visible mais figée.
+              Le bandeau dit pourquoi et porte l'unique action possible. */}
+          {notStarted && canFill && (
+            <div className="fiche-start-bar">
+              <div className="fiche-start-text">
+                <strong>Intervention non démarrée</strong>
+                <p>
+                  La checklist est consultable mais verrouillée. Démarrez
+                  l'intervention à votre arrivée sur site pour pouvoir la saisir.
+                </p>
+              </div>
+              <Countdown date={iv.scheduledDate} />
+              <button
+                className="btn btn--primary fiche-start-btn"
+                onClick={handleStart}
+                disabled={starting}
+              >
+                {starting ? <span className="spinner spinner--sm" /> : <PlayCircle size={15} />}
+                Démarrer l'intervention
+              </button>
+            </div>
+          )}
+          {notStarted && !canFill && (
+            <div className="fiche-admin-notes">
+              <Clock size={13} />
+              <span>
+                Intervention non démarrée : le technicien n'est pas encore
+                intervenu. La checklist affichée reprend le parc du site.
+              </span>
+            </div>
+          )}
           {/* Le superadmin qui ouvre une fiche encore vierge doit savoir qu'il
               saisit à la place du technicien, pas qu'il relit son travail. */}
           {isSuper && !isTech && !isTermine && (
@@ -1711,8 +1926,9 @@ export default function InterventionFichePage() {
             </div>
           )}
 
-          {/* Clôturer — technicien assigné, ou superadmin à sa place */}
-          {canFill && !isTermine && (
+          {/* Clôturer — technicien assigné, ou superadmin à sa place. Rien à
+              clôturer tant que la visite n'a pas commencé. */}
+          {canFill && !isTermine && !notStarted && (
             <div className="fiche-close-bar">
               <p className="fiche-close-hint">
                 {isTech
@@ -1745,6 +1961,16 @@ export default function InterventionFichePage() {
                     : <><Pencil size={14} /> Corriger la checklist</>}
                 </button>
               )}
+              {canReopen && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={canCorrect ? undefined : { marginLeft: 'auto' }}
+                  onClick={() => setShowReopen(true)}
+                >
+                  <Unlock size={14} /> Rouvrir pour modifier
+                </button>
+              )}
             </div>
           )}
         </>
@@ -1757,6 +1983,14 @@ export default function InterventionFichePage() {
           onConfirm={handleClose}
           loading={closing}
           onBehalf={!isTech}
+        />
+      )}
+
+      {showReopen && (
+        <ReopenConfirm
+          onClose={() => setShowReopen(false)}
+          onConfirm={handleReopen}
+          loading={reopening}
         />
       )}
 

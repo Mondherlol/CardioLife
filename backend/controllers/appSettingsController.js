@@ -1,6 +1,31 @@
-const path = require('path')
-const fsp  = require('fs/promises')
+const path   = require('path')
+const fs     = require('fs')
+const fsp    = require('fs/promises')
+const crypto = require('crypto')
+const multer = require('multer')
 const AppSettings = require('../models/AppSettings')
+
+/* Le logo vit avec les autres uploads : il doit survivre à un redéploiement du
+   code, ce qui exclut de l'écrire dans les fichiers statiques du front. */
+const LOGO_DIR = path.join(__dirname, '../uploads/company')
+fs.mkdirSync(LOGO_DIR, { recursive: true })
+
+const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']
+
+const uploadLogo = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, LOGO_DIR),
+    filename:    (_req, file, cb) => cb(null, `${crypto.randomUUID()}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(
+    LOGO_TYPES.includes(file.mimetype) ? null : new Error("Format d'image non supporté."),
+    LOGO_TYPES.includes(file.mimetype),
+  ),
+}).single('logo')
+
+/* Champs libres de l'identité — le logo passe par sa propre route (fichier). */
+const COMPANY_FIELDS = ['name', 'address', 'city', 'phone', 'email', 'website', 'taxId', 'footer']
 
 async function get(req, res) {
   const settings = await AppSettings.findOne() ?? await AppSettings.create({})
@@ -8,13 +33,41 @@ async function get(req, res) {
 }
 
 async function update(req, res) {
-  const { maxFileSizeMB, maxTotalSpaceMB, defaultUploadFolderId } = req.body
+  const { maxFileSizeMB, maxTotalSpaceMB, defaultUploadFolderId, company } = req.body
   let settings = await AppSettings.findOne()
   if (!settings) settings = new AppSettings()
   if (maxFileSizeMB   != null) settings.maxFileSizeMB   = Number(maxFileSizeMB)
   if (maxTotalSpaceMB != null) settings.maxTotalSpaceMB = Number(maxTotalSpaceMB)
   if (defaultUploadFolderId !== undefined) settings.defaultUploadFolderId = defaultUploadFolderId || null
+  if (company && typeof company === 'object') {
+    for (const key of COMPANY_FIELDS) {
+      if (company[key] !== undefined) settings.company[key] = String(company[key] ?? '')
+    }
+  }
   await settings.save()
+  res.json(settings)
+}
+
+/* ── Logo de l'entreprise ─────────────────────────────────────── */
+
+async function setLogo(req, res) {
+  if (!req.file) return res.status(400).json({ message: 'Aucun fichier reçu.' })
+  const settings = await AppSettings.findOne() ?? new AppSettings()
+  const previous = settings.company.logo
+  settings.company.logo = req.file.filename
+  await settings.save()
+  // L'ancien fichier ne sert plus : le garder ne ferait qu'user le quota.
+  if (previous) await fsp.rm(path.join(LOGO_DIR, previous), { force: true }).catch(() => {})
+  res.json(settings)
+}
+
+/** Retour au logo livré avec l'application. */
+async function deleteLogo(req, res) {
+  const settings = await AppSettings.findOne() ?? new AppSettings()
+  const previous = settings.company.logo
+  settings.company.logo = null
+  await settings.save()
+  if (previous) await fsp.rm(path.join(LOGO_DIR, previous), { force: true }).catch(() => {})
   res.json(settings)
 }
 
@@ -79,4 +132,4 @@ async function reset(req, res) {
   })
 }
 
-module.exports = { get, update, reset }
+module.exports = { get, update, uploadLogo, setLogo, deleteLogo, reset }

@@ -1,10 +1,12 @@
 const router = require('express').Router()
 const ctrl   = require('../controllers/installationsController')
 const { protect } = require('../middleware/auth')
+const { requireAny } = require('../middleware/access')
 
 // Le contrôle d'accès fin (gestionnaire de parc OU technicien assigné) est géré
 // dans le contrôleur, car les techniciens accèdent à leurs poses assignées.
 router.use(protect)
+router.use(requireAny(['canManageDevices']))
 
 router.get('/',            ctrl.getAll)
 router.get('/:id',         ctrl.getById)

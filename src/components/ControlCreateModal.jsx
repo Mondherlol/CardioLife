@@ -213,8 +213,10 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
                   onChange={e => setF('installation', e.target.value)}
                 >
                   <option value="">Tout le site — une fiche par DAE</option>
-                  {deas.map(d => (
-                    <option key={d._id} value={d._id}>
+                  {/* `value` explicite, jamais `undefined` : sinon le select
+                      devient non contrôlé et soumet le libellé de l'option. */}
+                  {deas.filter(d => d._id).map(d => (
+                    <option key={d._id} value={String(d._id)}>
                       {[d.deviceType || 'DAE', d.serialNumber, d.location].filter(Boolean).join(' · ')}
                     </option>
                   ))}

@@ -3,26 +3,38 @@ import { useParams } from 'react-router-dom'
 import { Download, Printer } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getIntervention, saveBon } from '../api/interventions'
+import { getAppSettings, companyLogoUrl } from '../api/appSettings'
 
-/* Logo officiel, fond blanc. Servi depuis l'application et non depuis le site :
-   le document doit s'imprimer sans dépendre d'un serveur tiers, et la
-   conversion en PDF ne peut pas lire une image d'un autre domaine. */
-const LOGO_URL      = '/logo-cardiolife.jpg'
-const LOGO_FALLBACK = 'https://cardiolife.tn/wp-content/uploads/2024/09/logo-MAJ.jpg'
+/* Identité de repli : le document doit s'imprimer même si les paramètres ne
+   répondent pas — un technicien sur site n'a pas de seconde chance. */
+const FALLBACK_COMPANY = {
+  name:    'CARDIO life',
+  address: 'Avenue 18 Janvier 1952\nAriana Centre 2ème Etage',
+  city:    "2080 L'ARIANA",
+  phone:   '71 714 063 – 31 119 719\n27 629 217 – 53 629 529',
+  email:   'info@cardiolife.tn',
+  website: 'www.cardiolife.tn',
+  taxId:   '1446928Z/B/M/000',
+  footer:  "BUREAU : Av 18 Janvier 1952 Centre Ariana 2ème Etage B.208A - L'ARIANA CP Ville 2080\nMF : 000/M/B/1446928/Z – BIAT 08 307 0005910015690 80",
+}
 
 /**
  * Natures d'intervention, dans l'ordre où le client les lit.
  *
- * Elles sont imprimées toutes les cinq, une seule cochée : un bon signé doit
- * montrer ce qui a été retenu *et* ce qui ne l'a pas été, comme le ferait le
- * formulaire papier qu'il remplace.
+ * `designation` est la phrase telle qu'elle s'écrit dans le tableau du bon
+ * papier ; `label` est la même chose, en court, pour le sélecteur d'écran.
  */
 const NATURES = [
-  { id: 'controle_semestriel',       label: 'Contrôle technique semestriel' },
-  { id: 'controle_annuel',           label: 'Contrôle technique annuel' },
-  { id: 'remplacement_consommables', label: 'Remplacement des consommables' },
-  { id: 'installation',              label: 'Installation' },
-  { id: 'hors_delai',                label: 'Intervention hors délai du contrôle technique' },
+  { id: 'controle_semestriel',       label: 'Contrôle technique semestriel',
+    designation: 'Contrôle technique semestriel du défibrillateur cardiaque' },
+  { id: 'controle_annuel',           label: 'Contrôle technique annuel',
+    designation: 'Contrôle technique annuel du défibrillateur cardiaque' },
+  { id: 'remplacement_consommables', label: 'Remplacement des consommables',
+    designation: 'Remplacement des consommables du défibrillateur cardiaque' },
+  { id: 'installation',              label: 'Installation',
+    designation: 'Installation du défibrillateur cardiaque' },
+  { id: 'hors_delai',                label: 'Intervention hors délai du contrôle technique',
+    designation: 'Intervention hors délai du contrôle technique sur le défibrillateur cardiaque' },
 ]
 
 /* Nature proposée d'après ce que la visite dit d'elle-même : un contrôle
@@ -35,32 +47,34 @@ function suggestNature(iv) {
 
 function fmt(d) {
   if (!d) return '—'
-  return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
+  return new Date(d).toLocaleDateString('fr-FR')
 }
 
-function Field({ label, value }) {
-  return (
-    <div className="bi-field">
-      <span className="bi-field-label">{label}</span>
-      <span className="bi-field-value">{value || '—'}</span>
-    </div>
-  )
+/* Adresse, téléphones, pied de page : saisis en texte libre dans les
+   paramètres, rendus ligne à ligne comme sur le papier à en-tête. */
+function Lines({ text, className }) {
+  const lines = String(text || '').split('\n').filter(l => l.trim())
+  if (!lines.length) return null
+  return <>{lines.map((l, i) => <div key={i} className={className}>{l}</div>)}</>
 }
 
 /**
  * Bon d'intervention — le document que le client signe en fin de visite.
  *
- * Il ne reprend pas la checklist : il atteste du passage, de sa nature et du
- * constat du client. Tout tient sur une page A4, sans quoi il ne se signe pas
- * sur le capot d'une voiture.
+ * Il reprend la mise en page du bon papier de l'entreprise : en-tête à gauche,
+ * client et référence en tête, une ligne de désignation par appareil, et le
+ * cartouche « Date de réception et visa / Observation » que le client tamponne.
+ * Il ne reprend pas la checklist : il atteste du passage et de sa nature.
  *
- * La nature et le signataire sont enregistrés sur l'intervention : un bon
+ * Référence, nature et signataire sont enregistrés sur l'intervention : un bon
  * réimprimé six mois plus tard doit dire exactement la même chose.
  */
 export default function InterventionBonPage() {
   const { id } = useParams()
   const [iv,      setIv]      = useState(null)
+  const [company, setCompany] = useState(FALLBACK_COMPANY)
   const [error,   setError]   = useState(false)
+  const [ref,     setRef]     = useState('')
   const [nature,  setNature]  = useState('')
   const [signer,  setSigner]  = useState('')
   const [saving,  setSaving]  = useState(false)
@@ -70,11 +84,18 @@ export default function InterventionBonPage() {
     getIntervention(id)
       .then(data => {
         setIv(data)
+        setRef(data.bon?.reference || '')
         setNature(data.bon?.nature || suggestNature(data))
         setSigner(data.bon?.signataire || data.visite?.visa || '')
       })
       .catch(() => setError(true))
   }, [id])
+
+  useEffect(() => {
+    getAppSettings()
+      .then(s => s?.company && setCompany({ ...FALLBACK_COMPANY, ...s.company }))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (iv) document.title = `Bon d'intervention — ${iv.clientName || id}`
@@ -83,7 +104,7 @@ export default function InterventionBonPage() {
   async function save() {
     setSaving(true)
     try {
-      await saveBon(id, { nature, signataire: signer })
+      await saveBon(id, { reference: ref, nature, signataire: signer })
       toast.success('Bon enregistré.')
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
@@ -137,12 +158,22 @@ export default function InterventionBonPage() {
     }
   })
 
-  const dateVisite = iv.completedDate || iv.scheduledDate
+  const dateVisite  = iv.completedDate || iv.scheduledDate
+  const natureObj   = NATURES.find(n => n.id === nature)
+  const designation = natureObj?.designation || 'Intervention sur le défibrillateur cardiaque'
+  const site        = iv.siteName || iv.site?.name
+  const website     = String(company.website || '').replace(/^https?:\/\//, '')
 
   return (
     <div className="bi-wrap">
       {/* ── Barre d'écran : ce qui se règle avant d'imprimer ── */}
       <div className="bi-bar no-print">
+        <div className="bi-bar-group bi-bar-group--sm">
+          <label className="bi-bar-label">Référence</label>
+          <input className="form-input form-input--plain" value={ref}
+            onChange={e => setRef(e.target.value)} placeholder="352/2025" />
+        </div>
+
         <div className="bi-bar-group">
           <label className="bi-bar-label">Nature de l'intervention</label>
           <select className="form-input form-input--plain" value={nature}
@@ -174,79 +205,106 @@ export default function InterventionBonPage() {
 
       {/* ── Le document ── */}
       <div className="bi-page">
-        <header className="bi-header">
-          <img src={LOGO_URL} alt="CardioLife" className="bi-logo"
-            onError={e => { e.target.src = LOGO_FALLBACK }} />
-          <div className="bi-title-block">
+        {/* En-tête : identité de l'émetteur à gauche, nature du document et
+            destinataire à droite — la lecture du bon papier. */}
+        <header className="bi-head">
+          <div className="bi-issuer">
+            <img src={companyLogoUrl(company.logo)} alt={company.name}
+              className="bi-logo" crossOrigin="anonymous"
+              onError={e => { e.target.src = '/logo-cardiolife.jpg' }} />
+            <dl className="bi-issuer-info">
+              {company.address && <div><dt>Adresse</dt><dd><Lines text={company.address} /></dd></div>}
+              {company.city    && <div><dt>CP Ville</dt><dd>{company.city}</dd></div>}
+              {company.phone   && <div><dt>Téléphone</dt><dd><Lines text={company.phone} /></dd></div>}
+              {company.email   && <div><dt>E-mail</dt><dd><a href={`mailto:${company.email}`}>{company.email}</a></dd></div>}
+              {website         && <div><dt>Site web</dt><dd><a href={`https://${website}`}>{website}</a></dd></div>}
+            </dl>
+          </div>
+
+          <div className="bi-doc">
             <h1 className="bi-title">Bon d'intervention</h1>
-            <p className="bi-ref">Réf. #{id.slice(-8).toUpperCase()}</p>
+            <div className="bi-recipient">
+              <span className="bi-recipient-name">{iv.clientName || '—'}</span>
+              {site && <span className="bi-recipient-site">{site}</span>}
+            </div>
           </div>
         </header>
 
-        <section className="bi-grid">
-          <Field label="Client"      value={iv.clientName} />
-          <Field label="Site"        value={iv.siteName || iv.site?.name} />
-          <Field label="Date de l'intervention" value={fmt(dateVisite)} />
-          <Field label="Technicien"  value={iv.technicienName || iv.technicien?.fullName} />
+        {/* Références du document — colonne de gauche, comme sur le papier. */}
+        <section className="bi-meta">
+          <div className="bi-meta-line">
+            <span className="bi-meta-label">Référence</span>
+            <span className="bi-meta-value">{ref || `#${id.slice(-8).toUpperCase()}`}</span>
+          </div>
+          <div className="bi-meta-line">
+            <span className="bi-meta-label">Date</span>
+            <span className="bi-meta-value">{fmt(dateVisite)}</span>
+          </div>
+          {company.taxId && (
+            <div className="bi-meta-line">
+              <span className="bi-meta-label">MF</span>
+              <span className="bi-meta-value">{company.taxId}</span>
+            </div>
+          )}
+          {(iv.technicienName || iv.technicien?.fullName) && (
+            <div className="bi-meta-line">
+              <span className="bi-meta-label">Technicien</span>
+              <span className="bi-meta-value">{iv.technicienName || iv.technicien?.fullName}</span>
+            </div>
+          )}
         </section>
 
-        <section className="bi-section">
-          <h2 className="bi-section-title">Appareil{devices.length > 1 ? 's' : ''} concerné{devices.length > 1 ? 's' : ''}</h2>
-          <table className="bi-table">
-            <thead>
-              <tr>
-                <th>Modèle de l'appareil</th>
-                <th>Numéro de série (SN)</th>
+        {/* Le corps du bon : une ligne par appareil intervenu. */}
+        <table className="bi-table">
+          <thead>
+            <tr>
+              <th className="bi-col-ref">Réf</th>
+              <th>Désignation</th>
+              <th className="bi-col-qty">Quantité</th>
+            </tr>
+          </thead>
+          <tbody>
+            {devices.map(d => (
+              <tr key={d.key}>
+                <td className="bi-col-ref">DAE</td>
+                <td>
+                  <div className="bi-desi">{designation} {d.model}</div>
+                  {d.serial && <div className="bi-desi-sn">DEA S/N {d.serial}</div>}
+                </td>
+                <td className="bi-col-qty">1</td>
               </tr>
-            </thead>
-            <tbody>
-              {devices.map(d => (
-                <tr key={d.key}>
-                  <td>{d.model}</td>
-                  <td className="bi-mono">{d.serial || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="bi-section">
-          <h2 className="bi-section-title">Nature de l'intervention</h2>
-          <ul className="bi-natures">
-            {NATURES.map(n => (
-              <li key={n.id} className={`bi-nature${nature === n.id ? ' bi-nature--on' : ''}`}>
-                <span className="bi-box">{nature === n.id ? '×' : ''}</span>
-                {n.label}
-              </li>
             ))}
-          </ul>
-        </section>
+          </tbody>
+        </table>
 
         {iv.visite?.observationGenerale && (
           <section className="bi-section">
-            <h2 className="bi-section-title">Observations</h2>
+            <h2 className="bi-section-title">Observations du technicien</h2>
             <p className="bi-note">{iv.visite.observationGenerale}</p>
           </section>
         )}
 
-        {/* Deux signatures : celle qui engage l'entreprise et celle qui atteste
-            du passage. Le bon ne vaut que par la seconde. */}
-        <section className="bi-signatures">
-          <div className="bi-sign">
-            <span className="bi-sign-label">Le technicien</span>
-            <span className="bi-sign-name">{iv.technicienName || iv.technicien?.fullName || ''}</span>
-            <span className="bi-sign-box" />
-          </div>
-          <div className="bi-sign">
-            <span className="bi-sign-label">Le client — lu et approuvé</span>
-            <span className="bi-sign-name">{signer}</span>
-            <span className="bi-sign-box" />
-          </div>
-        </section>
+        {/* Le cartouche que le client remplit : c'est lui qui donne sa valeur au
+            bon — sans ce visa, rien n'atteste du passage. */}
+        <table className="bi-table bi-table--visa">
+          <thead>
+            <tr>
+              <th>Date de réception et visa</th>
+              <th>Observation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="bi-visa-cell">
+                {signer && <span className="bi-visa-name">{signer}</span>}
+              </td>
+              <td className="bi-visa-cell" />
+            </tr>
+          </tbody>
+        </table>
 
         <footer className="bi-footer">
-          CardioLife · Bon d'intervention n° {id.slice(-8).toUpperCase()} ·
-          {' '}Établi le {fmt(new Date())}
+          <Lines text={company.footer} className="bi-footer-line" />
         </footer>
       </div>
     </div>

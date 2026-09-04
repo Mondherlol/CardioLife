@@ -26,6 +26,7 @@ const interventionsRoutes   = require('./routes/interventions')
 const replacementsRoutes    = require('./routes/replacements')
 const profileRoutes         = require('./routes/profile')
 const dashboardRoutes       = require('./routes/dashboard')
+const todosRoutes           = require('./routes/todos')
 
 const app = express()
 
@@ -69,6 +70,7 @@ app.use('/api/interventions',  interventionsRoutes)
 app.use('/api/replacements',   replacementsRoutes)
 app.use('/api/profile',        profileRoutes)
 app.use('/api/dashboard',      dashboardRoutes)
+app.use('/api/todos',          todosRoutes)
 
 app.use((err, req, res, next) => {
   console.error(err.stack)

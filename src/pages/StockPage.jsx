@@ -19,6 +19,8 @@ import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
 import ParcExpiryTab from '../components/ParcExpiryTab'
 import { categoryIcon } from '../constants/categoryIcons'
+import { useAuth } from '../context/AuthContext'
+import { stockRights } from '../lib/access'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -933,6 +935,8 @@ export default function StockPage() {
   const [stockState,     setStockState]     = useState('')
   const [expiryFilter,   setExpiryFilter]   = useState('')
 
+  const { user }    = useAuth()
+  const { canEdit } = stockRights(user)
   const [modal,      setModal]      = useState(null)
   const [adjusting,  setAdjusting]  = useState(null)
   const [archiving,  setArchiving]  = useState(null)
@@ -1135,7 +1139,7 @@ export default function StockPage() {
             }
           </p>
         </div>
-        {!isMovements && !isArchived && !isParc && (
+        {canEdit && !isMovements && !isArchived && !isParc && (
           <div className="page-header-actions">
             {/* Reprendre un catalogue existant ligne à ligne serait interminable :
                 l'aller-retour Excel évite la saisie manuelle des modèles. */}
@@ -1260,7 +1264,7 @@ export default function StockPage() {
             <div className="table-empty">
               <Package size={36} color="var(--gray-300)" />
               <p>{models.length === 0 ? 'Aucun produit dans cette catégorie.' : 'Aucun résultat pour ces filtres.'}</p>
-              {models.length === 0 && (
+              {models.length === 0 && canEdit && (
                 <button className="btn btn--primary" onClick={() => setModal('create')}>
                   <Plus size={14} /> Ajouter un produit
                 </button>
@@ -1456,11 +1460,14 @@ export default function StockPage() {
           menu={menu}
           onClose={() => setMenu(null)}
           actions={[
-            { label: 'Voir la fiche',    icon: Eye,               onClick: pr => navigate(`/stock/${pr._id}`) },
-            { label: 'Mouvements',       icon: History,           onClick: pr => setViewingMovements(pr) },
-            { label: 'Ajuster le stock', icon: SlidersHorizontal, onClick: pr => setAdjusting(pr) },
-            { label: 'Modifier',         icon: Pencil,            onClick: pr => setModal(pr) },
-            { label: 'Archiver',         icon: Trash2,            onClick: pr => setArchiving(pr), danger: true },
+            { label: 'Voir la fiche', icon: Eye,     onClick: pr => navigate(`/stock/${pr._id}`) },
+            { label: 'Mouvements',    icon: History, onClick: pr => setViewingMovements(pr) },
+            // Sans « Gérer le stock », la fiche se lit mais ne se modifie pas.
+            ...(canEdit ? [
+              { label: 'Ajuster le stock', icon: SlidersHorizontal, onClick: pr => setAdjusting(pr) },
+              { label: 'Modifier',         icon: Pencil,            onClick: pr => setModal(pr) },
+              { label: 'Archiver',         icon: Trash2,            onClick: pr => setArchiving(pr), danger: true },
+            ] : []),
           ]}
         />
       )}

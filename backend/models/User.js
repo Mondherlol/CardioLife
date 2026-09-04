@@ -1,11 +1,19 @@
 const mongoose = require('mongoose')
 const bcrypt   = require('bcryptjs')
+const { PASSWORD_MIN_LENGTH } = require('../config/auth')
 
 const permissionsSchema = new mongoose.Schema({
   canManageClients:      { type: Boolean, default: false },
   canManageDevices:      { type: Boolean, default: false },
   canManageContracts:    { type: Boolean, default: false },
   canManageStock:        { type: Boolean, default: false },
+  /* Consultation seule du catalogue et des articles.
+     `default: true` volontaire : jusqu'ici les lectures du stock étaient
+     ouvertes à tout compte connecté. Les comptes déjà en base n'ont pas la
+     clé — mongoose applique donc ce défaut et rien ne casse. Le droit devient
+     simplement révocable, et les comptes créés désormais reçoivent la valeur
+     explicite du préréglage de leur rôle. */
+  canViewStock:          { type: Boolean, default: true },
   canManageInterventions:{ type: Boolean, default: false },
   canManageUsers:        { type: Boolean, default: false },
   canViewReports:        { type: Boolean, default: false },
@@ -35,7 +43,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: true,
-    minlength: 5,
+    minlength: PASSWORD_MIN_LENGTH,
     select: false,
   },
   role: {

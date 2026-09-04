@@ -1,8 +1,10 @@
 const router = require('express').Router()
 const ctrl = require('../controllers/replacementsController')
 const { protect } = require('../middleware/auth')
+const { requireAny } = require('../middleware/access')
 
 router.use(protect)
+router.use(requireAny(['canManageInterventions', 'canManageDevices']))
 
 /* Signaler une pièce défectueuse est ouvert à tous : c'est le technicien sur
    place qui la constate. Le traitement, lui, est vérifié dans le contrôleur —

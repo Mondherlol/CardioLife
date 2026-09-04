@@ -14,7 +14,12 @@ export const deleteIntervention = (id)        => del(`/interventions/${id}`)
    Les champs de visite (visa, réception, observation générale) s'envoient sans. */
 export const saveFiche          = (id, data)  => patch(`/interventions/${id}/fiche`, data)
 export const removeFiche        = (id, deaId) => del(`/interventions/${id}/fiche/${deaId || 'none'}`)
+// Marque l'arrivée sur site : c'est ce clic qui déverrouille la checklist.
+export const startIntervention  = (id)        => patch(`/interventions/${id}/start`, {})
 export const closeIntervention  = (id)        => patch(`/interventions/${id}/close`, {})
+/* Rouvre une visite clôturée : la checklist redevient saisissable et la
+   réouverture est tracée dans l'historique. */
+export const reopenIntervention = (id, motif) => patch(`/interventions/${id}/reopen`, { motif })
 
 /* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist :
    elles vont au parc du site, pas dans la fiche d'intervention. */

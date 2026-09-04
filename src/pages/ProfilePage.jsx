@@ -8,6 +8,7 @@ import {
   getProfile, updateProfile, changePassword,
   uploadAvatar, deleteAvatar, avatarUrl,
 } from '../api/profile'
+import { PASSWORD_MIN_LENGTH } from '../constants/auth'
 
 /* ─── Role labels ─── */
 const ROLE_LABELS = {
@@ -126,7 +127,8 @@ export default function ProfilePage() {
   async function handleChangePwd(e) {
     e.preventDefault()
     if (!pwd.current) return toast.error('Saisissez votre mot de passe actuel.')
-    if (pwd.next.length < 8) return toast.error('Minimum 8 caractères.')
+    if (pwd.next.length < PASSWORD_MIN_LENGTH)
+      return toast.error(`Minimum ${PASSWORD_MIN_LENGTH} caractères.`)
     if (pwd.next !== pwd.confirm) return toast.error('Les mots de passe ne correspondent pas.')
     setSavingPwd(true)
     try {
@@ -337,8 +339,8 @@ export default function ProfilePage() {
                     {showPwd[key] ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
-                {key === 'next' && pwd.next.length > 0 && pwd.next.length < 8 && (
-                  <p className="profile-pwd-hint">⚠ Minimum 8 caractères</p>
+                {key === 'next' && pwd.next.length > 0 && pwd.next.length < PASSWORD_MIN_LENGTH && (
+                  <p className="profile-pwd-hint">⚠ Minimum {PASSWORD_MIN_LENGTH} caractères</p>
                 )}
               </Field>
             ))}

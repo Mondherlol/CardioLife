@@ -1,6 +1,7 @@
 const path = require('path')
 const fs   = require('fs')
 const User = require('../models/User')
+const { PASSWORD_MIN_LENGTH } = require('../config/auth')
 
 /* ─── GET /api/profile ─── */
 async function getProfile(req, res) {
@@ -38,8 +39,10 @@ async function changePassword(req, res) {
     const { currentPassword, newPassword } = req.body
     if (!currentPassword || !newPassword)
       return res.status(400).json({ message: 'Tous les champs sont requis.' })
-    if (newPassword.length < 8)
-      return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 8 caractères.' })
+    if (newPassword.length < PASSWORD_MIN_LENGTH)
+      return res.status(400).json({
+        message: `Le mot de passe doit contenir au moins ${PASSWORD_MIN_LENGTH} caractères.`,
+      })
 
     const user = await User.findById(req.user._id).select('+password')
     if (!user) return res.status(404).json({ message: 'Utilisateur introuvable.' })

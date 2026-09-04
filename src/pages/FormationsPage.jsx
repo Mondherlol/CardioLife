@@ -2,12 +2,22 @@ import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'react-toastify'
 import {
   GraduationCap, Plus, Search, X, Send, CalendarDays, Users, Mail, AlertTriangle,
+  Check,
 } from 'lucide-react'
+
+/* Le tableau se lit en diagonale : dates courtes, comme sur le suivi Excel
+   qu'il remplace. */
+function fmtShort(d) {
+  return d ? new Date(d).toLocaleDateString('fr-FR') : '—'
+}
 import { getAllFormations } from '../api/formations'
 import { getUsers } from '../api/users'
 import { useLoadingBar } from '../hooks/useLoadingBar'
-import { stageOf, countParticipants, attestationRecipient, fmtFormationDate } from '../lib/formations'
-import { FormationRow } from '../components/FormationRow'
+import {
+  stageOf, countParticipants, attestationRecipient, fmtFormationDate,
+  seatsUsed, deaModels, deliveryLabel,
+} from '../lib/formations'
+import { StageChip } from '../components/FormationRow'
 import FormationModal from '../components/FormationModal'
 
 const FILTERS = [
@@ -186,11 +196,79 @@ export default function FormationsPage({ embedded = false }) {
           )}
         </div>
       ) : (
-        <div className="sd-list">
-          {visible.map(f => (
-            <FormationRow key={f._id} formation={f} showClient
-              onClick={() => setModal({ mode: 'edit', formation: f })} />
-          ))}
+        <div className="table-wrap fm-table-wrap">
+          <table className="table fm-table">
+            <thead>
+              <tr>
+                <th style={{ minWidth: 200 }}>Clients</th>
+                <th>Nombre de personnes</th>
+                <th style={{ minWidth: 170 }}>Délivré ou non</th>
+                <th>Date de délivrance</th>
+                <th style={{ minWidth: 190 }}>Adresse mail</th>
+                <th>Numéro</th>
+                <th>Date de formation</th>
+                <th>DEA</th>
+                <th style={{ minWidth: 130 }}>Formateur</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(f => {
+                const site      = f.site?.name || f.siteName
+                const counts    = countParticipants(f)
+                const seats     = seatsUsed(f)
+                const to        = attestationRecipient(f)
+                const delivered = deliveryLabel(f)
+                const deas      = deaModels(f)
+                const trainers  = (f.assignedTo || []).map(u => u.fullName || u.username).filter(Boolean)
+
+                return (
+                  <tr key={f._id} className="row--clickable"
+                    onClick={() => setModal({ mode: 'edit', formation: f })}
+                    title="Ouvrir la formation">
+                    <td>
+                      <div className="cell-primary">{f.clientName || '—'}</div>
+                      <div className="cell-secondary">
+                        {[site, f.title].filter(Boolean).join(' · ') || '—'}
+                      </div>
+                    </td>
+
+                    <td className="cell-muted">
+                      {seats > 0 ? `${seats} p` : '—'}
+                      {counts.a_former > 0 && (
+                        <div className="cell-secondary">{counts.a_former} à former</div>
+                      )}
+                    </td>
+
+                    <td>
+                      {delivered
+                        ? <span className="fm-cell-delivered"><Check size={12} /> {delivered}</span>
+                        : <StageChip formation={f} />}
+                    </td>
+
+                    <td className="cell-muted">{fmtShort(f.attestationDeliveredAt)}</td>
+
+                    <td>
+                      {to?.email
+                        ? <a className="fm-cell-mail" href={`mailto:${to.email}`}
+                            onClick={e => e.stopPropagation()}>{to.email}</a>
+                        : <span className="cell-muted">—</span>}
+                    </td>
+
+                    <td className="cell-muted">{to?.phone || '—'}</td>
+                    <td className="cell-muted">{fmtShort(f.date)}</td>
+
+                    <td>
+                      {deas.length > 0
+                        ? <span className="fm-cell-dea">{deas.join(' / ')}</span>
+                        : <span className="cell-muted">—</span>}
+                    </td>
+
+                    <td className="cell-muted">{trainers.join(', ') || '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

@@ -1,3 +1,4 @@
+const mongoose       = require('mongoose')
 const path           = require('path')
 const fs             = require('fs')
 const Intervention   = require('../models/Intervention')
@@ -63,6 +64,65 @@ function canWriteFiche(user, intervention) {
 }
 
 /**
+ * Une visite non démarrée se consulte, elle ne se saisit pas.
+ *
+ * Ouvrir la fiche pour préparer sa tournée ne doit pas laisser de trace de
+ * relevé : c'est le clic sur « Démarrer l'intervention » qui marque l'arrivée
+ * sur site, et lui seul qui ouvre la checklist. Sans ce verrou, la première
+ * case cochée par mégarde faisait basculer la visite en cours.
+ *
+ * La correction après clôture reste possible : elle a son propre chemin.
+ */
+function ensureStarted(intervention, res) {
+  if (intervention.status !== 'planifie') return true
+  res.status(409).json({
+    message: "L'intervention n'a pas été démarrée. Cliquez sur « Démarrer l'intervention » avant de saisir la checklist.",
+    code: 'NOT_STARTED',
+  })
+  return false
+}
+
+/* ─── Démarrer l'intervention ──────────────────────────────── */
+async function startIntervention(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    if (!canWriteFiche(req.user, intervention)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    // Rejouer le démarrage ne doit ni réécrire l'heure d'arrivée ni rouvrir
+    // une visite clôturée : on répond simplement l'état courant.
+    if (intervention.status !== 'planifie') {
+      return res.json(await withParc(intervention))
+    }
+
+    intervention.status    = 'en_cours'
+    intervention.startedAt = new Date()
+    intervention.history.push({
+      action:   'debut',
+      user:     req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details:  'Intervention démarrée',
+    })
+
+    await intervention.save()
+    res.json(await withParc(intervention))
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* La réponse porte le parc : l'écran se met à jour sans rechargement. */
+async function withParc(intervention) {
+  const json = intervention.toObject()
+  const { deviceProduct, siteDeas } = await parcOf(intervention)
+  json.deviceProduct = deviceProduct
+  json.siteDeas      = siteDeas
+  return json
+}
+
+/**
  * Libellés et mise en forme des champs de la checklist.
  *
  * L'historique d'une correction ne vaut que s'il dit *ce qui* a changé : une
@@ -95,7 +155,7 @@ const FICHE_LABELS = {
   observation: 'Observation',
 
   dateReception: 'Date de réception', visa: 'Visa',
-  observationGenerale: 'Observation générale',
+  observationGenerale: 'Remarque',
 }
 
 const DATE_FIELDS = new Set([
@@ -404,6 +464,17 @@ async function create(req, res) {
 
     const CONTROL_TYPES = ['semestriel', 'annuel', 'hors_contrat']
 
+    /* Un identifiant d'appareil malformé remontait tel quel dans l'erreur de
+       cast Mongoose (« Cast to ObjectId failed for value "Powerheart G5 · …" »),
+       illisible pour qui programme une visite. On tranche ici, en français. */
+    for (const [champ, valeur] of [['client', client], ['site', site], ['installation', installation]]) {
+      if (valeur && !mongoose.Types.ObjectId.isValid(valeur)) {
+        return res.status(400).json({
+          message: `Sélection invalide pour « ${champ} ». Rechargez la page et refaites votre choix.`,
+        })
+      }
+    }
+
     const intervention = await Intervention.create({
       client, clientName,
       // Le site porte le contexte du contrôle (adresse, parc) : sans lui, la
@@ -512,6 +583,7 @@ async function submitRapport(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
     intervention.rapport = req.body.rapport || req.body
     intervention.status  = 'termine'
@@ -613,6 +685,7 @@ async function saveFiche(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
     ensureFiches(intervention)
 
@@ -652,16 +725,6 @@ async function saveFiche(req, res) {
     syncLegacyFiche(intervention)
 
     logCorrection(intervention, req.user, changes)
-
-    if (intervention.status === 'planifie') {
-      intervention.status = 'en_cours'
-      intervention.history.push({
-        action: 'debut',
-        user: req.user._id,
-        userName: req.user.fullName || req.user.username,
-        details: 'Intervention démarrée',
-      })
-    }
 
     await intervention.save()
 
@@ -704,6 +767,7 @@ async function removeFiche(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
     ensureFiches(intervention)
     const key = req.params.deaId === 'none' ? '' : String(req.params.deaId)
@@ -739,19 +803,80 @@ async function closeIntervention(req, res) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
 
+    /* Deuxième passage : la visite avait été rouverte pour correction. Le dire
+       dans l'historique évite de lire deux clôtures identiques sans comprendre
+       ce qui s'est passé entre les deux. */
+    const reCloture = Boolean(intervention.completedDate)
+
     intervention.status = 'termine'
     intervention.completedDate = new Date()
     intervention.history.push({
       action: 'cloture',
       user: req.user._id,
       userName: req.user.fullName || req.user.username,
-      details: 'Intervention clôturée',
+      details: reCloture
+        ? 'Intervention clôturée de nouveau après modification'
+        : 'Intervention clôturée',
     })
 
     await intervention.save()
     await pushFicheToParc(intervention, req.user)
     await refreshNextControl(intervention)
     res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Rouvrir une intervention clôturée ─────────────────────── */
+/**
+ * Une clôture n'est pas une fin de non-recevoir.
+ *
+ * Le technicien clôture depuis le site, souvent au moment de repartir, et
+ * s'aperçoit ensuite d'un oubli — une photo, une péremption, un kit non coché.
+ * Sans réouverture, la seule issue était d'appeler l'administration pour
+ * qu'elle corrige à sa place, alors qu'il a l'appareil sous les yeux.
+ *
+ * La réouverture remet la visite « en cours » : la checklist redevient
+ * saisissable par son chemin normal, sans mode de correction parallèle. Elle
+ * laisse sa trace dans l'historique, et la clôture suivante dit qu'elle en est
+ * une seconde — la chronologie reste lisible.
+ */
+async function reopenIntervention(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    /* Rouvrent : le technicien qui a fait la visite, et l'administration.
+       `canWriteFiche` ne convient pas ici — il ferme justement la porte au
+       technicien une fois la visite clôturée. */
+    const owner = String(intervention.technicien || '') === String(req.user._id)
+    if (!isAdmin(req.user) && req.user.role !== 'superadmin' && !owner) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    if (intervention.status !== 'termine') {
+      // Rejouer la réouverture ne doit pas empiler des lignes d'historique.
+      return res.json(await withParc(intervention))
+    }
+
+    const motif = String(req.body?.motif || '').trim()
+
+    intervention.status = 'en_cours'
+    intervention.history.push({
+      action:   'reouverture',
+      user:     req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details:  motif
+        ? `Intervention rouverte pour modification — ${motif}`
+        : 'Intervention rouverte pour modification',
+    })
+
+    await intervention.save()
+    /* La visite n'est plus faite : l'échéance du site se recalcule, sinon le
+       planning garderait le prochain contrôle issu d'une clôture annulée. */
+    await refreshNextControl(intervention)
+    res.json(await withParc(intervention))
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -769,6 +894,12 @@ async function uploadFichePhoto(req, res) {
       // avant nous. On le reprend, sinon chaque tentative laisse un orphelin.
       fs.unlink(req.file.path, () => {})
       return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    if (intervention.status === 'planifie') {
+      // Même raison qu'au-dessus : le fichier est déjà écrit, il faut le reprendre
+      // avant de refuser.
+      fs.unlink(req.file.path, () => {})
+      return ensureStarted(intervention, res)
     }
 
     // Les photos illustrent un appareil précis : elles suivent sa fiche.
@@ -796,6 +927,7 @@ async function deleteFichePhoto(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
     const { filename } = req.params
     ensureFiches(intervention)
@@ -840,6 +972,7 @@ async function saveDeaItems(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
     let siteId = intervention.site
     if (!siteId && intervention.installation) {
@@ -908,6 +1041,7 @@ async function saveFormation(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
     const { etat = '', date, note } = req.body
     if (!FORMATION_ETATS.includes(etat)) {
@@ -1024,13 +1158,15 @@ async function saveBon(req, res) {
     if (!canWriteFiche(req.user, intervention)) {
       return res.status(403).json({ message: 'Accès refusé.' })
     }
+    if (!ensureStarted(intervention, res)) return
 
-    const { nature, signataire } = req.body
+    const { nature, signataire, reference } = req.body
     if (nature !== undefined && !Intervention.BON_NATURES.includes(nature)) {
       return res.status(400).json({ message: "Nature d'intervention inconnue." })
     }
 
     if (!intervention.bon) intervention.bon = {}
+    if (reference !== undefined) intervention.bon.reference = String(reference).trim()
     if (nature !== undefined) intervention.bon.nature = nature
     if (signataire !== undefined) {
       intervention.bon.signataire = signataire
@@ -1073,7 +1209,9 @@ async function searchInstallations(req, res) {
 }
 
 module.exports = {
+  startIntervention,
   getAll, getOne, create, update, submitRapport, remove, searchInstallations,
-  saveFiche, removeFiche, closeIntervention, uploadFichePhoto, deleteFichePhoto,
+  saveFiche, removeFiche, closeIntervention, reopenIntervention,
+  uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
 }

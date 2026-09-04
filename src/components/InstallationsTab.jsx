@@ -8,6 +8,7 @@ import {
 import { getInstallations } from '../api/installations'
 import InstallationCompleteModal from './InstallationCompleteModal'
 import { useAuth } from '../context/AuthContext'
+import { isAdmin } from '../lib/access'
 
 /* Le parc ne connaît que deux statuts : « à installer » et « installé ».
    L'état « en cours » se déduit de la date de pose : une pose dont le jour est
@@ -54,8 +55,9 @@ const PAGE_SIZE = 100
 export default function InstallationsTab({ embedded = false }) {
   const navigate  = useNavigate()
   const { user }  = useAuth()
-  const canReport = user?.role === 'superadmin' || user?.role === 'admin'
-    || user?.role === 'technicien' || user?.permissions?.canManageDevices
+  // Le rôle Technicien ne donne plus d'accès en dur : c'est la case
+  // « Gérer les appareils » qui décide, comme partout ailleurs.
+  const canReport = isAdmin(user) || !!user?.permissions?.canManageDevices
 
   const [all, setAll]         = useState([])
   const [loading, setLoading] = useState(true)

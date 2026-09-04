@@ -73,7 +73,12 @@ async function lookup(req, res) {
   if (!client) return res.json([])
 
   const sites = await Site.find({ client, isActive: true })
-    .select('name address deas.deviceType deas.serialNumber deas.location deas.status')
+    /* `deas._id` est indispensable : une projection sur des sous-champs
+       (`deas.deviceType`, …) n'inclut PAS l'_id des sous-documents — seul
+       celui du document racine est ajouté d'office. Sans lui, le <select>
+       « Appareil » recevait `value={undefined}`, devenait non contrôlé, et
+       renvoyait le libellé de l'option à la place de l'identifiant. */
+    .select('name address deas._id deas.deviceType deas.serialNumber deas.location deas.status')
     .sort({ name: 1 })
     .collation({ locale: 'fr', strength: 1 })
     .lean()

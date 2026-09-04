@@ -5,7 +5,7 @@ const importCtrl = require('../controllers/productImportController')
 const imagesCtrl = require('../controllers/productImagesController')
 const upload    = require('../middleware/upload')
 const { protect }                  = require('../middleware/auth')
-const { requirePermissionToWrite } = require('../middleware/permissions')
+const { stockGuard } = require('../middleware/access')
 
 const productValidation = [
   body('name').trim().notEmpty().withMessage('Le nom du produit est requis.'),
@@ -19,7 +19,7 @@ const productValidation = [
 router.use(protect)
 // Le catalogue est consultable par tous : la pose d'un DEA en dépend. Seules
 // les modifications restent réservées à la gestion du stock.
-router.use(requirePermissionToWrite('canManageStock'))
+router.use(stockGuard())
 
 /* Import / export Excel du catalogue — déclarés avant `/:id`, qui avalerait
    sinon « import » et « export » comme des identifiants. */

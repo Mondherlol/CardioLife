@@ -6,6 +6,9 @@ const { requireAdminOrSuperAdmin, requireSuperAdmin } = require('../middleware/p
 router.use(protect)
 router.get('/', ctrl.get)
 router.put('/', requireAdminOrSuperAdmin, ctrl.update)
+// Logo imprimé en tête des documents.
+router.post('/logo',   requireAdminOrSuperAdmin, ctrl.uploadLogo, ctrl.setLogo)
+router.delete('/logo', requireAdminOrSuperAdmin, ctrl.deleteLogo)
 // Remise à zéro des données métier — irréversible, super admin uniquement.
 router.post('/reset', requireSuperAdmin, ctrl.reset)
 

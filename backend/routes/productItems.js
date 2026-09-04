@@ -2,12 +2,12 @@ const router = require('express').Router()
 const { body } = require('express-validator')
 const ctrl = require('../controllers/productItemsController')
 const { protect }                  = require('../middleware/auth')
-const { requirePermissionToWrite } = require('../middleware/permissions')
+const { stockGuard } = require('../middleware/access')
 
 router.use(protect)
 // Lecture ouverte : le choix d'un numéro de série au moment de poser un DEA
 // suppose de voir le stock. L'entrée en stock, elle, reste protégée.
-router.use(requirePermissionToWrite('canManageStock'))
+router.use(stockGuard())
 
 router.get('/models',  ctrl.getModels)
 router.get('/',        ctrl.getAll)

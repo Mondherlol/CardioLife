@@ -3,14 +3,21 @@ import {
   Monitor, Users, MoreHorizontal, Plus, Pencil, Trash2,
   KeyRound, Power, X, Eye, EyeOff, ShieldOff,
   CheckCircle2, AlertTriangle, HardDrive, Save, Boxes,
-  ChevronUp, ChevronDown, Wrench,
+  ChevronUp, ChevronDown, Wrench, Building2, Upload, RotateCcw,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
 import {
+  isAdmin, defaultPermissionsForRole, ROLE_PERMISSION_PRESETS, PERMISSION_KEYS,
+} from '../lib/access'
+import { PASSWORD_MIN_LENGTH } from '../constants/auth'
+import {
   getUsers, createUser, updateUser, resetUserPassword, deleteUser,
 } from '../api/users'
-import { getAppSettings, updateAppSettings, resetDatabase } from '../api/appSettings'
+import {
+  getAppSettings, updateAppSettings, resetDatabase,
+  uploadCompanyLogo, deleteCompanyLogo, companyLogoUrl,
+} from '../api/appSettings'
 import { getFolderTree } from '../api/documents'
 import {
   getProductCategories, deleteProductCategory, reorderProductCategories,
@@ -23,6 +30,7 @@ import DevFixPanel from '../components/DevFixPanel'
 
 const TABS = [
   { id: 'systeme',       label: 'Système',            icon: Monitor },
+  { id: 'societe',       label: 'Société',            icon: Building2 },
   { id: 'utilisateurs',  label: 'Utilisateurs',       icon: Users },
   { id: 'categories',    label: 'Catégories produits', icon: Boxes },
   { id: 'autres',        label: 'Autres',             icon: MoreHorizontal },
@@ -43,26 +51,35 @@ const ROLE_LABELS = {
   readonly:   'Lecture seule',
 }
 
-const PERM_KEYS = [
-  'canManageClients',
-  'canManageDevices',
-  'canManageContracts',
-  'canManageStock',
-  'canManageInterventions',
-  'canManageUsers',
-  'canViewReports',
-  'canManageFormations',
-]
+/* Liste tenue dans `src/lib/access.js` : une case déclarée ici mais absente
+   là-bas serait un droit sans effet — c'est ce qui est arrivé à
+   `canManageUsers` et `canViewReports`. */
+const PERM_KEYS = PERMISSION_KEYS
 
 const PERM_LABELS = {
   canManageClients:       'Gérer les clients',
   canManageDevices:       'Gérer les appareils',
   canManageContracts:     'Gérer les contrats',
+  canViewStock:           'Consulter le stock',
   canManageStock:         'Gérer le stock',
   canManageInterventions: 'Gérer les interventions',
   canManageUsers:         'Gérer les utilisateurs',
   canViewReports:         'Voir les rapports',
   canManageFormations:    'Gérer les formations',
+}
+
+/* Ce que chaque case ouvre réellement — l'énoncé doit correspondre aux tableaux
+   de `src/lib/access.js` et `backend/middleware/access.js`. */
+const PERM_HINTS = {
+  canManageClients:       'Menu Clients, sites et DEA, onglet Formations, Documents',
+  canManageDevices:       'Onglets Installations et Remplacements de la Maintenance',
+  canManageContracts:     'Menu Contrats',
+  canViewStock:           'Voir le catalogue et les articles, sans rien modifier',
+  canManageStock:         'Modifier le stock, les packs et les mouvements',
+  canManageInterventions: 'Onglets Contrôles et Remplacements de la Maintenance',
+  canManageUsers:         'Menu Paramètres et gestion des utilisateurs',
+  canViewReports:         'Tableau de bord et Documents',
+  canManageFormations:    'Onglet Formations de la Maintenance',
 }
 
 const EMPTY_PERMS = Object.fromEntries(PERM_KEYS.map(k => [k, false]))
@@ -73,7 +90,7 @@ const EMPTY_FORM = {
   email: '',
   password: '',
   role: 'readonly',
-  permissions: { ...EMPTY_PERMS },
+  permissions: defaultPermissionsForRole('readonly'),
 }
 
 /* ─── Helpers ───────────────────────────────────────────────── */
@@ -102,6 +119,7 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
   const [showPwd, setShowPwd] = useState(false)
   const [saving, setSaving]   = useState(false)
   const [errors, setErrors]   = useState({})
+  const [presetApplied, setPresetApplied] = useState(false)
 
   const isSuperAdmin = currentUser.role === 'superadmin'
 
@@ -112,6 +130,16 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
 
   function setPerm(key, val) {
     setForm(f => ({ ...f, permissions: { ...f.permissions, [key]: val } }))
+    setPresetApplied(false)
+  }
+
+  /**
+   * Changer de rôle recoche les permissions par défaut du métier. Sans cela on
+   * créait un technicien à zéro droit, qui n'ouvrait plus rien.
+   */
+  function setRole(role) {
+    setForm(f => ({ ...f, role, permissions: defaultPermissionsForRole(role) }))
+    setPresetApplied(!!ROLE_PERMISSION_PRESETS[role])
   }
 
   function validate() {
@@ -119,8 +147,11 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
     if (!form.fullName.trim())  e.fullName = 'Nom complet requis.'
     if (!form.username.trim())  e.username = 'Identifiant requis.'
     if (!form.email.trim())     e.email    = 'Email requis.'
-    if (mode === 'create' && form.password.length < 8) e.password = 'Minimum 8 caractères.'
-    if (mode === 'edit'   && form.password && form.password.length < 8) e.password = 'Minimum 8 caractères.'
+    // Le mot de passe ne se saisit qu'à la création : ensuite il passe par
+    // l'action « Réinitialiser le mot de passe » de la liste.
+    if (mode === 'create' && form.password.length < PASSWORD_MIN_LENGTH) {
+      e.password = `Minimum ${PASSWORD_MIN_LENGTH} caractères.`
+    }
     return e
   }
 
@@ -138,7 +169,6 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
         permissions: form.permissions,
       }
       if (mode === 'create') payload.password = form.password
-      else if (form.password) payload.password = form.password
       await onSave(payload)
     } catch (err) {
       const msg = err.message || 'Erreur.'
@@ -154,8 +184,11 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
     }
   }
 
+  // Super Admin et Admin ont accès à tout : afficher des cases décochées qui
+  // n'ont aucun effet est ce qui a fait croire à des droits mal appliqués.
+  const fullAccessRole = form.role === 'superadmin' || form.role === 'admin'
   const showPerms = form.role !== 'superadmin'
-  const permDisabled = !isSuperAdmin && form.role === 'superadmin'
+  const permDisabled = fullAccessRole
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -204,31 +237,35 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
               {errors.email && <span className="form-error">{errors.email}</span>}
             </div>
 
-            <div className="form-group">
-              <label className="form-label">
-                {mode === 'create' ? 'Mot de passe' : 'Nouveau mot de passe (laisser vide pour ne pas changer)'}
-              </label>
-              <div className="input-with-icon">
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  className={`form-input form-input--plain${errors.password ? ' form-input--error' : ''}`}
-                  value={form.password}
-                  onChange={e => setField('password', e.target.value)}
-                  placeholder="••••••••"
-                />
-                <button type="button" className="input-icon-btn" onClick={() => setShowPwd(v => !v)}>
-                  {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
+            {/* Uniquement à la création : la modification passe par l'action
+                dédiée « Réinitialiser le mot de passe » de la liste. Ce champ
+                était de toute façon sans effet en édition — l'API de mise à
+                jour ne lit pas `password`. */}
+            {mode === 'create' && (
+              <div className="form-group">
+                <label className="form-label">Mot de passe</label>
+                <div className="input-with-icon">
+                  <input
+                    type={showPwd ? 'text' : 'password'}
+                    className={`form-input form-input--plain${errors.password ? ' form-input--error' : ''}`}
+                    value={form.password}
+                    onChange={e => setField('password', e.target.value)}
+                    placeholder="••••••••"
+                  />
+                  <button type="button" className="input-icon-btn" onClick={() => setShowPwd(v => !v)}>
+                    {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {errors.password && <span className="form-error">{errors.password}</span>}
               </div>
-              {errors.password && <span className="form-error">{errors.password}</span>}
-            </div>
+            )}
 
             <div className="form-group">
               <label className="form-label">Rôle</label>
               <select
                 className="form-input form-input--plain"
                 value={form.role}
-                onChange={e => setField('role', e.target.value)}
+                onChange={e => setRole(e.target.value)}
                 disabled={!isSuperAdmin && form.role === 'superadmin'}
               >
                 {(isSuperAdmin ? ALL_ROLES : ROLES).map(r => (
@@ -240,14 +277,28 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
             {showPerms && (
               <div className="form-group">
                 <label className="form-label">Permissions</label>
+                {fullAccessRole ? (
+                  <p className="form-hint">
+                    Le rôle Administrateur donne accès à tous les modules ; ces cases
+                    ne s'appliquent qu'aux autres rôles.
+                  </p>
+                ) : presetApplied && (
+                  <p className="form-hint">
+                    Droits par défaut du rôle « {ROLE_LABELS[form.role]} » appliqués —
+                    ajustez-les si besoin.
+                  </p>
+                )}
                 <div className="perm-grid">
                   {PERM_KEYS.map(key => (
                     <label key={key} className="perm-item">
-                      <span>{PERM_LABELS[key]}</span>
+                      <span>
+                        {PERM_LABELS[key]}
+                        <small className="perm-hint">{PERM_HINTS[key]}</small>
+                      </span>
                       <span className="perm-toggle">
                         <input
                           type="checkbox"
-                          checked={!!form.permissions[key]}
+                          checked={fullAccessRole ? true : !!form.permissions[key]}
                           disabled={permDisabled}
                           onChange={e => setPerm(key, e.target.checked)}
                         />
@@ -283,7 +334,9 @@ function ResetPasswordModal({ user, onClose, onSave }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (pwd.length < 8) { setError('Minimum 8 caractères.'); return }
+    if (pwd.length < PASSWORD_MIN_LENGTH) {
+      setError(`Minimum ${PASSWORD_MIN_LENGTH} caractères.`); return
+    }
     setSaving(true)
     try {
       await onSave(pwd)
@@ -384,7 +437,8 @@ function DeleteModal({ user, onClose, onConfirm }) {
 /* ─── Utilisateurs Tab ──────────────────────────────────────── */
 
 function UtilisateursTab({ currentUser }) {
-  const canManage = currentUser.role === 'admin' || currentUser.role === 'superadmin'
+  // `canManageUsers` restait décoratif : l'onglet ne regardait que le rôle.
+  const canManage = isAdmin(currentUser) || !!currentUser.permissions?.canManageUsers
 
   const [users, setUsers]           = useState([])
   const [loading, setLoading]       = useState(true)
@@ -696,6 +750,148 @@ function SystemeTab() {
   )
 }
 
+/* ─── Société ───────────────────────────────────────────────────
+   L'en-tête du papier à lettres, saisi une fois. Le bon d'intervention le lit
+   à l'impression : changer d'adresse ne doit pas demander de toucher au code. */
+
+const COMPANY_FIELDS = [
+  { key: 'name',    label: "Nom de la société", hint: 'Affiché sous le logo et en pied de document' },
+  { key: 'taxId',   label: 'Matricule fiscal',  hint: 'Imprimé sous la date du bon (MF)' },
+  { key: 'address', label: 'Adresse', rows: 2, hint: 'Une ligne par retour à la ligne' },
+  { key: 'city',    label: 'CP / Ville' },
+  { key: 'phone',   label: 'Téléphone', rows: 2, hint: 'Plusieurs numéros : un par ligne' },
+  { key: 'email',   label: 'E-mail' },
+  { key: 'website', label: 'Site web' },
+  { key: 'footer',  label: 'Pied de page des documents', rows: 3, full: true,
+    hint: "Bureau, matricule fiscal, coordonnées bancaires — bas du bon d'intervention" },
+]
+
+function SocieteTab() {
+  const [settings, setSettings] = useState(null)
+  const [loading,  setLoading]  = useState(true)
+  const [saving,   setSaving]   = useState(false)
+  const [busyLogo, setBusyLogo] = useState(false)
+
+  useEffect(() => {
+    getAppSettings()
+      .then(setSettings)
+      .catch(() => toast.error('Impossible de charger les paramètres.'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const company = settings?.company || {}
+
+  function setField(key, value) {
+    setSettings(s => ({ ...s, company: { ...s.company, [key]: value } }))
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      const saved = await updateAppSettings({ company: settings.company })
+      setSettings(saved)
+      toast.success('Informations de société enregistrées.')
+    } catch (err) {
+      toast.error(err.message || 'Erreur lors de la sauvegarde.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleLogo(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setBusyLogo(true)
+    try {
+      setSettings(await uploadCompanyLogo(file))
+      toast.success('Logo mis à jour.')
+    } catch (err) {
+      toast.error(err.message || 'Envoi impossible.')
+    } finally {
+      setBusyLogo(false)
+    }
+  }
+
+  async function handleResetLogo() {
+    setBusyLogo(true)
+    try {
+      setSettings(await deleteCompanyLogo())
+      toast.success('Logo par défaut rétabli.')
+    } catch (err) {
+      toast.error(err.message || 'Suppression impossible.')
+    } finally {
+      setBusyLogo(false)
+    }
+  }
+
+  if (loading)   return <div className="table-loading"><span className="spinner" /></div>
+  if (!settings) return null
+
+  return (
+    <>
+      <h2 className="sp-section-title">Société</h2>
+      <p className="sp-section-desc">
+        Identité imprimée en tête et en pied des documents — bon d'intervention en premier lieu.
+      </p>
+
+      <div className="settings-group">
+        <div className="settings-group-title"><Building2 size={15} /> Logo</div>
+
+        <div className="sp-logo-row">
+          <div className="sp-logo-preview">
+            <img src={companyLogoUrl(company.logo)} alt={company.name || 'Logo'} />
+          </div>
+          <div className="sp-logo-actions">
+            <label className="btn btn--ghost" style={busyLogo ? { opacity: 0.5, pointerEvents: 'none' } : undefined}>
+              <Upload size={14} /> Changer le logo
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                hidden disabled={busyLogo} onChange={handleLogo} />
+            </label>
+            {company.logo && (
+              <button className="btn btn--ghost" disabled={busyLogo} onClick={handleResetLogo}>
+                <RotateCcw size={14} /> Logo par défaut
+              </button>
+            )}
+            <span className="form-hint">
+              PNG, JPEG, WebP ou SVG — 3 Mo maximum. Fond blanc de préférence :
+              le logo s'imprime tel quel.
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <div className="settings-group-title"><Building2 size={15} /> Coordonnées</div>
+
+        <div className="sp-company-grid">
+          {COMPANY_FIELDS.map(f => (
+            <div key={f.key} className={`form-group${f.full ? ' sp-company-full' : ''}`}>
+              <label className="form-label">{f.label}</label>
+              {f.rows ? (
+                <textarea className="form-input form-input--plain" rows={f.rows}
+                  value={company[f.key] || ''}
+                  onChange={e => setField(f.key, e.target.value)} />
+              ) : (
+                <input className="form-input form-input--plain"
+                  value={company[f.key] || ''}
+                  onChange={e => setField(f.key, e.target.value)} />
+              )}
+              {f.hint && <span className="form-hint">{f.hint}</span>}
+            </div>
+          ))}
+        </div>
+
+        <button className="btn btn--primary" style={{ marginTop: 20 }}
+          onClick={handleSave} disabled={saving}>
+          {saving ? <span className="spinner spinner--sm" /> : <Save size={14} />}
+          Enregistrer les informations
+        </button>
+      </div>
+    </>
+  )
+}
+
 /* ─── Catégories produits ───────────────────────────────────── */
 
 function CategoriesTab() {
@@ -1001,6 +1197,7 @@ export default function SettingsPage() {
 
       <div className="sp-content">
         {activeTab === 'systeme'      && <SystemeTab />}
+        {activeTab === 'societe'      && <SocieteTab />}
         {activeTab === 'utilisateurs' && <UtilisateursTab currentUser={currentUser} />}
         {activeTab === 'categories'   && <CategoriesTab />}
         {activeTab === 'autres'       && <AutresTab currentUser={currentUser} />}

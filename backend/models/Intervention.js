@@ -127,6 +127,10 @@ const interventionSchema = new Schema({
 
   status:        { type: String, enum: ['planifie','en_cours','termine'], default: 'planifie' },
   scheduledDate: Date,
+  /* Heure d'arrivée sur site, posée par « Démarrer l'intervention ». Tant
+     qu'elle est vide la checklist se consulte mais ne se saisit pas : une
+     visite ne commence pas parce qu'on a ouvert l'écran. */
+  startedAt:     Date,
   /* Date déplacée à la main (fiche client). Le calendrier du contrat ne la
      réaligne plus : une reprise de parc ancien vaut mieux que la règle. */
   manualDate:    { type: Boolean, default: false },
@@ -173,6 +177,10 @@ const interventionSchema = new Schema({
    * remplacements de consommables.
    */
   bon: {
+    // Numéro du bon tel qu'il figure sur le papier (« 352/2025 »). Saisi à la
+    // main : la numérotation est tenue hors application et doit pouvoir suivre
+    // celle du carnet en cours.
+    reference:  { type: String, trim: true },
     nature:     { type: String, enum: BON_NATURES, default: '' },
     signataire: { type: String, trim: true },
     signedAt:   Date,

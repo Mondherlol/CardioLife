@@ -7,25 +7,32 @@ import {
 } from 'lucide-react'
 import { useSidebar } from '../context/SidebarContext'
 import { useAuth }    from '../context/AuthContext'
+import { canAccess } from '../lib/access'
 import { get }        from '../api/http'
 
+/* L'accès de chaque entrée est décidé par `src/lib/access.js`, miroir du
+   middleware serveur. Filtrer ici sur le rôle seul laissait passer le Stock à
+   des comptes dont la case « Gérer le stock » était décochée. */
 const ALL_NAV = [
-  { icon: LayoutDashboard, label: 'Tableau de bord',  to: '/dashboard',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: Users,           label: 'Clients',           to: '/clients',        roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: Package,         label: 'Stock & Produits',  to: '/stock',          roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  { icon: FileText,        label: 'Contrats',          to: '/contrats',       roles: ['superadmin','admin','commercial','assistante'] },
+  { icon: LayoutDashboard, label: 'Tableau de bord', to: '/dashboard',   module: 'dashboard' },
+  { icon: Users,           label: 'Clients',          to: '/clients',     module: 'clients' },
+  { icon: Package,         label: 'Stock & Produits', to: '/stock',       module: 'stock' },
+  { icon: FileText,        label: 'Contrats',         to: '/contrats',    module: 'contracts' },
   // Contrôles, installations, formations et remplacements : un seul suivi
   // terrain, une seule entrée de menu (onglets internes).
-  { icon: Wrench,          label: 'Maintenance',       to: '/maintenance',    roles: null }, // all roles
-  { icon: Calendar,        label: 'Planning',          to: '/planning',       roles: null }, // all roles
-  { icon: File,            label: 'Documents',         to: '/documents',      roles: ['superadmin','admin','commercial','assistante','readonly'] },
-  // Désactivés pour l'instant : { icon: Map, label: 'Carte Tunisie', to: '/carte', roles: [...] }
-  // Désactivés pour l'instant : { icon: Mail, label: 'Emails & Relances', to: '/emails', roles: [...] }
+  { icon: Wrench,          label: 'Maintenance',      to: '/maintenance', module: 'maintenance' },
+  { icon: Calendar,        label: 'Planning',         to: '/planning',    module: 'planning' },
+  { icon: File,            label: 'Documents',        to: '/documents',   module: 'documents' },
 ]
 
 const ALL_BOTTOM = [
-  { icon: Settings,   label: 'Paramètres', to: '/settings', roles: ['superadmin','admin'] },
-  { icon: UserCircle, label: 'Mon profil', to: '/profil',   roles: null },
+  /* Suivi & To-do : masqué du menu le temps de la mise au point. La page reste
+     accessible en tapant /dev — la route et ses droits sont inchangés.
+     Pour la remontrer : décommenter la ligne ci-dessous et remettre `ListTodo`
+     dans l'import de lucide-react en tête de fichier. */
+  // { icon: ListTodo,   label: 'Suivi & To-do', to: '/dev',     module: 'dev' },
+  { icon: Settings,   label: 'Paramètres', to: '/settings', module: 'settings' },
+  { icon: UserCircle, label: 'Mon profil', to: '/profil',   module: 'profile' },
 ]
 
 const ROLE_LABELS = {
@@ -37,12 +44,8 @@ const ROLE_LABELS = {
   readonly:   'Lecture seule',
 }
 
-function filterByRole(items, role, user) {
-  return items.filter(item => {
-    if (item.roles && !item.roles.includes(role)) return false
-    if (item.anyPermission && role !== 'superadmin' && !item.anyPermission.some(p => user?.permissions?.[p])) return false
-    return true
-  })
+function filterByAccess(items, user) {
+  return items.filter(item => canAccess(user, item.module))
 }
 
 export default function Sidebar() {
@@ -60,8 +63,8 @@ export default function Sidebar() {
       .catch(() => {})
   }, [user, role])
 
-  const navItems    = filterByRole(ALL_NAV,    role, user)
-  const bottomItems = filterByRole(ALL_BOTTOM, role, user)
+  const navItems    = filterByAccess(ALL_NAV,    user)
+  const bottomItems = filterByAccess(ALL_BOTTOM, user)
 
   const cls = [
     'sidebar',

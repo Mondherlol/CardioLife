@@ -98,6 +98,34 @@ export function attestationRecipient(formation, site) {
   return null
 }
 
+/**
+ * Modèles de DAE posés sur le site formé — la colonne « DEA » du tableau des
+ * formations : on forme les agents sur l'appareil qu'ils ont sous la main.
+ * Doublons écartés, ordre de pose conservé.
+ */
+export function deaModels(formation) {
+  const seen = []
+  for (const d of formation?.site?.deas || []) {
+    const label = String(d?.deviceType || '').trim()
+    if (label && !seen.includes(label)) seen.push(label)
+  }
+  return seen
+}
+
+/**
+ * Colonne « Délivré ou non » : non pas un oui/non, mais la façon dont les
+ * attestations sont parties — par mail à un contact, ou remises par un
+ * collaborateur. C'est ce que l'assistante relit pour savoir où elle en est.
+ */
+export function deliveryLabel(formation) {
+  if (!formation?.attestationDelivered) return null
+  const to = attestationRecipient(formation)
+  if (to?.email && (to.name || to.email)) return `par mail à ${to.name || to.email}`
+  const by = formation.attestationDeliveredBy
+  const byName = typeof by === 'object' ? (by?.fullName || by?.username) : null
+  return byName ? `délivré par ${byName}` : 'délivré'
+}
+
 /* ── Divers ────────────────────────────────────────────────────── */
 
 export const SEATS_PER_DEA = 16

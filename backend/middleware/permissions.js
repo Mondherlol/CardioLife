@@ -1,3 +1,9 @@
+const { isAdmin } = require('./access')
+
+/* Le rôle Administrateur vaut accès complet — c'est le contrat que tient
+   déjà l'interface. Ces gardes n'exemptaient que le Super Admin : un admin
+   sans cases cochées voyait le menu Clients puis se prenait un 403. */
+
 function requireSuperAdmin(req, res, next) {
   if (req.user.role !== 'superadmin') {
     return res.status(403).json({ message: 'Réservé au Super Admin.' })
@@ -14,7 +20,7 @@ function requireAdminOrSuperAdmin(req, res, next) {
 
 function requirePermission(permission) {
   return (req, res, next) => {
-    if (req.user.role === 'superadmin') return next()
+    if (isAdmin(req.user)) return next()
 
     if (!req.user.permissions?.[permission]) {
       return res.status(403).json({
@@ -27,7 +33,7 @@ function requirePermission(permission) {
 
 function requireAnyPermission(permissions) {
   return (req, res, next) => {
-    if (req.user.role === 'superadmin') return next()
+    if (isAdmin(req.user)) return next()
 
     if (!permissions.some(p => req.user.permissions?.[p])) {
       return res.status(403).json({

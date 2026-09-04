@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
 import { Wrench, HeartPulse, GraduationCap, Replace } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { isAdmin } from '../lib/access'
 import InterventionsPage from './InterventionsPage'
 import ReplacementsPage  from './ReplacementsPage'
 import FormationsPage    from './FormationsPage'
@@ -16,23 +17,27 @@ import InstallationsTab  from '../components/InstallationsTab'
  * Chaque volet reste une page autonome, montée ici en mode `embedded` : son
  * titre disparaît au profit de celui de la page, ses actions restent.
  */
+/* Chaque volet suit la permission qui le concerne, et rien d'autre — cocher
+   « Gérer les formations » n'ouvre pas les contrôles, et le rôle Technicien ne
+   donne plus d'accès en dur : c'est bien la case qui décide. */
+const has = (u, perm) => isAdmin(u) || !!u?.permissions?.[perm]
+
 const TABS = [
   {
     id: 'controles', label: 'Contrôles', icon: Wrench,
-    can: () => true,
+    can: u => has(u, 'canManageInterventions'),
   },
   {
     id: 'installations', label: 'Installations', icon: HeartPulse,
-    can: u => ['superadmin', 'admin', 'technicien'].includes(u?.role) || !!u?.permissions?.canManageDevices,
+    can: u => has(u, 'canManageDevices'),
   },
   {
     id: 'formations', label: 'Formations', icon: GraduationCap,
-    can: u => u?.role === 'superadmin'
-      || !!u?.permissions?.canManageFormations || !!u?.permissions?.canManageClients,
+    can: u => has(u, 'canManageFormations') || has(u, 'canManageClients'),
   },
   {
     id: 'remplacements', label: 'Remplacements', icon: Replace,
-    can: u => ['superadmin', 'admin', 'commercial', 'assistante'].includes(u?.role),
+    can: u => has(u, 'canManageInterventions') || has(u, 'canManageDevices'),
   },
 ]
 
@@ -45,6 +50,7 @@ export default function MaintenancePage() {
   const active  = allowed.find(t => t.id === tab)
 
   // Onglet inconnu ou interdit : on retombe sur le premier accessible.
+  if (!allowed.length) return <Navigate to="/planning" replace />
   if (!active) return <Navigate to={`/maintenance/${allowed[0].id}`} replace />
 
   return (

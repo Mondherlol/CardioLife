@@ -1,8 +1,10 @@
 const router = require('express').Router()
 const ctrl   = require('../controllers/controlsController')
 const { protect } = require('../middleware/auth')
+const { requireAny } = require('../middleware/access')
 
 router.use(protect)
+router.use(requireAny(['canManageInterventions']))
 
 router.get('/installation/:installId', ctrl.getByInstallation)
 router.get('/client/:clientId',        ctrl.getByClient)
