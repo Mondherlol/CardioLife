@@ -18077,6 +18077,232 @@ button {
 /* Avertissements non bloquants de l'import (n° de série déjà posé ailleurs) */
 .ci-warn-list { color: var(--amber-600); }
 
+/* ── Import du parc : lecture du fichier, modèles, réglages ────── */
+
+.ci-summary-chip--warn {
+  background: var(--amber-50);
+  color: var(--amber-600);
+  border-color: var(--amber-100);
+}
+
+/* Compteur « dont X nouveaux » accolé à une pastille de résumé. */
+.ci-chip-new {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 20px;
+  background: var(--green-100);
+  color: var(--green-700);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+/* Bandeau d'information au fil de l'écran (convention de date, rappels). */
+.ci-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--gray-50);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.ci-banner svg { flex-shrink: 0; color: var(--text-muted); }
+.ci-banner span { flex: 1; }
+
+.ci-banner--warn {
+  background: var(--amber-50);
+  border-color: var(--amber-100);
+  color: var(--amber-600);
+}
+
+.ci-banner--warn svg { color: var(--amber-500); }
+
+/* ── Colonnes reconnues ──────────────────────────────── */
+.ci-map-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 8px 0 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ci-map-toggle:hover { color: var(--brand-dark); }
+
+.ci-map-caret { transition: transform 0.15s ease; }
+.ci-map-caret--open { transform: rotate(90deg); }
+
+.ci-map-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 16px;
+  margin-top: 10px;
+}
+
+.ci-map-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.ci-map-item svg { color: var(--text-muted); flex-shrink: 0; }
+
+.ci-map-src {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ci-map-dst { color: var(--text-secondary); }
+
+.ci-map-item--off { opacity: 0.55; }
+.ci-map-item--off .ci-map-dst { font-style: italic; }
+
+.ci-map-approx {
+  color: var(--amber-600);
+  font-weight: 700;
+  cursor: help;
+}
+
+/* ── Modèles de DAE à trancher ───────────────────────── */
+.ci-model {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.ci-model-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.ci-model-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ci-model-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.ci-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ci-model-badge--ok  { background: var(--green-50);  color: var(--green-700); }
+.ci-model-badge--new { background: var(--amber-50);  color: var(--amber-600); }
+
+.ci-model-choices { display: flex; flex-direction: column; gap: 4px; }
+
+.ci-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ci-choice:hover { background: var(--gray-50); }
+.ci-choice svg { color: var(--text-muted); flex-shrink: 0; }
+
+.ci-choice--on {
+  background: var(--brand-light);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.ci-choice--on svg { color: var(--brand-dark); }
+
+.ci-choice-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 2px 9px 10px 31px;
+}
+
+.ci-choice-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 160px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ci-choice-fields .input { width: 100%; }
+
+/* ── Options de l'import ─────────────────────────────── */
+.ci-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+}
+
+.ci-opt:last-of-type { border-bottom: 0; }
+
+.ci-opt input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; }
+
+.ci-opt > span { display: flex; flex-direction: column; gap: 3px; }
+
+.ci-opt strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ci-opt em {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.ci-opt--sub {
+  align-items: center;
+  gap: 10px;
+  padding: 0 0 10px 26px;
+  border-bottom: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.ci-opt--sub .input { width: auto; }
+
 
 /* ── Photo du produit dans l'en-tête ──────────────────────
    Un seul visuel, cliquable : il remplace l'ancienne galerie de l'onglet

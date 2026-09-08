@@ -38,16 +38,20 @@ export function uploadClientLogo(id, file) {
   return upload(`/clients/${id}/logo`, form)
 }
 
-export function validateImport(file) {
+/* Import du parc — lecture à blanc du fichier, puis import des lignes retenues.
+   `dateFormat` ('dmy' | 'mdy') force la convention des dates quand le fichier
+   ne permet pas de la deviner. */
+export function validateImport(file, { dateFormat } = {}) {
   const form  = new FormData()
   form.append('file', file)
+  if (dateFormat) form.append('dateFormat', dateFormat)
   return authFetch(`${API_BASE}/clients/import/validate`, { method: 'POST', body: form })
 }
 
-export function executeImport(rows) {
+export function executeImport(rows, { models = [], options = {} } = {}) {
   return authFetch(`${API_BASE}/clients/import/execute`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ rows }),
+    body:    JSON.stringify({ rows, models, options }),
   })
 }
