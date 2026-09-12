@@ -60,7 +60,7 @@ async function create(req, res) {
 }
 
 async function updateUser(req, res) {
-  const { fullName, email, username, role, permissions, isActive } = req.body
+  const { fullName, email, username, role, permissions, isActive, password } = req.body
 
   const target = await User.findById(req.params.id).select('-password')
   if (!target) return res.status(404).json({ message: 'Utilisateur introuvable.' })
@@ -89,6 +89,19 @@ async function updateUser(req, res) {
     return res.status(403).json({
       message: 'Vous ne pouvez pas modifier votre propre rôle ni vos propres permissions.',
     })
+  }
+
+  // Changement de mot de passe optionnel depuis le formulaire d'édition.
+  // Passe par `save()` et non par `$set` : findByIdAndUpdate court-circuite le
+  // hook de hachage et écrirait le mot de passe en clair en base.
+  if (password !== undefined && password !== '') {
+    if (String(password).length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({
+        message: `Le mot de passe doit faire au moins ${PASSWORD_MIN_LENGTH} caractères.`,
+      })
+    }
+    target.password = password
+    await target.save()
   }
 
   const update = {}

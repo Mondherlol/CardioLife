@@ -147,9 +147,12 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
     if (!form.fullName.trim())  e.fullName = 'Nom complet requis.'
     if (!form.username.trim())  e.username = 'Identifiant requis.'
     if (!form.email.trim())     e.email    = 'Email requis.'
-    // Le mot de passe ne se saisit qu'à la création : ensuite il passe par
-    // l'action « Réinitialiser le mot de passe » de la liste.
+    // À la création le mot de passe est requis. En édition il est optionnel :
+    // laissé vide, il ne change pas ; renseigné, il doit respecter le minimum.
     if (mode === 'create' && form.password.length < PASSWORD_MIN_LENGTH) {
+      e.password = `Minimum ${PASSWORD_MIN_LENGTH} caractères.`
+    }
+    if (mode !== 'create' && form.password && form.password.length < PASSWORD_MIN_LENGTH) {
       e.password = `Minimum ${PASSWORD_MIN_LENGTH} caractères.`
     }
     return e
@@ -168,7 +171,9 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
         role:        form.role,
         permissions: form.permissions,
       }
-      if (mode === 'create') payload.password = form.password
+      // Création : mot de passe toujours envoyé. Édition : uniquement s'il a
+      // été saisi, pour ne pas écraser l'existant avec une valeur vide.
+      if (mode === 'create' || form.password) payload.password = form.password
       await onSave(payload)
     } catch (err) {
       const msg = err.message || 'Erreur.'
@@ -237,28 +242,28 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
               {errors.email && <span className="form-error">{errors.email}</span>}
             </div>
 
-            {/* Uniquement à la création : la modification passe par l'action
-                dédiée « Réinitialiser le mot de passe » de la liste. Ce champ
-                était de toute façon sans effet en édition — l'API de mise à
-                jour ne lit pas `password`. */}
-            {mode === 'create' && (
-              <div className="form-group">
-                <label className="form-label">Mot de passe</label>
-                <div className="input-with-icon">
-                  <input
-                    type={showPwd ? 'text' : 'password'}
-                    className={`form-input form-input--plain${errors.password ? ' form-input--error' : ''}`}
-                    value={form.password}
-                    onChange={e => setField('password', e.target.value)}
-                    placeholder="••••••••"
-                  />
-                  <button type="button" className="input-icon-btn" onClick={() => setShowPwd(v => !v)}>
-                    {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-                {errors.password && <span className="form-error">{errors.password}</span>}
+            {/* À la création le mot de passe est requis. En édition il est
+                optionnel : laissé vide il ne change rien, renseigné il remplace
+                l'ancien (l'API de mise à jour le hache correctement). */}
+            <div className="form-group">
+              <label className="form-label">
+                {mode === 'create' ? 'Mot de passe' : 'Nouveau mot de passe'}
+              </label>
+              <div className="input-with-icon">
+                <input
+                  type={showPwd ? 'text' : 'password'}
+                  className={`form-input form-input--plain${errors.password ? ' form-input--error' : ''}`}
+                  value={form.password}
+                  onChange={e => setField('password', e.target.value)}
+                  placeholder={mode === 'create' ? '••••••••' : 'Laisser vide pour ne pas changer'}
+                  autoComplete="new-password"
+                />
+                <button type="button" className="input-icon-btn" onClick={() => setShowPwd(v => !v)}>
+                  {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
-            )}
+              {errors.password && <span className="form-error">{errors.password}</span>}
+            </div>
 
             <div className="form-group">
               <label className="form-label">Rôle</label>
