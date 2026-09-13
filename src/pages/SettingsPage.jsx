@@ -600,8 +600,17 @@ function UtilisateursTab({ currentUser }) {
                         </button>
                         <button
                           className={`sp-action-btn${u.isActive ? '' : ' sp-action-btn--success'}`}
-                          title={u.isActive ? 'Désactiver' : 'Activer'}
-                          disabled={!actable || toggling === u._id}
+                          title={
+                            (u.role === 'superadmin' || u.role === 'admin')
+                              ? 'Un compte administrateur ne peut pas être désactivé'
+                              : u.isActive ? 'Désactiver' : 'Activer'
+                          }
+                          disabled={
+                            !actable
+                            || toggling === u._id
+                            || u.role === 'superadmin'
+                            || u.role === 'admin'
+                          }
                           onClick={() => handleToggleActive(u)}
                         >
                           {toggling === u._id

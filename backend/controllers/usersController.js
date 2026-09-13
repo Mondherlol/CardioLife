@@ -104,6 +104,15 @@ async function updateUser(req, res) {
     await target.save()
   }
 
+  // Un compte administrateur ne peut pas être désactivé — ni par lui-même, ni
+  // par un autre. C'est la porte ouverte au verrouillage total : un admin qui
+  // se coupe l'accès et plus personne pour rétablir la situation.
+  if (isActive === false && isAdmin(target)) {
+    return res.status(403).json({
+      message: 'Un compte administrateur ne peut pas être désactivé.',
+    })
+  }
+
   const update = {}
   if (fullName    !== undefined) update.fullName    = fullName
   if (email       !== undefined) update.email       = email
