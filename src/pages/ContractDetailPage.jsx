@@ -3,9 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   ArrowLeft, Pencil, FileText, Calendar, Zap, MapPin, Clock,
-  User, CheckCircle2, ClipboardList, Building2, HeartPulse, Info,
+  User, CheckCircle2, ClipboardList, Building2, HeartPulse, Info, Banknote,
 } from 'lucide-react'
-import { getContract, CONTRACT_STATUSES } from '../api/contracts'
+import { getContract, CONTRACT_STATUSES, formatPrice } from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ContractModal from '../components/ContractModal'
 
@@ -157,6 +157,15 @@ export default function ContractDetailPage() {
         <div className="ct-detail-tile">
           <span className="ct-tile-label"><Calendar size={12} /> Période</span>
           <span className="ct-tile-value">{formatDate(contract.startDate)} → {formatDate(contract.endDate)}</span>
+        </div>
+        <div className="ct-detail-tile">
+          <span className="ct-tile-label"><Banknote size={12} /> Prix</span>
+          <span className="ct-tile-value">{formatPrice(contract.price)}</span>
+          <span className="ct-tile-sub">
+            {contract.priceIncreases?.length
+              ? `+5 % appliqué le ${formatDate(contract.priceIncreases[contract.priceIncreases.length - 1].appliedAt)}`
+              : '+5 % deux mois avant le contrôle annuel'}
+          </span>
         </div>
         <div className="ct-detail-tile">
           <span className="ct-tile-label"><Clock size={12} /> Contrôles</span>

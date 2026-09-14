@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import {
   getContracts, getContractStats, archiveContract, restoreContract, destroyContract,
-  CONTRACT_STATUSES,
+  CONTRACT_STATUSES, formatPrice,
 } from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 
@@ -196,6 +196,7 @@ export default function ContractsPage() {
                 <th style={{ minWidth: 170 }}>Client</th>
                 <th>Statut</th>
                 <th>Période</th>
+                <th title="Augmente de 5 % deux mois avant chaque contrôle annuel">Prix</th>
                 <th>Prochain contrôle</th>
                 <th>DAE couverts</th>
                 <th style={{ width: 100 }}></th>
@@ -223,6 +224,18 @@ export default function ContractsPage() {
                   <td><StatusBadge status={c.status} /></td>
                   <td className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
                     <Calendar size={11} style={{ verticalAlign: -1 }} /> {formatDate(c.startDate)} → {formatDate(c.endDate)}
+                  </td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {c.price != null ? (
+                      <>
+                        <div className="cell-primary">{formatPrice(c.price)}</div>
+                        {c.priceIncreases?.length > 0 && (
+                          <div className="cell-secondary">
+                            +5 % le {formatDate(c.priceIncreases[c.priceIncreases.length - 1].appliedAt)}
+                          </div>
+                        )}
+                      </>
+                    ) : <span className="cell-muted">—</span>}
                   </td>
                   <td className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>
                     {c.nextControlDate ? (

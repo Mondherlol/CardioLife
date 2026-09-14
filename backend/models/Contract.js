@@ -6,6 +6,18 @@ const mongoose = require('mongoose')
 const TYPES    = ['maintenance', 'location', 'vente', 'autre']
 const STATUSES = ['brouillon', 'actif', 'expire', 'resilie']
 
+/* Hausse de prix appliquée à l'approche d'un contrôle annuel. Rattachée au
+   contrôle qui l'a déclenchée : une même échéance ne relève jamais deux fois
+   le prix, même si le bouton est pressé deux fois. */
+const priceIncreaseSchema = new mongoose.Schema({
+  control:   { type: mongoose.Schema.Types.ObjectId, ref: 'Intervention', required: true },
+  from:      { type: Number, required: true },
+  to:        { type: Number, required: true },
+  rate:      { type: Number, required: true },
+  appliedAt: { type: Date, default: Date.now },
+  appliedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+}, { _id: false })
+
 /**
  * Contrat de maintenance d'un site.
  *
@@ -33,7 +45,11 @@ const contractSchema = new mongoose.Schema({
   startDate: { type: Date },
   endDate:   { type: Date },
 
-  notes:     { type: String, trim: true },
+  // Prix du contrat. Relevé de 5 % deux mois avant chaque contrôle annuel.
+  price:          { type: Number, min: 0 },
+  priceIncreases: { type: [priceIncreaseSchema], default: [] },
+
+  notes:    { type: String, trim: true },
   isActive:  { type: Boolean, default: true },   // archivage doux
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true })

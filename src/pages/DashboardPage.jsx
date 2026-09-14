@@ -6,9 +6,11 @@ import {
   AlertTriangle, CalendarClock, Clock, User, MapPin,
   ArrowRight, ChevronRight,
   ChevronLeft, Plus, Activity, BatteryWarning, Zap,
-  CircleDot,
+  CircleDot, TrendingUp, X, Check,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { canAccess } from '../lib/access'
+import { getAnnualIncreases, applyAnnualIncrease, formatPrice } from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { getDashboard } from '../api/dashboard'
 import { getInstallations } from '../api/installations'
@@ -489,6 +491,112 @@ function MiniCalendar({ onOpenItem }) {
   )
 }
 
+/* Hausses de contrat : les contrôles annuels à deux mois ou moins, chacun
+ * relevant le prix de son contrat de 5 %. La hausse s'applique d'un clic et
+ * n'est comptée qu'une fois par contrôle. */
+function IncreasesModal({ increases, onClose, onApplied, onOpenContract }) {
+  const [busy, setBusy] = useState(null)
+  const rows    = increases?.data || []
+  const pct     = Math.round((increases?.rate ?? 0.05) * 100)
+  const months  = increases?.months ?? 2
+  const pending = rows.filter(r => !r.applied).length
+  const gain    = Math.round(rows
+    .filter(r => r.price != null)
+    .reduce((s, r) => s + (r.newPrice - r.price), 0) * 1000) / 1000
+
+  useEffect(() => {
+    const onKey = e => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  async function apply(r) {
+    setBusy(r.control)
+    try {
+      const res = await applyAnnualIncrease(r.contract, r.control)
+      toast.success(`${r.clientName || 'Contrat'} : prix porté à ${formatPrice(res.price)}.`)
+      onApplied(r.control, res)
+    } catch (err) {
+      toast.error(formatApiError(err))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="dfx-inc-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="dfx-inc" role="dialog" aria-modal="true" aria-labelledby="dfx-inc-title">
+        <div className="dfx-inc-head">
+          <span className="dfx-inc-icon"><TrendingUp size={20} /></span>
+          <div className="dfx-inc-headtext">
+            <h2 id="dfx-inc-title">Hausses de contrat à venir</h2>
+            <p>Contrôle annuel dans {months} mois ou moins · <strong>+{pct} %</strong> sur le prix du contrat</p>
+          </div>
+          <button className="dfx-inc-close" onClick={onClose} aria-label="Fermer"><X size={18} /></button>
+        </div>
+
+        {rows.length > 0 && (
+          <div className="dfx-inc-summary">
+            <div><strong>{rows.length}</strong><span>contrôle{rows.length > 1 ? 's' : ''} annuel{rows.length > 1 ? 's' : ''}</span></div>
+            <div><strong>{pending}</strong><span>hausse{pending > 1 ? 's' : ''} à appliquer</span></div>
+            <div className="is-gain"><strong>+{formatPrice(gain)}</strong><span>sur les contrats</span></div>
+          </div>
+        )}
+
+        <div className="dfx-inc-body">
+          {rows.length === 0 ? (
+            <div className="dfx-inc-empty">
+              <ShieldCheck size={28} />
+              <p>Aucun contrôle annuel dans les {months} prochains mois.</p>
+            </div>
+          ) : rows.map(r => {
+            const d    = new Date(r.scheduledDate)
+            const days = Math.max(0, daysUntil(r.scheduledDate))
+            const tone = days <= 15 ? 'red' : days <= 30 ? 'amber' : 'blue'
+            return (
+              <div key={r.control} className={`dfx-inc-row${r.applied ? ' is-applied' : ''}`}>
+                <span className="dfx-inc-date">
+                  <strong>{d.toLocaleDateString('fr-FR', { day: '2-digit' })}</strong>
+                  <span>{d.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', '')}</span>
+                </span>
+                <button className="dfx-inc-main" onClick={() => onOpenContract(r.contract)} title="Voir le contrat">
+                  <span className="dfx-inc-client">{r.clientName || '—'}</span>
+                  <span className="dfx-inc-sub">
+                    <MapPin size={11} /> {r.siteName || '—'}{r.contractNumber && ` · ${r.contractNumber}`}
+                  </span>
+                </button>
+                <span className={`dfx-pill dfx-pill--${tone}`}>{days === 0 ? "Aujourd'hui" : `J-${days}`}</span>
+                <div className="dfx-inc-price">
+                  {r.price == null
+                    ? <span className="dfx-inc-noprice">Prix non renseigné</span>
+                    : <>
+                        <span className="dfx-inc-old">{formatPrice(r.price)}</span>
+                        <ArrowRight size={12} />
+                        <span className="dfx-inc-new">{formatPrice(r.newPrice)}</span>
+                      </>}
+                </div>
+                <div className="dfx-inc-action">
+                  {r.applied ? (
+                    <span className="dfx-pill dfx-pill--green"><Check size={11} /> Appliquée</span>
+                  ) : r.price == null ? (
+                    <button className="dfx-inc-btn dfx-inc-btn--ghost" onClick={() => onOpenContract(r.contract)}>
+                      Saisir le prix
+                    </button>
+                  ) : (
+                    <button className="dfx-inc-btn" disabled={busy === r.control} onClick={() => apply(r)}>
+                      {busy === r.control ? <span className="dfx-cal-spin dfx-inc-spin" /> : `Appliquer +${pct} %`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ActivityRow({ a }) {
   return (
     <div className="dfx-act">
@@ -520,8 +628,31 @@ export default function DashboardPage() {
   const [replacements, setReplacements] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [increases, setIncreases] = useState(null)
+  const [showIncreases, setShowIncreases] = useState(false)
+  const canContracts = canAccess(user, 'contracts')
 
   useLoadingBar(loading)
+
+  /* Hausses de contrat : réservées à qui gère les contrats. */
+  useEffect(() => {
+    if (!canContracts) return
+    let alive = true
+    getAnnualIncreases()
+      .then(res => { if (alive) setIncreases(res) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [canContracts])
+
+  function markIncreaseApplied(controlId, res) {
+    setIncreases(cur => cur && {
+      ...cur,
+      data: cur.data.map(r => r.control === controlId
+        ? { ...r, applied: true, price: res.from, newPrice: res.price }
+        : r),
+    })
+  }
+  const pendingIncreases = (increases?.data || []).filter(r => !r.applied).length
 
   useEffect(() => {
     let alive = true
@@ -719,21 +850,44 @@ export default function DashboardPage() {
           <p className="dfx-date">{dateLabel}</p>
         </div>
 
-        {ALERTS.length > 0 && (
-          <div className="dfx-alerts">
-            <span className="dfx-alerts-lead"><AlertTriangle size={15} /> Alertes du jour</span>
-            {ALERTS.map(a => {
-              const Icon = a.icon
-              return (
-                <button key={a.key} className={`dfx-alert dfx-alert--${a.tone}`} onClick={() => go(a.to)}>
-                  <Icon size={14} /> <strong>{a.count}</strong> {a.label}
-                  <ArrowRight size={13} className="dfx-alert-arrow" />
-                </button>
-              )
-            })}
-          </div>
-        )}
+        <div className="dfx-top-right">
+          {ALERTS.length > 0 && (
+            <div className="dfx-alerts">
+              <span className="dfx-alerts-lead"><AlertTriangle size={15} /> Alertes du jour</span>
+              {ALERTS.map(a => {
+                const Icon = a.icon
+                return (
+                  <button key={a.key} className={`dfx-alert dfx-alert--${a.tone}`} onClick={() => go(a.to)}>
+                    <Icon size={14} /> <strong>{a.count}</strong> {a.label}
+                    <ArrowRight size={13} className="dfx-alert-arrow" />
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {canContracts && (
+            <button
+              className={`dfx-inc-trigger${pendingIncreases > 0 ? ' has-pending' : ''}`}
+              onClick={() => setShowIncreases(true)}
+              title="Contrôles annuels dans 2 mois ou moins : +5 % sur le contrat"
+            >
+              <span className="dfx-inc-trigger-icon"><TrendingUp size={15} /></span>
+              Hausses de contrat
+              {pendingIncreases > 0 && <span className="dfx-inc-trigger-count">{pendingIncreases}</span>}
+            </button>
+          )}
+        </div>
       </header>
+
+      {showIncreases && (
+        <IncreasesModal
+          increases={increases}
+          onClose={() => setShowIncreases(false)}
+          onApplied={markIncreaseApplied}
+          onOpenContract={id => navigate(`/contrats/${id}`)}
+        />
+      )}
 
       {/* ── Cartes stats ── */}
       <section className="dfx-stats">
@@ -909,6 +1063,72 @@ function DashboardStyles() {
     .dfx-alert--red{ background:var(--red-soft); color:#c0392b; border-color:#f7d3d3; }
     .dfx-alert--amber{ background:var(--amber-soft); color:#b57508; border-color:#f7e4bf; }
     .dfx-alert--orange{ background:var(--orange-soft); color:var(--orange-d); border-color:#fbdcc2; }
+    .dfx-top-right{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+
+    /* ── Hausses de contrat (bouton + modale) ── */
+    .dfx-inc-trigger{
+      display:inline-flex; align-items:center; gap:9px; padding:6px 14px 6px 6px; border-radius:999px;
+      border:1px solid #fbdcc2; background:linear-gradient(135deg,#fff4ea,#fff); color:var(--ink);
+      font-size:13px; font-weight:700; box-shadow:0 6px 16px -8px rgba(249,115,22,.55);
+      transition:transform .14s, box-shadow .14s;
+    }
+    .dfx-inc-trigger:hover{ transform:translateY(-1px); box-shadow:0 10px 22px -8px rgba(249,115,22,.7); }
+    .dfx-inc-trigger-icon{ width:28px; height:28px; border-radius:50%; display:grid; place-items:center; color:#fff;
+      background:linear-gradient(135deg,#fb8b3c,var(--orange)); }
+    .dfx-inc-trigger.has-pending .dfx-inc-trigger-icon{ animation:incPulse 2.2s ease-out infinite; }
+    @keyframes incPulse{ 0%{ box-shadow:0 0 0 0 rgba(249,115,22,.5) } 100%{ box-shadow:0 0 0 9px rgba(249,115,22,0) } }
+    .dfx-inc-trigger-count{ min-width:20px; height:20px; padding:0 6px; border-radius:999px; display:grid; place-items:center;
+      background:var(--red); color:#fff; font-size:11px; font-weight:800; }
+
+    .dfx-inc-overlay{ position:fixed; inset:0; z-index:1000; display:grid; place-items:center; padding:16px;
+      background:rgba(15,23,42,.45); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); animation:incFade .15s ease; }
+    .dfx-inc{ width:100%; max-width:780px; max-height:calc(100vh - 32px); display:flex; flex-direction:column;
+      background:var(--card); border-radius:var(--radius); overflow:hidden;
+      box-shadow:0 30px 70px -20px rgba(15,23,42,.45); animation:incRise .2s cubic-bezier(.2,.8,.3,1); }
+    @keyframes incFade{ from{ opacity:0 } }
+    @keyframes incRise{ from{ opacity:0; transform:translateY(10px) scale(.98) } }
+    .dfx-inc-head{ display:flex; align-items:center; gap:14px; padding:20px 22px; color:#fff;
+      background:linear-gradient(135deg,#ff8a3d 0%,#f97316 50%,#ea580c 100%); }
+    .dfx-inc-icon{ width:44px; height:44px; border-radius:14px; display:grid; place-items:center; flex-shrink:0; background:rgba(255,255,255,.22); }
+    .dfx-inc-headtext{ flex:1; min-width:0; }
+    .dfx-inc-headtext h2{ margin:0; font-size:17px; font-weight:800; letter-spacing:-.01em; }
+    .dfx-inc-headtext p{ margin:3px 0 0; font-size:12.5px; opacity:.92; }
+    .dfx-inc-close{ width:34px; height:34px; border-radius:10px; border:none; display:grid; place-items:center; flex-shrink:0;
+      background:rgba(255,255,255,.18); color:#fff; }
+    .dfx-inc-close:hover{ background:rgba(255,255,255,.3); }
+    .dfx-inc-summary{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:16px 22px 4px; }
+    .dfx-inc-summary > div{ display:flex; flex-direction:column; gap:2px; padding:10px 12px; border-radius:12px; background:var(--gray-soft); }
+    .dfx-inc-summary strong{ font-size:18px; font-weight:800; letter-spacing:-.01em; }
+    .dfx-inc-summary span{ font-size:11.5px; color:var(--ink2); }
+    .dfx-inc-summary .is-gain strong{ color:var(--green); }
+    .dfx-inc-body{ padding:12px 22px 20px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+    .dfx-inc-row{ display:grid; grid-template-columns:48px minmax(0,1fr) auto auto 132px; align-items:center; gap:12px;
+      padding:10px 12px 10px 10px; border:1px solid var(--border); border-radius:14px; transition:border-color .14s, box-shadow .14s; }
+    .dfx-inc-row:hover{ border-color:#fbdcc2; box-shadow:0 8px 20px -14px rgba(16,24,40,.35); }
+    .dfx-inc-row.is-applied{ background:#f8fcf9; }
+    .dfx-inc-date{ width:48px; height:48px; border-radius:13px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background:#e6f6fe; color:#0284c7; }
+    .dfx-inc-date strong{ font-size:17px; font-weight:800; line-height:1; }
+    .dfx-inc-date span{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .dfx-inc-main{ min-width:0; display:flex; flex-direction:column; gap:3px; text-align:left; background:none; border:none; padding:0; color:inherit; }
+    .dfx-inc-client{ font-size:13.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:color .12s; }
+    .dfx-inc-main:hover .dfx-inc-client{ color:var(--orange-d); }
+    .dfx-inc-sub{ display:flex; align-items:center; gap:4px; font-size:11.5px; color:var(--ink3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dfx-inc-price{ display:flex; align-items:center; gap:6px; font-size:12.5px; white-space:nowrap; color:var(--ink3); }
+    .dfx-inc-old{ color:var(--ink2); }
+    .dfx-inc-new{ font-weight:800; color:var(--green); }
+    .dfx-inc-noprice{ font-size:12px; font-weight:600; color:#b57508; }
+    .dfx-inc-action{ display:flex; justify-content:flex-end; }
+    .dfx-inc-btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; width:100%; height:32px; padding:0 12px;
+      border-radius:10px; border:none; font-size:12px; font-weight:700; color:#fff;
+      background:linear-gradient(135deg,#fb8b3c,var(--orange)); box-shadow:0 6px 14px -8px rgba(249,115,22,.8); transition:transform .12s; }
+    .dfx-inc-btn:hover:not(:disabled){ transform:translateY(-1px); }
+    .dfx-inc-btn:disabled{ opacity:.75; cursor:default; }
+    .dfx-inc-btn--ghost{ background:var(--amber-soft); color:#b57508; box-shadow:none; }
+    .dfx-inc-spin{ border-color:rgba(255,255,255,.4); border-top-color:#fff; }
+    .dfx-inc-empty{ display:flex; flex-direction:column; align-items:center; gap:8px; padding:36px 0 26px; color:var(--ink3); text-align:center; }
+    .dfx-inc-empty p{ margin:0; font-size:13px; }
+    .dfx-pill--green{ display:inline-flex; align-items:center; gap:4px; background:var(--green-soft); color:var(--green); }
 
     /* ── Stats (lueur qui suit le curseur) ── */
     .dfx-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
@@ -1303,9 +1523,17 @@ function DashboardStyles() {
       .dfx-ctrl-node{ width:36px; height:36px; }
       .dfx-ctrl-arrow{ display:none; }
       .dfx-ctrl-list::before{ left:70px; }
+      .dfx-top-right{ justify-content:flex-start; }
+      .dfx-inc-head{ padding:16px; }
+      .dfx-inc-summary{ padding:14px 16px 4px; gap:6px; }
+      .dfx-inc-summary strong{ font-size:15px; }
+      .dfx-inc-body{ padding:10px 16px 16px; }
+      .dfx-inc-row{ grid-template-columns:44px minmax(0,1fr) auto; }
+      .dfx-inc-price{ grid-column:2 / -1; }
+      .dfx-inc-action{ grid-column:1 / -1; }
     }
     @media (prefers-reduced-motion:reduce){
-      .dfx-hero-glow, .dfx-ecg-pulse, .dfx-ring-pulse{ animation:none; }
+      .dfx-hero-glow, .dfx-ecg-pulse, .dfx-ring-pulse, .dfx-inc-trigger-icon{ animation:none !important; }
     }
     `}</style>
   )

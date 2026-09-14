@@ -5,9 +5,25 @@ const Client       = require('../models/Client')
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
 const { listInstallations } = require('../utils/deaParc')
-const { syncContractControls, syncSiteNextControl } = require('../utils/controls')
+const { syncContractControls, syncSiteNextControl, addMonths } = require('../utils/controls')
 
 const { STATUSES } = Contract
+
+/* Deux mois avant un contrôle annuel, le prix du contrat augmente de 5 %. */
+const ANNUAL_INCREASE_RATE   = 0.05
+const INCREASE_WINDOW_MONTHS = 2
+
+// Au millime près : le dinar compte trois décimales.
+const roundPrice = n => Math.round(n * 1000) / 1000
+
+/* Prix saisi : vide l'efface, sinon un montant positif (virgule acceptée). */
+function parsePrice(v) {
+  if (v === undefined) return { skip: true }
+  if (v === null || v === '') return { value: undefined }
+  const n = Number(String(v).replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0) return { error: 'Le prix du contrat doit être un montant positif.' }
+  return { value: roundPrice(n) }
+}
 
 /* Un client est « sous contrat » dès qu'un de ses sites l'est. Le drapeau est
    dénormalisé sur la fiche client : listes et tableau de bord le lisent
@@ -135,6 +151,8 @@ async function create(req, res) {
   const b = req.body
 
   if (!b.site) return res.status(422).json({ message: 'Le site à couvrir est requis.' })
+  const price = parsePrice(b.price)
+  if (price.error) return res.status(422).json({ message: price.error })
 
   const site = await Site.findById(b.site).select('name client deas')
   if (!site) return res.status(404).json({ message: 'Site introuvable.' })
@@ -176,6 +194,7 @@ async function create(req, res) {
     status:     STATUSES.includes(b.status) ? b.status : 'actif',
     startDate,
     endDate,
+    price:      price.value,
     notes:      b.notes?.trim() || undefined,
     createdBy:  req.user._id,
   })
@@ -197,6 +216,9 @@ async function update(req, res) {
   if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
 
   const b = req.body
+  const price = parsePrice(b.price)
+  if (price.error) return res.status(422).json({ message: price.error })
+
   const before = {
     start: contract.startDate?.getTime(),
     end:   contract.endDate?.getTime(),
@@ -207,6 +229,7 @@ async function update(req, res) {
   if (b.startDate !== undefined) contract.startDate = b.startDate || undefined
   if (b.endDate   !== undefined) contract.endDate   = b.endDate   || undefined
   if (b.notes     !== undefined) contract.notes     = b.notes?.trim() || undefined
+  if (!price.skip) contract.price = price.value
 
   await contract.save()
 
@@ -220,6 +243,90 @@ async function update(req, res) {
 
   const populated = await Contract.findById(contract._id).populate(POPULATE).lean()
   res.json(populated)
+}
+
+/* ── Hausses annuelles ────────────────────────────────── */
+/**
+ * Contrôles annuels des contrats actifs tombant d'ici deux mois : ce sont les
+ * contrats dont le prix doit augmenter de 5 %. Une hausse déjà appliquée pour
+ * ce contrôle est signalée avec les prix d'avant et d'après.
+ */
+async function getAnnualIncreases(req, res) {
+  const from = new Date()
+  from.setHours(0, 0, 0, 0)
+  const to = addMonths(from, INCREASE_WINDOW_MONTHS)
+  to.setHours(23, 59, 59, 999)
+
+  const controls = await Intervention.find({
+    controlType:   'annuel',
+    status:        { $ne: 'termine' },
+    contract:      { $ne: null },
+    scheduledDate: { $gte: from, $lte: to },
+  })
+    .sort({ scheduledDate: 1 })
+    .select('contract scheduledDate clientName siteName')
+    .lean()
+
+  const contracts = await Contract.find({
+    _id: { $in: controls.map(c => c.contract) },
+    isActive: true,
+    status: 'actif',
+  })
+    .select('contractNumber client clientName site siteName price priceIncreases')
+    .lean()
+  const byId = new Map(contracts.map(c => [String(c._id), c]))
+
+  const data = controls.map(iv => {
+    const c = byId.get(String(iv.contract))
+    if (!c) return null
+    const applied = (c.priceIncreases || []).find(p => String(p.control) === String(iv._id))
+    const price   = applied ? applied.from : (c.price ?? null)
+    return {
+      control:        iv._id,
+      scheduledDate:  iv.scheduledDate,
+      contract:       c._id,
+      contractNumber: c.contractNumber,
+      client:         c.client,
+      clientName:     c.clientName || iv.clientName,
+      site:           c.site,
+      siteName:       c.siteName || iv.siteName,
+      price,
+      newPrice:  applied ? applied.to : price != null ? roundPrice(price * (1 + ANNUAL_INCREASE_RATE)) : null,
+      applied:   !!applied,
+      appliedAt: applied?.appliedAt || null,
+    }
+  }).filter(Boolean)
+
+  res.json({ rate: ANNUAL_INCREASE_RATE, months: INCREASE_WINDOW_MONTHS, data })
+}
+
+/** Applique la hausse de 5 % au prix du contrat, une fois par contrôle annuel. */
+async function applyAnnualIncrease(req, res) {
+  const contract = await Contract.findById(req.params.id)
+  if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
+
+  const controlId = req.body.control
+  const control = mongoose.isValidObjectId(controlId)
+    ? await Intervention.findOne({ _id: controlId, contract: contract._id, controlType: 'annuel' }).select('_id')
+    : null
+  if (!control) return res.status(404).json({ message: 'Contrôle annuel introuvable pour ce contrat.' })
+
+  if (contract.price == null) {
+    return res.status(422).json({ message: "Renseignez d'abord le prix du contrat." })
+  }
+  if (contract.priceIncreases.some(p => String(p.control) === String(control._id))) {
+    return res.status(409).json({ message: 'La hausse a déjà été appliquée pour ce contrôle annuel.' })
+  }
+
+  const from = contract.price
+  const to   = roundPrice(from * (1 + ANNUAL_INCREASE_RATE))
+  contract.price = to
+  contract.priceIncreases.push({
+    control: control._id, from, to, rate: ANNUAL_INCREASE_RATE, appliedBy: req.user._id,
+  })
+  await contract.save()
+
+  res.json({ price: to, from })
 }
 
 /* ── Archivage / restauration / suppression ───────────── */
@@ -258,4 +365,5 @@ async function permanentDelete(req, res) {
 module.exports = {
   generateNumber, getStats, getAll, getById,
   create, update, archive, restore, permanentDelete,
+  getAnnualIncreases, applyAnnualIncrease,
 }

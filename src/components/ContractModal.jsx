@@ -45,6 +45,7 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
   const [end,    setEnd]    = useState(toDateInput(contract?.endDate)   || addYear())
   const [status, setStatus] = useState(contract?.status || 'actif')
   const [notes,  setNotes]  = useState(contract?.notes || '')
+  const [price,  setPrice]  = useState(contract?.price ?? '')
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
 
@@ -74,6 +75,7 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
         endDate:   end   || undefined,
         status,
         notes,
+        price,
       }
       const saved = isEdit
         ? await updateContract(contract._id, payload)
@@ -135,6 +137,16 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
               <input type="date" className="form-input form-input--plain"
                 value={end} onChange={e => setEnd(e.target.value)} />
             </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Prix du contrat (DT) <span className="form-label-opt">(optionnel)</span></label>
+            <input type="number" min="0" step="0.001" inputMode="decimal"
+              className="form-input form-input--plain"
+              value={price} onChange={e => setPrice(e.target.value)} placeholder="Ex. 450" />
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+              Augmente de 5 % deux mois avant chaque contrôle annuel.
+            </span>
           </div>
 
           {isEdit && (

@@ -96,7 +96,7 @@ const historySchema = new Schema({
 /* Natures d'intervention du bon signé par le client. */
 const BON_NATURES = [
   '', 'controle_semestriel', 'controle_annuel',
-  'remplacement_consommables', 'installation', 'hors_delai',
+  'remplacement_consommables', 'installation', 'formation', 'hors_delai',
 ]
 
 const interventionSchema = new Schema({
@@ -181,7 +181,11 @@ const interventionSchema = new Schema({
     // main : la numérotation est tenue hors application et doit pouvoir suivre
     // celle du carnet en cours.
     reference:  { type: String, trim: true },
-    nature:     { type: String, enum: BON_NATURES, default: '' },
+    // Numéro du bon de commande du client, imprimé en tête du bon.
+    bonCommande: { type: String, trim: true },
+    // Plusieurs natures sur un même passage : une pose se double souvent d'une
+    // formation. Les anciens bons, enregistrés en texte, se relisent en tableau.
+    nature:     { type: [{ type: String, enum: BON_NATURES }], default: [] },
     signataire: { type: String, trim: true },
     signedAt:   Date,
   },

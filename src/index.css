@@ -20563,6 +20563,20 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 .bi-bar-group--sm { min-width: 130px; max-width: 160px; flex: 0 1 auto; }
 .bi-bar-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
 .bi-bar-actions { display: flex; gap: 8px; margin-left: auto; }
+.bi-bar-group--full { flex-basis: 100%; }
+.bi-natures { display: flex; flex-wrap: wrap; gap: 6px; }
+.bi-nature {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+.bi-nature--on { border-color: var(--primary, #f97316); background: var(--gray-100); font-weight: 600; }
 
 /* La page : A4 exact, pour que l'aperçu écran soit l'aperçu papier. */
 .bi-page {
@@ -20720,26 +20734,6 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 .bi-visa-cell { height: 96px; }
 .bi-visa-name { font-size: 12px; font-weight: 600; color: #6b7280; }
 
-/* ── Observations ── */
-
-.bi-section { margin-bottom: 18px; }
-.bi-section-title {
-  margin: 0 0 6px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #6b7280;
-}
-.bi-note {
-  margin: 0;
-  white-space: pre-wrap;
-  padding: 9px 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 4px;
-  background: #fafafa;
-}
-
 /* ── Pied de page ── */
 
 .bi-footer {
@@ -20764,7 +20758,7 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
     box-shadow: none;
   }
   /* Les aplats du document doivent survivre à la génération du PDF. */
-  .bi-table th, .bi-recipient, .bi-note, .bi-title::after, .bi-footer {
+  .bi-table th, .bi-recipient, .bi-title::after, .bi-footer {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

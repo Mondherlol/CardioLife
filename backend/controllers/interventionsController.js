@@ -1160,14 +1160,18 @@ async function saveBon(req, res) {
     }
     if (!ensureStarted(intervention, res)) return
 
-    const { nature, signataire, reference } = req.body
-    if (nature !== undefined && !Intervention.BON_NATURES.includes(nature)) {
+    const { nature, signataire, reference, bonCommande } = req.body
+    // Une nature seule (ancien client) vaut une liste d'un élément.
+    const natures = nature === undefined ? undefined
+      : [...new Set((Array.isArray(nature) ? nature : [nature]).filter(Boolean))]
+    if (natures && !natures.every(n => Intervention.BON_NATURES.includes(n))) {
       return res.status(400).json({ message: "Nature d'intervention inconnue." })
     }
 
     if (!intervention.bon) intervention.bon = {}
     if (reference !== undefined) intervention.bon.reference = String(reference).trim()
-    if (nature !== undefined) intervention.bon.nature = nature
+    if (bonCommande !== undefined) intervention.bon.bonCommande = String(bonCommande).trim()
+    if (natures) intervention.bon.nature = natures
     if (signataire !== undefined) {
       intervention.bon.signataire = signataire
       // La signature vaut à la date où elle est recueillie, pas à l'impression.

@@ -12,6 +12,15 @@ export const updateContract     = (id, data) => put(`/contracts/${id}`, data)
 export const archiveContract    = (id)       => del(`/contracts/${id}`)
 export const restoreContract    = (id)       => put(`/contracts/${id}/restore`)
 export const destroyContract    = (id)       => del(`/contracts/${id}/permanent`)
+// Contrôles annuels à deux mois ou moins : contrats à relever de 5 %.
+export const getAnnualIncreases  = ()        => get('/contracts/annual-increases')
+export const applyAnnualIncrease = (id, control) => post(`/contracts/${id}/increase`, { control })
+
+/** Montant en dinars, millimes compris quand il y en a. */
+export function formatPrice(n) {
+  if (n == null || n === '') return '—'
+  return `${Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} DT`
+}
 
 export const CONTRACT_TYPES = [
   { value: 'maintenance', label: 'Maintenance' },

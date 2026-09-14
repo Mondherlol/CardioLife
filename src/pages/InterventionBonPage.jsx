@@ -33,6 +33,8 @@ const NATURES = [
     designation: 'Remplacement des consommables du défibrillateur cardiaque' },
   { id: 'installation',              label: 'Installation',
     designation: 'Installation du défibrillateur cardiaque' },
+  { id: 'formation',                 label: 'Formation',
+    designation: "Formation à l'utilisation du défibrillateur cardiaque" },
   { id: 'hors_delai',                label: 'Intervention hors délai du contrôle technique',
     designation: 'Intervention hors délai du contrôle technique sur le défibrillateur cardiaque' },
 ]
@@ -40,9 +42,15 @@ const NATURES = [
 /* Nature proposée d'après ce que la visite dit d'elle-même : un contrôle
    semestriel du contrat n'a pas à être requalifié à la main. */
 function suggestNature(iv) {
-  if (iv?.controlType === 'semestriel') return 'controle_semestriel'
-  if (iv?.controlType === 'annuel')     return 'controle_annuel'
-  return ''
+  if (iv?.controlType === 'semestriel') return ['controle_semestriel']
+  if (iv?.controlType === 'annuel')     return ['controle_annuel']
+  return []
+}
+
+/* Les anciens bons stockaient une seule nature en texte. */
+function savedNatures(bon) {
+  const n = bon?.nature
+  return (Array.isArray(n) ? n : [n]).filter(Boolean)
 }
 
 function fmt(d) {
@@ -75,7 +83,8 @@ export default function InterventionBonPage() {
   const [company, setCompany] = useState(FALLBACK_COMPANY)
   const [error,   setError]   = useState(false)
   const [ref,     setRef]     = useState('')
-  const [nature,  setNature]  = useState('')
+  const [bc,      setBc]      = useState('')
+  const [natures, setNatures] = useState([])
   const [signer,  setSigner]  = useState('')
   const [saving,  setSaving]  = useState(false)
   const [dl,      setDl]      = useState(false)
@@ -85,7 +94,9 @@ export default function InterventionBonPage() {
       .then(data => {
         setIv(data)
         setRef(data.bon?.reference || '')
-        setNature(data.bon?.nature || suggestNature(data))
+        setBc(data.bon?.bonCommande || '')
+        const saved = savedNatures(data.bon)
+        setNatures(saved.length ? saved : suggestNature(data))
         setSigner(data.bon?.signataire || data.visite?.visa || '')
       })
       .catch(() => setError(true))
@@ -104,7 +115,7 @@ export default function InterventionBonPage() {
   async function save() {
     setSaving(true)
     try {
-      await saveBon(id, { reference: ref, nature, signataire: signer })
+      await saveBon(id, { reference: ref, bonCommande: bc, nature: natures, signataire: signer })
       toast.success('Bon enregistré.')
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
@@ -140,6 +151,10 @@ export default function InterventionBonPage() {
     }
   }
 
+  function toggleNature(nid) {
+    setNatures(cur => cur.includes(nid) ? cur.filter(n => n !== nid) : [...cur, nid])
+  }
+
   if (error) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Intervention introuvable.</div>
   if (!iv)   return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Chargement…</div>
 
@@ -159,9 +174,12 @@ export default function InterventionBonPage() {
   })
 
   const dateVisite  = iv.completedDate || iv.scheduledDate
-  const natureObj   = NATURES.find(n => n.id === nature)
-  const designation = natureObj?.designation || 'Intervention sur le défibrillateur cardiaque'
-  const site        = iv.siteName || iv.site?.name
+  /* Ordre du bon papier, quel que soit l'ordre des coches. */
+  const chosen       = NATURES.filter(n => natures.includes(n.id))
+  const designations = chosen.length
+    ? chosen.map(n => n.designation)
+    : ['Intervention sur le défibrillateur cardiaque']
+  const site       = iv.siteName || iv.site?.name
   const website     = String(company.website || '').replace(/^https?:\/\//, '')
 
   return (
@@ -174,13 +192,10 @@ export default function InterventionBonPage() {
             onChange={e => setRef(e.target.value)} placeholder="352/2025" />
         </div>
 
-        <div className="bi-bar-group">
-          <label className="bi-bar-label">Nature de l'intervention</label>
-          <select className="form-input form-input--plain" value={nature}
-            onChange={e => setNature(e.target.value)}>
-            <option value="">— À préciser —</option>
-            {NATURES.map(n => <option key={n.id} value={n.id}>{n.label}</option>)}
-          </select>
+        <div className="bi-bar-group bi-bar-group--sm">
+          <label className="bi-bar-label">BC</label>
+          <input className="form-input form-input--plain" value={bc}
+            onChange={e => setBc(e.target.value)} placeholder="N° bon de commande" />
         </div>
 
         <div className="bi-bar-group">
@@ -188,6 +203,21 @@ export default function InterventionBonPage() {
           <input className="form-input form-input--plain" value={signer}
             onChange={e => setSigner(e.target.value)}
             placeholder="Responsable du site" />
+        </div>
+
+        <div className="bi-bar-group bi-bar-group--full">
+          <span className="bi-bar-label">Nature de l'intervention</span>
+          <div className="bi-natures">
+            {NATURES.map(n => {
+              const on = natures.includes(n.id)
+              return (
+                <label key={n.id} className={`bi-nature${on ? ' bi-nature--on' : ''}`}>
+                  <input type="checkbox" checked={on} onChange={() => toggleNature(n.id)} />
+                  {n.label}
+                </label>
+              )
+            })}
+          </div>
         </div>
 
         <div className="bi-bar-actions">
@@ -236,6 +266,12 @@ export default function InterventionBonPage() {
             <span className="bi-meta-label">Référence</span>
             <span className="bi-meta-value">{ref || `#${id.slice(-8).toUpperCase()}`}</span>
           </div>
+          {bc && (
+            <div className="bi-meta-line">
+              <span className="bi-meta-label">BC</span>
+              <span className="bi-meta-value">{bc}</span>
+            </div>
+          )}
           <div className="bi-meta-line">
             <span className="bi-meta-label">Date</span>
             <span className="bi-meta-value">{fmt(dateVisite)}</span>
@@ -264,8 +300,8 @@ export default function InterventionBonPage() {
             </tr>
           </thead>
           <tbody>
-            {devices.map(d => (
-              <tr key={d.key}>
+            {designations.flatMap(designation => devices.map(d => (
+              <tr key={`${designation}-${d.key}`}>
                 <td className="bi-col-ref">DAE</td>
                 <td>
                   <div className="bi-desi">{designation} {d.model}</div>
@@ -273,16 +309,9 @@ export default function InterventionBonPage() {
                 </td>
                 <td className="bi-col-qty">1</td>
               </tr>
-            ))}
+            )))}
           </tbody>
         </table>
-
-        {iv.visite?.observationGenerale && (
-          <section className="bi-section">
-            <h2 className="bi-section-title">Observations du technicien</h2>
-            <p className="bi-note">{iv.visite.observationGenerale}</p>
-          </section>
-        )}
 
         {/* Le cartouche que le client remplit : c'est lui qui donne sa valeur au
             bon — sans ce visa, rien n'atteste du passage. */}
