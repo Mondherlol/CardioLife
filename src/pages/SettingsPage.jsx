@@ -4,18 +4,20 @@ import {
   KeyRound, Power, X, Eye, EyeOff, ShieldOff,
   CheckCircle2, AlertTriangle, HardDrive, Save, Boxes,
   ChevronUp, ChevronDown, Wrench, Building2, Upload, RotateCcw,
+  Download, DatabaseBackup,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
 import {
   isAdmin, defaultPermissionsForRole, ROLE_PERMISSION_PRESETS, PERMISSION_KEYS,
+  resolvePermissions,
 } from '../lib/access'
 import { PASSWORD_MIN_LENGTH } from '../constants/auth'
 import {
   getUsers, createUser, updateUser, resetUserPassword, deleteUser,
 } from '../api/users'
 import {
-  getAppSettings, updateAppSettings, resetDatabase,
+  getAppSettings, updateAppSettings, resetDatabase, downloadBackup, restoreBackup,
   uploadCompanyLogo, deleteCompanyLogo, companyLogoUrl,
 } from '../api/appSettings'
 import { getFolderTree } from '../api/documents'
@@ -51,35 +53,23 @@ const ROLE_LABELS = {
   readonly:   'Lecture seule',
 }
 
-/* Liste tenue dans `src/lib/access.js` : une case déclarée ici mais absente
-   là-bas serait un droit sans effet — c'est ce qui est arrivé à
-   `canManageUsers` et `canViewReports`. */
 const PERM_KEYS = PERMISSION_KEYS
 
-const PERM_LABELS = {
-  canManageClients:       'Gérer les clients',
-  canManageDevices:       'Gérer les appareils',
-  canManageContracts:     'Gérer les contrats',
-  canViewStock:           'Consulter le stock',
-  canManageStock:         'Gérer le stock',
-  canManageInterventions: 'Gérer les interventions',
-  canManageUsers:         'Gérer les utilisateurs',
-  canViewReports:         'Voir les rapports',
-  canManageFormations:    'Gérer les formations',
-}
+/* Une case par onglet de la sidebar, avec exactement le même nom. Chaque case
+   pilote les droits de `src/lib/access.js` qui ouvrent cet onglet. */
+const ACCESS_TOGGLES = [
+  { label: 'Tableau de bord',  keys: ['canAccessDashboard'] },
+  { label: 'Clients',          keys: ['canManageClients'] },
+  { label: 'Stock & Produits', keys: ['canViewStock'], editKey: 'canManageStock' },
+  { label: 'Contrats',         keys: ['canManageContracts'] },
+  { label: 'Maintenance',      keys: ['canManageInterventions', 'canManageDevices', 'canManageFormations'] },
+  { label: 'Planning',         keys: ['canAccessPlanning'] },
+  { label: 'Documents',        keys: ['canAccessDocuments'] },
+  { label: 'Paramètres',       keys: ['canManageUsers'] },
+]
 
-/* Ce que chaque case ouvre réellement — l'énoncé doit correspondre aux tableaux
-   de `src/lib/access.js` et `backend/middleware/access.js`. */
-const PERM_HINTS = {
-  canManageClients:       'Menu Clients, sites et DEA, onglet Formations, Documents',
-  canManageDevices:       'Onglets Installations et Remplacements de la Maintenance',
-  canManageContracts:     'Menu Contrats',
-  canViewStock:           'Voir le catalogue et les articles, sans rien modifier',
-  canManageStock:         'Modifier le stock, les packs et les mouvements',
-  canManageInterventions: 'Onglets Contrôles et Remplacements de la Maintenance',
-  canManageUsers:         'Menu Paramètres et gestion des utilisateurs',
-  canViewReports:         'Tableau de bord et Documents',
-  canManageFormations:    'Onglet Formations de la Maintenance',
+function toggleIsOn(t, perms) {
+  return t.keys.some(k => perms[k]) || (!!t.editKey && !!perms[t.editKey])
 }
 
 const EMPTY_PERMS = Object.fromEntries(PERM_KEYS.map(k => [k, false]))
@@ -130,6 +120,16 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
 
   function setPerm(key, val) {
     setForm(f => ({ ...f, permissions: { ...f.permissions, [key]: val } }))
+    setPresetApplied(false)
+  }
+
+  function setAccess(toggle, on) {
+    setForm(f => {
+      const next = { ...f.permissions }
+      toggle.keys.forEach(k => { next[k] = on })
+      if (toggle.editKey && !on) next[toggle.editKey] = false
+      return { ...f, permissions: next }
+    })
     setPresetApplied(false)
   }
 
@@ -281,7 +281,7 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
 
             {showPerms && (
               <div className="form-group">
-                <label className="form-label">Permissions</label>
+                <label className="form-label">Accès aux onglets</label>
                 {fullAccessRole ? (
                   <p className="form-hint">
                     Le rôle Administrateur donne accès à tous les modules ; ces cases
@@ -294,23 +294,36 @@ function UserModal({ mode, initial, currentUser, onClose, onSave }) {
                   </p>
                 )}
                 <div className="perm-grid">
-                  {PERM_KEYS.map(key => (
-                    <label key={key} className="perm-item">
-                      <span>
-                        {PERM_LABELS[key]}
-                        <small className="perm-hint">{PERM_HINTS[key]}</small>
-                      </span>
-                      <span className="perm-toggle">
-                        <input
-                          type="checkbox"
-                          checked={fullAccessRole ? true : !!form.permissions[key]}
-                          disabled={permDisabled}
-                          onChange={e => setPerm(key, e.target.checked)}
-                        />
-                        <span className="perm-toggle-track" />
-                      </span>
-                    </label>
-                  ))}
+                  {ACCESS_TOGGLES.map(t => {
+                    const on = fullAccessRole || toggleIsOn(t, form.permissions)
+                    return (
+                      <div key={t.label}>
+                        <label className="perm-item">
+                          <span>{t.label}</span>
+                          <span className="perm-toggle">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              disabled={permDisabled}
+                              onChange={e => setAccess(t, e.target.checked)}
+                            />
+                            <span className="perm-toggle-track" />
+                          </span>
+                        </label>
+                        {t.editKey && on && (
+                          <label className="perm-hint" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                            <input
+                              type="checkbox"
+                              checked={fullAccessRole ? true : !!form.permissions[t.editKey]}
+                              disabled={permDisabled}
+                              onChange={e => setPerm(t.editKey, e.target.checked)}
+                            />
+                            Autoriser la modification
+                          </label>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -528,7 +541,7 @@ function UtilisateursTab({ currentUser }) {
     email:       editTarget.email,
     password:    '',
     role:        editTarget.role,
-    permissions: { ...EMPTY_PERMS, ...editTarget.permissions },
+    permissions: { ...EMPTY_PERMS, ...resolvePermissions(editTarget.permissions) },
   } : null
 
   return (
@@ -1131,14 +1144,154 @@ function ResetDbModal({ onClose, onDone }) {
   )
 }
 
+/* ─── Sauvegarde / restauration ─────────────────────────────── */
+
+const RESTORE_PHRASE = 'RESTAURER'
+
+function formatSize(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} Go`
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} Mo`
+  return `${Math.max(1, Math.round(bytes / 1024))} Ko`
+}
+
+/**
+ * Remplace tout — base, comptes et fichiers — par le contenu d'une sauvegarde.
+ * Même garde-fou que la réinitialisation : phrase exacte à taper.
+ */
+function RestoreBackupModal({ onClose, onDone }) {
+  const [file,     setFile]     = useState(null)
+  const [phrase,   setPhrase]   = useState('')
+  const [progress, setProgress] = useState(null)
+  const [error,    setError]    = useState('')
+
+  const busy  = progress !== null
+  const armed = !!file && phrase.trim().toUpperCase() === RESTORE_PHRASE
+  const sent  = busy && progress >= 1
+
+  async function confirm() {
+    setError('')
+    setProgress(0)
+    try {
+      const res = await restoreBackup(file, RESTORE_PHRASE, setProgress)
+      const date = res.backupDate ? new Date(res.backupDate).toLocaleString('fr-FR') : ''
+      toast.success(`Sauvegarde${date ? ` du ${date}` : ''} restaurée.`)
+      onDone()
+    } catch (err) {
+      setError(err.message || 'La restauration a échoué.')
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => !busy && e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--sm">
+        <div className="modal-header">
+          <h2 className="modal-title"><AlertTriangle size={16} /> Charger une sauvegarde</h2>
+          {!busy && <button className="modal-close" onClick={onClose}><X size={18} /></button>}
+        </div>
+        <div className="modal-body">
+          <p className="delete-confirm-text">
+            <strong>Tout ce qui est actuellement sur le serveur sera remplacé</strong> par
+            le contenu de la sauvegarde : toutes les données, les comptes utilisateurs
+            et les fichiers. Ce qui a été saisi depuis la sauvegarde sera perdu.
+          </p>
+
+          <div className="sp-reset-keep">
+            <Download size={13} />
+            <span>Conseil : téléchargez d'abord une sauvegarde de l'état actuel.</span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Fichier de sauvegarde (.zip)</label>
+            <input type="file" accept=".zip,application/zip" disabled={busy}
+              onChange={e => setFile(e.target.files?.[0] || null)} />
+            {file && <p className="form-hint">{file.name} — {formatSize(file.size)}</p>}
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              Tapez <strong>{RESTORE_PHRASE}</strong> pour confirmer
+            </label>
+            <input className="form-input form-input--plain" value={phrase} disabled={busy}
+              onChange={e => setPhrase(e.target.value)}
+              placeholder={RESTORE_PHRASE} autoComplete="off" />
+          </div>
+
+          {busy && (
+            <p className="form-hint">
+              {sent
+                ? 'Archive envoyée — restauration en cours sur le serveur, ne fermez pas la page…'
+                : `Envoi de l'archive… ${Math.round(progress * 100)} %`}
+            </p>
+          )}
+
+          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
+
+          <div className="modal-footer">
+            <button className="btn btn--ghost" onClick={onClose} disabled={busy}>Annuler</button>
+            <button className="btn btn--danger" onClick={confirm} disabled={!armed || busy}>
+              {busy ? <span className="login-btn-spinner" /> : <><Upload size={14} /> Restaurer</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AutresTab({ currentUser }) {
   const [resetOpen, setResetOpen] = useState(false)
+  const [restoreOpen, setRestoreOpen] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const isSuper = currentUser?.role === 'superadmin'
+
+  async function handleDownload() {
+    setDownloading(true)
+    try {
+      const { size } = await downloadBackup()
+      toast.success(`Sauvegarde téléchargée (${formatSize(size)}).`)
+    } catch (err) {
+      toast.error(err.message || 'Le téléchargement a échoué.')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <>
       <h2 className="sp-section-title">Autres</h2>
       <p className="sp-section-desc">Paramètres divers.</p>
+
+      {isSuper && (
+        <div className="sp-danger sp-backup">
+          <div className="sp-danger-head">
+            <DatabaseBackup size={16} />
+            <div>
+              <h3 className="sp-danger-title">Sauvegarde</h3>
+              <p className="sp-danger-desc">
+                Une copie complète à garder chez vous, au cas où le serveur tomberait.
+              </p>
+            </div>
+          </div>
+
+          <div className="sp-danger-row">
+            <div className="sp-danger-row-text">
+              <strong>Télécharger une sauvegarde</strong>
+              <span>
+                Un fichier .zip avec toutes les données, les comptes utilisateurs et
+                tous les fichiers (photos, documents, logos). Il peut peser plusieurs
+                centaines de Mo : gardez la page ouverte pendant le téléchargement,
+                et rangez le fichier en lieu sûr — il contient les comptes.
+              </span>
+            </div>
+            <button className="btn btn--primary" onClick={handleDownload} disabled={downloading}>
+              {downloading
+                ? <><span className="spinner spinner--sm" /> Préparation…</>
+                : <><Download size={14} /> Télécharger</>}
+            </button>
+          </div>
+        </div>
+      )}
 
       {isSuper ? (
         <div className="sp-danger">
@@ -1164,12 +1317,34 @@ function AutresTab({ currentUser }) {
               <Trash2 size={14} /> Réinitialiser
             </button>
           </div>
+
+          <div className="sp-danger-row">
+            <div className="sp-danger-row-text">
+              <strong>Charger une sauvegarde</strong>
+              <span>
+                Remplace toutes les données, les comptes et les fichiers par ceux d'un
+                .zip téléchargé plus haut.
+              </span>
+            </div>
+            <button className="btn btn--danger" onClick={() => setRestoreOpen(true)}>
+              <Upload size={14} /> Charger
+            </button>
+          </div>
         </div>
       ) : (
         <div className="sp-placeholder">
           <MoreHorizontal size={40} strokeWidth={1.2} />
           <p style={{ marginTop: 12 }}>Aucun paramètre disponible pour l'instant.</p>
         </div>
+      )}
+
+      {restoreOpen && (
+        <RestoreBackupModal
+          onClose={() => setRestoreOpen(false)}
+          // Base et comptes viennent d'être remplacés : la session elle-même
+          // peut ne plus exister. On repart de zéro.
+          onDone={() => { setRestoreOpen(false); window.location.assign('/') }}
+        />
       )}
 
       {resetOpen && (

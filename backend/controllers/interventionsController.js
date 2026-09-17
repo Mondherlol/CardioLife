@@ -115,7 +115,7 @@ async function startIntervention(req, res) {
 
 /* La réponse porte le parc : l'écran se met à jour sans rechargement. */
 async function withParc(intervention) {
-  const json = intervention.toObject()
+  const json = intervention.toObject({ flattenMaps: true })
   const { deviceProduct, siteDeas } = await parcOf(intervention)
   json.deviceProduct = deviceProduct
   json.siteDeas      = siteDeas
@@ -422,7 +422,7 @@ async function getOne(req, res) {
     // Le parc du site vit deux niveaux plus loin (site → DEA → produit) : on le
     // joint ici plutôt que de le figer dans le snapshot, qui deviendrait faux au
     // moindre changement de photo ou de parc.
-    const json = intervention.toObject()
+    const json = intervention.toObject({ flattenMaps: true })
     const { deviceProduct, siteDeas } = await parcOf(intervention)
     json.deviceProduct = deviceProduct
     json.siteDeas      = siteDeas
@@ -746,7 +746,7 @@ async function saveFiche(req, res) {
 
     /* La réponse porte le parc rafraîchi : l'écran affiche la pièce telle
        qu'elle vient d'être mise à jour, sans attendre un rechargement. */
-    const json = intervention.toObject()
+    const json = intervention.toObject({ flattenMaps: true })
     const { deviceProduct, siteDeas } = await parcOf(intervention)
     json.deviceProduct = deviceProduct
     json.siteDeas      = siteDeas
@@ -1005,7 +1005,7 @@ async function saveDeaItems(req, res) {
     })
     await intervention.save()
 
-    const json = intervention.toObject()
+    const json = intervention.toObject({ flattenMaps: true })
     const { deviceProduct, siteDeas } = await parcOf(intervention)
     json.deviceProduct = deviceProduct
     json.siteDeas      = siteDeas
@@ -1134,7 +1134,7 @@ async function saveFormation(req, res) {
 
     await intervention.save()
 
-    const json = intervention.toObject()
+    const json = intervention.toObject({ flattenMaps: true })
     json.formations = await formationsOf(intervention)
     res.json(json)
   } catch (err) {
@@ -1160,7 +1160,7 @@ async function saveBon(req, res) {
     }
     if (!ensureStarted(intervention, res)) return
 
-    const { nature, signataire, reference, bonCommande } = req.body
+    const { nature, signataire, reference, bonCommande, designations } = req.body
     // Une nature seule (ancien client) vaut une liste d'un élément.
     const natures = nature === undefined ? undefined
       : [...new Set((Array.isArray(nature) ? nature : [nature]).filter(Boolean))]
@@ -1172,6 +1172,13 @@ async function saveBon(req, res) {
     if (reference !== undefined) intervention.bon.reference = String(reference).trim()
     if (bonCommande !== undefined) intervention.bon.bonCommande = String(bonCommande).trim()
     if (natures) intervention.bon.nature = natures
+    if (designations !== undefined) {
+      // Texte vide = retour au libellé par défaut : on n'en garde pas la trace.
+      const clean = Object.entries(designations && typeof designations === 'object' ? designations : {})
+        .filter(([k, v]) => /^[\w-]+\|[\w-]+$/.test(k) && typeof v === 'string' && v.trim())
+        .map(([k, v]) => [k, v.trim().slice(0, 1000)])
+      intervention.bon.designations = clean.length ? new Map(clean) : undefined
+    }
     if (signataire !== undefined) {
       intervention.bon.signataire = signataire
       // La signature vaut à la date où elle est recueillie, pas à l'impression.

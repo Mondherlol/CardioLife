@@ -188,6 +188,9 @@ const interventionSchema = new Schema({
     nature:     { type: [{ type: String, enum: BON_NATURES }], default: [] },
     signataire: { type: String, trim: true },
     signedAt:   Date,
+    // Désignations retouchées à la main, par ligne du tableau
+    // (« <nature>|<appareil> »). Une ligne absente garde le texte par défaut.
+    designations: { type: Map, of: String, default: undefined },
   },
 
   history:  { type: [historySchema], default: [] },

@@ -21,9 +21,7 @@
 export const MODULES = {
   dashboard: {
     label: 'Tableau de bord',
-    // Le tableau de bord agrège clients, stock et contrats : le voir suppose
-    // d'avoir le droit d'en voir au moins une part.
-    permissions: ['canViewReports', 'canManageClients', 'canManageStock', 'canManageContracts'],
+    permissions: ['canAccessDashboard'],
   },
   clients: {
     label: 'Clients',
@@ -49,13 +47,13 @@ export const MODULES = {
   },
   planning: {
     label: 'Planning',
-    // Chacun consulte son propre agenda : le filtrage se fait sur les données,
-    // pas sur l'accès à la page.
-    public: true,
+    // Chacun consulte son propre agenda : le filtrage se fait sur les données.
+    // La case permet seulement de masquer l'onglet.
+    permissions: ['canAccessPlanning'],
   },
   documents: {
     label: 'Documents',
-    permissions: ['canViewReports', 'canManageClients'],
+    permissions: ['canAccessDocuments'],
   },
   dev: {
     label: 'Suivi & To-do',
@@ -91,17 +89,38 @@ export const MODULE_FALLBACK_ORDER = [
 export const ROLE_PERMISSION_PRESETS = {
   admin:      'all',
   superadmin: 'all',
-  technicien: ['canManageInterventions', 'canManageDevices', 'canViewStock'],
-  commercial: ['canManageClients', 'canManageContracts', 'canViewReports', 'canViewStock'],
-  assistante: ['canManageClients', 'canManageFormations', 'canViewReports', 'canViewStock'],
-  readonly:   ['canViewReports'],
+  technicien: ['canManageInterventions', 'canManageDevices', 'canViewStock', 'canAccessPlanning'],
+  commercial: ['canAccessDashboard', 'canManageClients', 'canManageContracts', 'canViewStock',
+               'canAccessPlanning', 'canAccessDocuments'],
+  assistante: ['canAccessDashboard', 'canManageClients', 'canManageFormations', 'canViewStock',
+               'canAccessPlanning', 'canAccessDocuments'],
+  readonly:   ['canAccessDashboard', 'canAccessPlanning', 'canAccessDocuments'],
 }
 
 export const PERMISSION_KEYS = [
   'canManageClients', 'canManageDevices', 'canManageContracts',
   'canViewStock', 'canManageStock',
   'canManageInterventions', 'canManageUsers', 'canViewReports', 'canManageFormations',
+  'canAccessDashboard', 'canAccessPlanning', 'canAccessDocuments',
 ]
+
+/**
+ * `canAccessDashboard`, `canAccessPlanning` et `canAccessDocuments` sont venus
+ * après coup, pour qu'un onglet du menu = une case. Les comptes enregistrés
+ * avant n'ont pas la clé : on reprend alors l'ancienne règle, pour que rien ne
+ * change tant qu'un admin n'a pas réenregistré le compte.
+ */
+export function resolvePermissions(perms = {}) {
+  const p = { ...(perms?.toObject ? perms.toObject() : perms) }
+  if (p.canAccessDashboard === undefined) {
+    p.canAccessDashboard = !!(p.canViewReports || p.canManageClients || p.canManageStock || p.canManageContracts)
+  }
+  if (p.canAccessPlanning === undefined) p.canAccessPlanning = true
+  if (p.canAccessDocuments === undefined) {
+    p.canAccessDocuments = !!(p.canViewReports || p.canManageClients)
+  }
+  return p
+}
 
 /** Objet complet (toutes les clés présentes) des droits par défaut d'un rôle. */
 export function defaultPermissionsForRole(role) {
@@ -124,7 +143,8 @@ export function canAccess(user, moduleId) {
 
   if (mod.roles?.includes(user.role)) return true
 
-  return !!mod.permissions?.some(p => user.permissions?.[p])
+  const perms = resolvePermissions(user.permissions)
+  return !!mod.permissions?.some(p => perms[p])
 }
 
 /** Premier module accessible — cible de redirection après connexion. */

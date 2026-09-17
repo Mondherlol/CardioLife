@@ -18,6 +18,12 @@ const permissionsSchema = new mongoose.Schema({
   canManageUsers:        { type: Boolean, default: false },
   canViewReports:        { type: Boolean, default: false },
   canManageFormations:   { type: Boolean, default: false },
+  /* Une case par onglet du menu. Pas de `default` : un compte ancien sans la
+     clé suit l'ancienne règle (voir `resolvePermissions` dans
+     `middleware/access.js`). */
+  canAccessDashboard:    { type: Boolean },
+  canAccessPlanning:     { type: Boolean },
+  canAccessDocuments:    { type: Boolean },
 }, { _id: false })
 
 const userSchema = new mongoose.Schema({

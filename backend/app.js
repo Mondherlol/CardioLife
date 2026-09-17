@@ -78,4 +78,7 @@ app.use((err, req, res, next) => {
 })
 
 const PORT = process.env.PORT || 5000
-app.listen(PORT, () => console.log(`API CardioTrack démarrée sur le port ${PORT}`))
+const server = app.listen(PORT, () => console.log(`API CardioTrack démarrée sur le port ${PORT}`))
+// Node coupe une requête au bout de 5 min. Envoyer une sauvegarde de plusieurs
+// centaines de Mo pour la restaurer peut prendre plus longtemps.
+server.requestTimeout = 60 * 60 * 1000

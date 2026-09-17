@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { Download, Printer } from 'lucide-react'
+import { Download, Printer, RotateCcw } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getIntervention, saveBon } from '../api/interventions'
 import { getAppSettings, companyLogoUrl } from '../api/appSettings'
@@ -86,6 +86,8 @@ export default function InterventionBonPage() {
   const [bc,      setBc]      = useState('')
   const [natures, setNatures] = useState([])
   const [signer,  setSigner]  = useState('')
+  // Désignations retouchées, par ligne (« <nature>|<appareil> »).
+  const [custom,  setCustom]  = useState({})
   const [saving,  setSaving]  = useState(false)
   const [dl,      setDl]      = useState(false)
 
@@ -98,6 +100,7 @@ export default function InterventionBonPage() {
         const saved = savedNatures(data.bon)
         setNatures(saved.length ? saved : suggestNature(data))
         setSigner(data.bon?.signataire || data.visite?.visa || '')
+        setCustom(data.bon?.designations || {})
       })
       .catch(() => setError(true))
   }, [id])
@@ -115,7 +118,14 @@ export default function InterventionBonPage() {
   async function save() {
     setSaving(true)
     try {
-      await saveBon(id, { reference: ref, bonCommande: bc, nature: natures, signataire: signer })
+      // Seules les lignes réellement modifiées sont gardées : un texte identique
+      // au libellé par défaut suivra les évolutions de ce dernier.
+      const autoOf = Object.fromEntries(lines.map(l => [l.key, l.auto]))
+      const designations = Object.fromEntries(Object.entries(custom)
+        .filter(([k, v]) => autoOf[k] !== undefined && v.trim() && v.trim() !== autoOf[k]))
+      await saveBon(id, {
+        reference: ref, bonCommande: bc, nature: natures, signataire: signer, designations,
+      })
       toast.success('Bon enregistré.')
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
@@ -177,8 +187,15 @@ export default function InterventionBonPage() {
   /* Ordre du bon papier, quel que soit l'ordre des coches. */
   const chosen       = NATURES.filter(n => natures.includes(n.id))
   const designations = chosen.length
-    ? chosen.map(n => n.designation)
-    : ['Intervention sur le défibrillateur cardiaque']
+    ? chosen.map(n => ({ id: n.id, text: n.designation }))
+    : [{ id: 'defaut', text: 'Intervention sur le défibrillateur cardiaque' }]
+  /* Une ligne par nature et par appareil. Le texte proposé se remplace à la
+     main quand le libellé type ne colle pas à ce qui a été fait. */
+  const lines = designations.flatMap(n => devices.map(d => {
+    const key  = `${n.id}|${d.key}`
+    const auto = `${n.text} ${d.model}`
+    return { key, auto, text: custom[key]?.trim() ? custom[key] : auto, serial: d.serial }
+  }))
   const site       = iv.siteName || iv.site?.name
   const website     = String(company.website || '').replace(/^https?:\/\//, '')
 
@@ -215,6 +232,29 @@ export default function InterventionBonPage() {
                   <input type="checkbox" checked={on} onChange={() => toggleNature(n.id)} />
                   {n.label}
                 </label>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="bi-bar-group bi-bar-group--full">
+          <span className="bi-bar-label">Désignation</span>
+          <div className="bi-desi-edit">
+            {lines.map(l => {
+              const edited = l.text !== l.auto
+              return (
+                <div key={l.key} className="bi-desi-edit-row">
+                  <textarea className="form-input form-input--plain" rows={2}
+                    value={l.text}
+                    onChange={e => setCustom(c => ({ ...c, [l.key]: e.target.value }))} />
+                  {edited && (
+                    <button type="button" className="btn btn--ghost btn--sm"
+                      title="Revenir au texte par défaut"
+                      onClick={() => setCustom(c => { const n = { ...c }; delete n[l.key]; return n })}>
+                      <RotateCcw size={13} />
+                    </button>
+                  )}
+                </div>
               )
             })}
           </div>
@@ -294,22 +334,20 @@ export default function InterventionBonPage() {
         <table className="bi-table">
           <thead>
             <tr>
-              <th className="bi-col-ref">Réf</th>
+              <th className="bi-col-qty">Qté</th>
               <th>Désignation</th>
-              <th className="bi-col-qty">Quantité</th>
             </tr>
           </thead>
           <tbody>
-            {designations.flatMap(designation => devices.map(d => (
-              <tr key={`${designation}-${d.key}`}>
-                <td className="bi-col-ref">DAE</td>
-                <td>
-                  <div className="bi-desi">{designation} {d.model}</div>
-                  {d.serial && <div className="bi-desi-sn">DEA S/N {d.serial}</div>}
-                </td>
+            {lines.map(l => (
+              <tr key={l.key}>
                 <td className="bi-col-qty">1</td>
+                <td>
+                  <div className="bi-desi">{l.text}</div>
+                  {l.serial && <div className="bi-desi-sn">DEA S/N {l.serial}</div>}
+                </td>
               </tr>
-            )))}
+            ))}
           </tbody>
         </table>
 

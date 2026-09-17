@@ -20716,10 +20716,14 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
   font-size: 12px;
   vertical-align: top;
 }
-.bi-col-ref { width: 90px; text-align: center; font-weight: 700; vertical-align: middle; }
-.bi-col-qty { width: 84px; text-align: center; vertical-align: middle; }
+.bi-col-qty { width: 70px; text-align: center; font-weight: 700; vertical-align: middle; }
 
-.bi-desi { line-height: 1.55; }
+/* Retours à la ligne saisis dans la désignation : conservés tels quels. */
+.bi-desi { line-height: 1.55; white-space: pre-line; }
+
+.bi-desi-edit { display: flex; flex-direction: column; gap: 6px; }
+.bi-desi-edit-row { display: flex; gap: 6px; align-items: flex-start; }
+.bi-desi-edit-row textarea { flex: 1; resize: vertical; min-height: 38px; }
 .bi-desi::before { content: '– '; }
 .bi-desi-sn {
   margin-top: 8px;
@@ -21102,3 +21106,13 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
   padding: 1px 5px;
   border-radius: 4px;
 }
+
+/* Sauvegarde : même carte que la zone dangereuse, sans le rouge — télécharger
+   ne détruit rien. */
+.sp-backup {
+  border-color: var(--border);
+  background: var(--gray-50);
+  margin-bottom: 16px;
+}
+.sp-backup .sp-danger-head,
+.sp-backup .sp-danger-title { color: var(--text-primary); }

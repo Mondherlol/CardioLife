@@ -3,6 +3,7 @@ const DEFAULT_BASE = import.meta.env.DEV
   : `${window.location.origin}/api`
 
 const BASE = import.meta.env.VITE_API_URL || DEFAULT_BASE
+export const API_BASE = BASE
 
 // Base URL for static files (strip /api suffix)
 export const STATIC_BASE = BASE.replace(/\/api\/?$/, '')
