@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'react-toastify'
 import {
   Search, X, Plus, AlertTriangle, Boxes, PackageOpen, Clock,
-  Wrench, CalendarClock, Package,
+  Wrench, CalendarClock, Package, Building2,
 } from 'lucide-react'
 import {
   getProductItems, createProductItems, ITEM_STATUSES,
@@ -306,6 +306,8 @@ export default function ProductItemsTab({ product, category, onStockChanged }) {
     { key: 'dispo',  tone: 'mint',  icon: PackageOpen,   label: 'Disponible',      value: summary.disponible  ?? 0 },
     { key: 'resa',   tone: 'sky',   icon: Clock,         label: 'Réservé',         value: summary.reserve     ?? 0 },
     { key: 'maint',  tone: 'sun',   icon: Wrench,        label: 'En maintenance',  value: summary.maintenance ?? 0, alert: true },
+    // Hors du stock mais bien à nous de suivre : les unités posées chez les clients.
+    { key: 'inst',   tone: 'mint',  icon: Building2,     label: 'Chez les clients', value: summary.installe   ?? 0 },
     ...(tracksLot ? [{
       key: 'dlc', tone: 'ember', icon: CalendarClock, alert: true,
       label: summary.expired > 0 ? 'DLC dépassée' : 'DLC sous 90 j',

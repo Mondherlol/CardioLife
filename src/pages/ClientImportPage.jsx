@@ -1018,8 +1018,8 @@ export default function ClientImportPage() {
                   <p className="ci-format-intro">
                     Chaque pièce citée dans le fichier est rattachée à son DAE, et son modèle entre
                     au catalogue s'il n'y est pas — les électrodes par modèle d'appareil, car elles
-                    ne vont pas d'un DAE à l'autre. Sans n° de lot dans le fichier, aucun article de
-                    stock n'est créé : la fiche du produit liste les DAE où il est posé.
+                    ne vont pas d'un DAE à l'autre. Chaque pièce posée devient un article « installé »
+                    chez le client : sa fiche produit la compte et la liste avec son DAE.
                   </p>
                   <div className="ci-parts">
                     {[['batteries', 'Batteries'], ['electrodes', 'Électrodes'], ['armoires', 'Armoires']].map(([cat, label]) => {
@@ -1127,8 +1127,8 @@ export default function ClientImportPage() {
                     <strong>Créer les exemplaires manquants dans le stock</strong>
                     <em>
                       Chaque DAE avec un n° de série et un modèle rattaché devient un exemplaire
-                      marqué « installé » chez le client. Sans cela, l'appareil vit dans le parc mais
-                      reste absent de l'inventaire.
+                      marqué « installé » chez le client, ainsi que ses batteries, électrodes et son
+                      armoire. Sans cela, le matériel vit dans le parc mais reste absent de l'inventaire.
                     </em>
                   </span>
                 </label>
@@ -1249,6 +1249,11 @@ export default function ClientImportPage() {
               {importRes.summary.partsCreated > 0 && (
                 <div className="ci-summary-chip ci-summary-chip--total">
                   <BatteryMedium size={14} /><strong>{importRes.summary.partsCreated}</strong> batterie(s), électrode(s) ou armoire(s) au catalogue
+                </div>
+              )}
+              {importRes.summary.partItemsCreated > 0 && (
+                <div className="ci-summary-chip ci-summary-chip--total">
+                  <Package size={14} /><strong>{importRes.summary.partItemsCreated}</strong> pièce(s) posée(s) enregistrée(s) au stock
                 </div>
               )}
             </div>

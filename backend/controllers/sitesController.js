@@ -10,7 +10,9 @@ const Control      = require('../models/Control')
 const Appointment  = require('../models/Appointment')
 const Contract     = require('../models/Contract')
 const Replacement  = require('../models/Replacement')
-const { syncDeaWithItem, syncDeaConsumables, syncProductStock, logHistory } = require('../utils/productItems')
+const {
+  syncDeaWithItem, syncDeaConsumables, syncDeaArmoire, alignArmoireProduct, unmountItem,
+} = require('../utils/productItems')
 const { getOrCreateSiteFolder } = require('../utils/siteDocsFolder')
 const { trainingQuota } = require('../utils/training')
 const { syncSiteControls } = require('../utils/controls')
@@ -24,13 +26,10 @@ const { syncSiteControls } = require('../utils/controls')
  */
 async function releaseItemForDea(deaId) {
   const items = await ProductItem.find({ dea: deaId })
+  // L'appareil et ses pièces numérotées rentrent au stock ; une pièce sans
+  // numéro (reprise d'un fichier) passe hors service — voir `unmountItem`.
   for (const item of items) {
-    const from = item.status
-    item.dea = undefined; item.site = undefined; item.client = undefined
-    item.reservedFor = undefined
-    item.status = 'disponible'
-    await logHistory(item, { action: 'Retour en stock (DEA retiré du parc)', from, to: 'disponible' })
-    await syncProductStock(item.product)
+    await unmountItem(item, { action: 'Retour en stock (DEA retiré du parc)', hsAction: 'DEA retiré du parc' })
   }
 }
 
@@ -348,7 +347,10 @@ async function updateDea(req, res) {
   if (!site) return
   const dea = site.deas.id(req.params.deaId)
   if (!dea) return res.status(404).json({ message: 'DEA introuvable.' })
+  const armoireBefore = dea.armoire?.product || null
   dea.set(req.body)
+  // L'armoire décrite par son modèle retrouve son produit du catalogue.
+  if (req.body.armoire !== undefined) await alignArmoireProduct(dea, armoireBefore)
   await site.save()
   await syncDeaWithItem(site, dea)
   // Batterie ou électrodes déclarées depuis la fiche client : même pont vers le
@@ -356,6 +358,7 @@ async function updateDea(req, res) {
   for (const kind of ['batteries', 'electrodes']) {
     if (req.body[kind] !== undefined) await syncDeaConsumables(site, dea, kind)
   }
+  if (req.body.armoire !== undefined) await syncDeaArmoire(site, dea, { userId: req.user._id })
   res.json(await refreshSchedule(site, req.user._id))
 }
 

@@ -137,12 +137,55 @@ async function syncDeaWithItem(site, dea) {
   if (wasInStock && !IN_STOCK_STATUSES.includes(item.status)) await syncProductStock(item.product)
 }
 
-/** Une ligne du parc et un article de stock désignent-ils la même pièce ? */
+const numbered = x => !!(x?.serialNumber || x?.lotNumber)
+
+/**
+ * Une ligne du parc et un article de stock désignent-ils la même pièce ?
+ *
+ * Par son numéro quand il y en a un. Une pièce reprise d'un fichier n'en a
+ * pas : sur un même DAE, c'est alors le modèle qui l'identifie.
+ */
 function samePiece(line, item) {
   if (String(line.product || '') !== String(item.product || '')) return false
   if (line.serialNumber && item.serialNumber) return line.serialNumber === item.serialNumber
   if (line.lotNumber && item.lotNumber)       return line.lotNumber === item.lotNumber
-  return false
+  return !numbered(line) && !numbered(item)
+}
+
+/**
+ * Apparie les lignes d'un DAE aux articles qui y sont rattachés, une pièce par
+ * ligne. Rend les paires et les articles restés sans ligne.
+ */
+function pairPieces(lines, items) {
+  const free  = [...items]
+  const pairs = []
+  for (const line of lines) {
+    const idx = free.findIndex(item => samePiece(line, item))
+    if (idx >= 0) pairs.push({ line, item: free.splice(idx, 1)[0] })
+  }
+  return { pairs, free }
+}
+
+/**
+ * Sort du parc un article qui n'est plus monté.
+ *
+ * Une pièce numérotée retourne au stock, d'où on peut la remonter ailleurs.
+ * Une pièce sans numéro — reprise d'un fichier — ne se distingue pas d'une
+ * neuve : la remettre « disponible » ferait compter une batterie usée ou
+ * périmée comme du stock. Elle passe hors service.
+ */
+async function unmountItem(item, { action, hsAction = action, note } = {}) {
+  const from = item.status
+  const to   = numbered(item) ? 'disponible' : 'hs'
+  item.dea = undefined; item.site = undefined; item.client = undefined
+  item.reservedFor = undefined
+  item.activationDate = undefined
+  item.status = to
+  await logHistory(item, {
+    action: to === 'hs' ? `${hsAction} — pièce sans n°, mise hors service` : action,
+    from, to, note,
+  })
+  await syncProductStock(item.product)
 }
 
 /**
@@ -184,27 +227,24 @@ async function takeOneUnit(item) {
  * du catalogue, qui distingue ces articles de l'appareil lui-même.
  */
 async function syncDeaConsumables(site, dea, kind) {
-  const lines = (dea[kind] || []).filter(l => l.product && (l.serialNumber || l.lotNumber))
+  const lines    = (dea[kind] || []).filter(l => l.product)
   const attached = await ProductItem.find({ dea: dea._id, category: kind })
+  const { pairs, free } = pairPieces(lines, attached)
 
-  // 1. Ce qui n'est plus déclaré sur l'appareil retourne au stock.
-  for (const item of attached) {
-    if (lines.some(l => samePiece(l, item))) continue
+  // 1. Ce qui n'est plus déclaré sur l'appareil quitte le parc.
+  for (const item of free) {
     /* Une pièce déclarée hors service ne revient pas au stock parce qu'elle a
        quitté la fiche du DAE : elle est cassée, pas rangée. */
     if (!IN_STOCK_STATUSES.includes(item.status) && item.status !== 'installe') continue
-    const from = item.status
-    item.dea = undefined; item.site = undefined; item.client = undefined
-    item.reservedFor = undefined
-    item.activationDate = undefined
-    item.status = 'disponible'
-    await logHistory(item, { action: 'Retour en stock (retirée du DAE)', from, to: 'disponible', note: site.name })
-    await syncProductStock(item.product)
+    await unmountItem(item, {
+      action: 'Retour en stock (retirée du DAE)', hsAction: 'Remplacée ou retirée du DAE', note: site.name,
+    })
   }
 
   // 2. Ce qui vient d'être déclaré sort du stock, une unité par ligne.
   for (const line of lines) {
-    const already = attached.find(item => samePiece(line, item))
+    const already = pairs.find(p => p.line === line)?.item
+    if (!already && !numbered(line)) continue   // pièce sans n° : rien à prendre au stock
     if (already) {
       /* La pièce montée et sa fiche article sont le même objet : ce que le
          terrain corrige sur le DAE — péremption relevée sur l'étiquette, date
@@ -303,11 +343,19 @@ async function detachItemFromParc(item, { userId } = {}) {
     return { kind: 'dae', label, site }
   }
 
+  // L'armoire du DAE : elle quitte la fiche de l'appareil avec son article.
+  if (item.category === ARMOIRE_CATEGORY) {
+    if (!dea.armoire || String(dea.armoire.product || '') !== String(item.product)) return null
+    const label = dea.armoire.model || 'Armoire'
+    dea.armoire = undefined
+    await site.save()
+    return { kind: 'armoire', label, site }
+  }
+
   const list = CONSUMABLE_LISTS.find(k => k === item.category)
   if (!list) return null
-  const idx = (dea[list] || []).findIndex(l =>
-    (item.serialNumber && l.serialNumber === item.serialNumber)
-    || (item.lotNumber && l.lotNumber === item.lotNumber))
+  // Pièce sans numéro : la ligne du même modèle.
+  const idx = (dea[list] || []).findIndex(l => samePiece(l, item))
   if (idx === -1) return null
 
   const [removed] = dea[list].splice(idx, 1)
@@ -315,9 +363,115 @@ async function detachItemFromParc(item, { userId } = {}) {
   return { kind: list, label: removed.productName || item.serialNumber || item.lotNumber, site }
 }
 
+const ARMOIRE_CATEGORY = 'armoires'
+
+/**
+ * Articles des pièces montées sur un DAE — batteries, électrodes, armoire —
+ * qui n'en ont pas encore : la pièce est chez le client, sa fiche produit doit
+ * la compter. Une pièce reprise d'un fichier n'est jamais passée par le stock :
+ * l'article naît directement « installé », rattaché au DAE, au site et au client.
+ *
+ * Idempotent : une pièce déjà appariée à un article n'en reçoit pas un second.
+ * Rend le nombre d'articles créés.
+ */
+async function attachMountedParts(site, dea, { userId, note = 'Pièce reprise par l’import du parc' } = {}) {
+  const Product = require('../models/Product')
+  let created = 0
+  const touched = new Set()
+
+  const lines = [
+    ...CONSUMABLE_LISTS.flatMap(kind => (dea[kind] || []).filter(l => l.product).map(line => ({ kind, line }))),
+    ...(dea.armoire?.product ? [{ kind: ARMOIRE_CATEGORY, line: { product: dea.armoire.product } }] : []),
+  ]
+  if (!lines.length) return 0
+
+  const attached = await ProductItem.find({
+    dea: dea._id, category: { $in: [...CONSUMABLE_LISTS, ARMOIRE_CATEGORY] },
+  })
+
+  for (const kind of [...CONSUMABLE_LISTS, ARMOIRE_CATEGORY]) {
+    const own = lines.filter(l => l.kind === kind).map(l => l.line)
+    const { pairs } = pairPieces(own, attached.filter(i => i.category === kind))
+    for (const line of own) {
+      if (pairs.some(p => p.line === line)) continue
+      const product = await Product.findById(line.product).select('category reference').lean()
+      if (!product) continue
+      await ProductItem.create({
+        product:        line.product,
+        category:       product.category || kind,
+        reference:      product.reference || '',
+        serialNumber:   line.serialNumber || undefined,
+        lotNumber:      line.lotNumber || undefined,
+        expirationDate: line.expiryDate || undefined,
+        activationDate: line.activationDate || undefined,
+        quantity:       1,
+        status:         'installe',
+        entryDate:      line.activationDate || dea.installationDate || new Date(),
+        client:         site.client,
+        site:           site._id,
+        dea:            dea._id,
+        notes:          note,
+        history: [{ action: note, to: 'installe', note: site.name, user: userId, date: new Date() }],
+        createdBy:      userId,
+      })
+      created++
+      touched.add(String(line.product))
+    }
+  }
+  for (const id of touched) await syncProductStock(id)
+  return created
+}
+
+/**
+ * Rattache l'armoire du DAE au produit du catalogue qui correspond à son
+ * modèle (« AIVIA 100 » → « Armoire AIVIA 100 »). Sans modèle, plus de
+ * produit. Un modèle que le catalogue ne connaît pas garde le produit
+ * `fallback` (celui d'avant la modification) : une faute de frappe ne doit pas
+ * faire disparaître l'armoire de la fiche produit. À appeler avant d'enregistrer.
+ */
+async function alignArmoireProduct(dea, fallback = null) {
+  if (!dea.armoire) return
+  const model = String(dea.armoire.model || '').trim()
+  if (!model) { dea.armoire.product = undefined; return }
+  const Product = require('../models/Product')
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const found = await Product.findOne({
+    category: ARMOIRE_CATEGORY,
+    name: { $in: [`Armoire ${model}`, model].map(n => new RegExp(`^${esc(n)}$`, 'i')) },
+  }).select('_id').lean()
+  dea.armoire.product = found?._id || dea.armoire.product || fallback || undefined
+}
+
+/**
+ * Article de l'armoire d'un DAE, aligné sur ce que dit la fiche : créé s'il
+ * manque, son modèle corrigé si l'armoire a changé de modèle, sorti du parc si
+ * l'armoire a été retirée.
+ */
+async function syncDeaArmoire(site, dea, { userId } = {}) {
+  const items = await ProductItem.find({ dea: dea._id, category: ARMOIRE_CATEGORY, status: 'installe' })
+  const product = dea.armoire?.product
+  if (!product) {
+    for (const item of items) await unmountItem(item, { action: 'Armoire retirée du DAE', note: site.name })
+    return
+  }
+  const [current, ...extra] = items
+  for (const item of extra) await unmountItem(item, { action: 'Armoire en double sur le DAE', note: site.name })
+  if (!current) {
+    await attachMountedParts(site, dea, { userId, note: 'Armoire déclarée sur la fiche client' })
+    return
+  }
+  if (String(current.product) !== String(product)) {
+    const before = current.product
+    current.product = product
+    await logHistory(current, { action: 'Modèle d’armoire corrigé', from: 'installe', to: 'installe', note: site.name })
+    await syncProductStock(before)
+    await syncProductStock(product)
+  }
+}
+
 module.exports = {
   modelViewSlugs, summarize,
   syncProductStock, logHistory, findItemForDea, syncDeaWithItem, syncDeaConsumables,
-  detachItemFromParc,
+  detachItemFromParc, attachMountedParts, syncDeaArmoire, alignArmoireProduct, unmountItem,
   IN_STOCK_STATUSES,
 }

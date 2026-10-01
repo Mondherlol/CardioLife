@@ -1,7 +1,7 @@
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
 const { skipWeekend, syncSiteNextControl } = require('./controls')
-const { syncDeaConsumables } = require('./productItems')
+const { syncDeaConsumables, syncDeaArmoire, alignArmoireProduct } = require('./productItems')
 
 /**
  * Remontée de la checklist vers le parc et le planning.
@@ -272,6 +272,8 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
     }
 
     if (changes.length && !dry) {
+      // Un modèle d'armoire relevé sur place retrouve son produit du catalogue.
+      for (const dea of touched) await alignArmoireProduct(dea)
       await site.save()
       /* La chaîne va jusqu'au stock : la péremption relevée sur le terrain
          arrive sur la fiche du DAE, puis sur la fiche de l'article monté. Les
@@ -279,6 +281,7 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
       for (const dea of touched) {
         await syncDeaConsumables(site, dea, 'batteries')
         await syncDeaConsumables(site, dea, 'electrodes')
+        if (dea.armoire) await syncDeaArmoire(site, dea, { userId: user?._id })
       }
     }
 

@@ -9,7 +9,7 @@ const ProductItem     = require('../models/ProductItem')
 const Intervention    = require('../models/Intervention')
 const { seedIfEmpty } = require('./productCategoriesController')
 const { resetBusinessData } = require('../utils/resetData')
-const { syncDeaWithItem, syncProductStock } = require('../utils/productItems')
+const { syncDeaWithItem, syncProductStock, attachMountedParts } = require('../utils/productItems')
 const { addMonths, skipWeekend, syncSiteNextControl, PERIOD_MONTHS } = require('../utils/controls')
 
 /**
@@ -2272,9 +2272,9 @@ function collectParts(clients) {
  * Produits du catalogue pour ces pièces : repris s'ils existent sous le même
  * nom, créés sinon dans leur catégorie. Rend la table « nom → produit ».
  *
- * Aucun exemplaire de stock n'est créé pour elles : le fichier ne donne ni
- * n° de lot ni n° de série, et une pièce sans numéro ne se suit pas au stock
- * — elle repartirait « disponible » le jour où on la remplace sur le DAE.
+ * Chaque pièce posée reçoit ensuite son article « installé » (voir
+ * `attachMountedParts`) : sans n° de lot dans le fichier, elle est suivie par
+ * son modèle sur son DAE, et passe hors service le jour où on la remplace.
  */
 async function buildPartsMap(parts, userId) {
   const map     = new Map()
@@ -2714,7 +2714,7 @@ async function execute(req, res) {
 
       /* ── Sites et DAE ── */
       let sitesCreated = 0, deasCreated = 0, deasUpdated = 0, contractsCreated = 0
-      let itemsCreated = 0, controlsPlanned = 0, controlsHistory = 0
+      let itemsCreated = 0, partItemsCreated = 0, controlsPlanned = 0, controlsHistory = 0
       const notes = []
 
       for (const ps of pc.sites) {
@@ -2749,6 +2749,9 @@ async function execute(req, res) {
             if (opts.createStockItems) {
               const item = await attachStockItem(site, dea, req.user._id)
               if (item) { itemsCreated++; await syncProductStock(item.product) }
+              // Ses batteries, électrodes et armoire : un article « installé »
+              // chacune, pour que leur fiche produit les compte chez le client.
+              partItemsCreated += await attachMountedParts(site, dea, { userId: req.user._id })
             } else {
               await syncDeaWithItem(site, dea)
             }
@@ -2798,6 +2801,7 @@ async function execute(req, res) {
         deasCreated,
         deasUpdated,
         itemsCreated,
+        partItemsCreated,
         contractsCreated,
         controlsPlanned,
         controlsHistory,
@@ -2823,6 +2827,7 @@ async function execute(req, res) {
       deasCreated:      sum('deasCreated'),
       deasUpdated:      sum('deasUpdated'),
       itemsCreated:     sum('itemsCreated'),
+      partItemsCreated: sum('partItemsCreated'),
       contractsCreated: sum('contractsCreated'),
       controlsPlanned:  sum('controlsPlanned'),
       controlsHistory:  sum('controlsHistory'),
