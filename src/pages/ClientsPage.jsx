@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   Plus, Search, Trash2, X, AlertTriangle,
-  Building2, ChevronLeft, ChevronRight, RotateCcw, Trash, Archive, ArrowLeft,
+  Building2, RotateCcw, Trash, Archive, ArrowLeft,
   FileSpreadsheet, ArrowUp, ArrowDown, HeartPulse, CheckCircle2, MinusCircle,
 } from 'lucide-react'
 import { getClients, archiveClient, restoreClient, destroyClient, clientLogoUrl } from '../api/clients'
 import { useLoadingBar } from '../hooks/useLoadingBar'
+import { useInfiniteList, useDebouncedValue } from '../hooks/useInfiniteList'
 import ClientModal from '../components/ClientModal'
+import ListFooter from '../components/ListFooter'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -133,10 +135,52 @@ function NextControlCell({ date }) {
   )
 }
 
+/* ─── Consommables : l'état le plus préoccupant parmi tous les DEA du client ─── */
+function dateTone(value) {
+  const days = daysUntil(value)
+  return days < 0 ? 'overdue' : days <= 60 ? 'soon' : 'ok'
+}
+const fmtShort = d => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`
+
+function BatteryCell({ client: c }) {
+  if (c.battLevel == null && !c.battExpiry) return <span className="cell-muted">—</span>
+  const lvlTone = c.battLevel == null ? null : c.battLevel <= 25 ? 'overdue' : c.battLevel < 50 ? 'soon' : 'ok'
+  const issues = [
+    c.battExpiredCount > 0 && plural(c.battExpiredCount, 'périmée', 'périmées'),
+    c.battLowCount > 0 && plural(c.battLowCount, 'faible', 'faibles'),
+  ].filter(Boolean)
+  return (
+    <div className="conso-cell" title="Charge la plus basse et DLC la plus proche parmi les batteries du client">
+      <div className="conso-cell-line">
+        {lvlTone && <span className={`next-ctrl next-ctrl--${lvlTone}`}>{c.battLevel} %</span>}
+        {c.battExpiry && <span className={`next-ctrl next-ctrl--${dateTone(c.battExpiry)}`}>{fmtShort(c.battExpiry)}</span>}
+      </div>
+      {issues.length > 0 && <span className="conso-cell-note">{issues.join(' · ')}</span>}
+    </div>
+  )
+}
+
+function ElectrodeCell({ client: c }) {
+  if (!c.elecExpiry) return <span className="cell-muted">—</span>
+  return (
+    <div className="conso-cell" title="DLC la plus proche parmi les électrodes du client">
+      <div className="conso-cell-line">
+        <span className={`next-ctrl next-ctrl--${dateTone(c.elecExpiry)}`}>{fmtShort(c.elecExpiry)}</span>
+      </div>
+      {c.elecExpiredCount > 0 && (
+        <span className="conso-cell-note">{plural(c.elecExpiredCount, 'périmée', 'périmées')}</span>
+      )}
+    </div>
+  )
+}
+
 /* ─── Page principale ─── */
-const LIMIT = 15
+/* Lots chargés au défilement. Un lot couvre largement un écran : la liste se
+   remplit d'un trait, le suivant part avant d'atteindre le bas. */
+const PAGE_SIZE = 30
 const CLIENTS_STATE_KEY = 'cardiotrack.clients.listState'
-const SORT_FIELDS = ['name', 'sites', 'deas', 'nextControl', 'contract', 'createdAt']
+const SORT_FIELDS = ['name', 'sites', 'deas', 'nextControl', 'contract', 'createdAt', 'battLevel', 'battExpiry', 'elecExpiry']
 
 function getSavedClientsState() {
   try {
@@ -150,69 +194,72 @@ export default function ClientsPage() {
   const navigate = useNavigate()
   const savedState = useRef(getSavedClientsState())
   const [tab,        setTab]        = useState(savedState.current.tab || 'active')   // 'active' | 'archived'
-  const [clients,    setClients]    = useState([])
-  const [total,      setTotal]      = useState(0)
-  const [page,       setPage]       = useState(savedState.current.page || 1)
   const [search,     setSearch]     = useState(savedState.current.search || '')
+  // La requête attend une courte pause dans la frappe : une recherche, pas une par lettre.
+  const query = useDebouncedValue(search.trim(), 300)
   // Les anciennes colonnes (ville, contact, téléphone) peuvent traîner en session.
   const [sortField,  setSortField]  = useState(
     SORT_FIELDS.includes(savedState.current.sortField) ? savedState.current.sortField : 'createdAt'
   )
   const [sortDir,    setSortDir]    = useState(savedState.current.sortDir || 'desc')
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState('')
   const [modal,      setModal]      = useState(null)     // null | 'create' | client
   const [archiving,  setArchiving]  = useState(null)
   const [destroying, setDestroying] = useState(null)
   const tableWrapRef = useRef(null)
   const scrollTopRef = useRef(savedState.current.scrollTop || 0)
+  // Le défilement mémorisé ne se rejoue qu'une fois, au retour sur la page.
+  const restorePending = useRef(scrollTopRef.current > 0)
+
+  const isArchived = tab === 'archived'
+
+  const fetchPage = useCallback(({ skip, limit }) => {
+    const params = { skip, limit, archived: isArchived ? 'true' : 'false', sort: sortField, dir: sortDir }
+    if (query) params.search = query
+    return getClients(params)
+  }, [isArchived, sortField, sortDir, query])
+
+  const {
+    items: clients, total, loading, loadingMore, error, hasMore, reload, retry, sentinelRef,
+  } = useInfiniteList(fetchPage, [fetchPage], {
+    pageSize: PAGE_SIZE,
+    // Au retour d'une fiche : tout ce qui était affiché revient d'un coup.
+    initialCount: savedState.current.count || 0,
+  })
 
   useLoadingBar(loading)
 
-  const isArchived = tab === 'archived'
-  const totalPages = Math.ceil(total / LIMIT)
+  useEffect(() => { if (error) toast.error(error) }, [error])
 
-  const fetchClients = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false', sort: sortField, dir: sortDir }
-      if (search)     params.search = search
-      const res = await getClients(params)
-      setClients(res.data)
-      setTotal(res.total)
-    } catch (err) {
-      const msg = formatApiError(err)
-      setError(msg)
-      toast.error(msg)
-    } finally {
-      setLoading(false)
-    }
-  }, [page, search, isArchived, sortField, sortDir])
-
-  useEffect(() => { fetchClients() }, [fetchClients])
-
-  useEffect(() => {
+  const persist = useCallback(() => {
     sessionStorage.setItem(CLIENTS_STATE_KEY, JSON.stringify({
-      tab, page, search, sortField, sortDir, scrollTop: scrollTopRef.current,
+      tab, search: query, sortField, sortDir,
+      scrollTop: scrollTopRef.current, count: clients.length,
     }))
-  }, [tab, page, search, sortField, sortDir])
+  }, [tab, query, sortField, sortDir, clients.length])
+
+  useEffect(() => { persist() }, [persist])
 
   useEffect(() => {
-    if (loading || !tableWrapRef.current) return
-    tableWrapRef.current.scrollTop = scrollTopRef.current || 0
-  }, [loading, clients])
+    if (loading || !restorePending.current || !tableWrapRef.current) return
+    restorePending.current = false
+    tableWrapRef.current.scrollTop = scrollTopRef.current
+  }, [loading])
+
+  /* Nouveaux critères : on repart du haut de la liste. */
+  function resetScroll() {
+    scrollTopRef.current = 0
+    restorePending.current = false
+    if (tableWrapRef.current) tableWrapRef.current.scrollTop = 0
+  }
 
   function setSearchFilter(value) {
-    scrollTopRef.current = 0
+    resetScroll()
     setSearch(value)
-    setPage(1)
   }
 
   function setTabAndReset(value) {
-    scrollTopRef.current = 0
+    resetScroll()
     setTab(value)
-    setPage(1)
   }
 
   function toggleSort(field) {
@@ -222,13 +269,7 @@ export default function ClientsPage() {
       setSortField(field)
       setSortDir('asc')
     }
-    scrollTopRef.current = 0
-    setPage(1)
-  }
-
-  function changePage(nextPage) {
-    scrollTopRef.current = 0
-    setPage(nextPage)
+    resetScroll()
   }
 
   function sortMark(field) {
@@ -238,15 +279,15 @@ export default function ClientsPage() {
       : <ArrowDown size={12} strokeWidth={2.2} className="th-sort-icon" />
   }
 
+  // On note la position à chaque défilement ; la session n'est écrite qu'en
+  // quittant la page, pas à chaque pixel.
   function saveScroll() {
     scrollTopRef.current = tableWrapRef.current?.scrollTop || 0
-    sessionStorage.setItem(CLIENTS_STATE_KEY, JSON.stringify({
-      tab, page, search, sortField, sortDir, scrollTop: scrollTopRef.current,
-    }))
   }
 
   function openClient(id) {
     saveScroll()
+    persist()
     navigate(`/clients/${id}`)
   }
 
@@ -254,7 +295,7 @@ export default function ClientsPage() {
     try {
       await restoreClient(client._id)
       toast.success(`${client.name} restauré.`)
-      fetchClients()
+      reload()
     } catch (err) {
       toast.error(formatApiError(err))
     }
@@ -266,13 +307,14 @@ export default function ClientsPage() {
     setModal(null)
     if (saved?._id) {
       saveScroll()
+      persist()
       navigate(`/clients/${saved._id}`)
       return
     }
-    fetchClients()
+    reload()
   }
-  function handleArchived()  { setArchiving(null); fetchClients() }
-  function handleDestroyed() { setDestroying(null); fetchClients() }
+  function handleArchived()  { setArchiving(null); reload() }
+  function handleDestroyed() { setDestroying(null); reload() }
 
   return (
     <div className="page-content">
@@ -323,7 +365,7 @@ export default function ClientsPage() {
 
       {/* Tableau */}
       <div className="table-wrap" ref={tableWrapRef} onScroll={saveScroll}>
-        {error && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
+        {error && !clients.length && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
 
         {loading ? (
           <div className="table-loading"><span className="spinner" /></div>
@@ -331,14 +373,14 @@ export default function ClientsPage() {
           <div className="table-empty">
             <Building2 size={36} color="var(--gray-300)" />
             <p>
-              {search
+              {query
                 ? 'Aucun résultat pour cette recherche.'
                 : isArchived
                   ? 'Aucun client archivé.'
                   : 'Aucun client enregistré.'
               }
             </p>
-            {!search && !isArchived && (
+            {!query && !isArchived && (
               <button className="btn btn--primary" onClick={() => setModal('create')}>
                 <Plus size={14} /> Créer le premier client
               </button>
@@ -366,6 +408,26 @@ export default function ClientsPage() {
                 <th style={{ width: 170 }}>
                   <button className="th-sort-btn" onClick={() => toggleSort('nextControl')}>
                     Prochain contrôle {sortMark('nextControl')}
+                  </button>
+                </th>
+                {/* Deux tris pour les batteries : la charge la plus basse, ou la
+                    DLC la plus proche — les deux décident d'un appel. */}
+                <th style={{ width: 190 }}>
+                  <div className="th-sort-group">
+                    <span>Batteries</span>
+                    <button className={`th-sort-chip${sortField === 'battLevel' ? ' th-sort-chip--on' : ''}`}
+                      onClick={() => toggleSort('battLevel')} title="Trier par charge la plus basse">
+                      % {sortMark('battLevel')}
+                    </button>
+                    <button className={`th-sort-chip${sortField === 'battExpiry' ? ' th-sort-chip--on' : ''}`}
+                      onClick={() => toggleSort('battExpiry')} title="Trier par DLC la plus proche">
+                      DLC {sortMark('battExpiry')}
+                    </button>
+                  </div>
+                </th>
+                <th style={{ width: 150 }}>
+                  <button className="th-sort-btn" onClick={() => toggleSort('elecExpiry')} title="Trier par DLC la plus proche">
+                    Électrodes {sortMark('elecExpiry')}
                   </button>
                 </th>
                 <th style={{ width: 150 }}>
@@ -404,6 +466,8 @@ export default function ClientsPage() {
                     </span>
                   </td>
                   <td><NextControlCell date={c.nextControlDate} /></td>
+                  <td><BatteryCell client={c} /></td>
+                  <td><ElectrodeCell client={c} /></td>
                   <td>
                     {c.underContract ? (
                       <span className="contract-badge contract-badge--on">
@@ -446,20 +510,21 @@ export default function ClientsPage() {
             </tbody>
           </table>
         )}
-      </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="pagination">
-          <button className="pag-btn" disabled={page === 1} onClick={() => changePage(page - 1)}>
-            <ChevronLeft size={15} />
-          </button>
-          <span className="pag-info">Page {page} / {totalPages}</span>
-          <button className="pag-btn" disabled={page === totalPages} onClick={() => changePage(page + 1)}>
-            <ChevronRight size={15} />
-          </button>
-        </div>
-      )}
+        {/* Fin de liste : la sentinelle charge le lot suivant à l'approche du bas. */}
+        {!loading && clients.length > 0 && (
+          <ListFooter
+            sentinelRef={sentinelRef}
+            shown={clients.length}
+            total={total}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            error={error}
+            onRetry={retry}
+            noun={['client', 'clients']}
+          />
+        )}
+      </div>
 
       {/* Modals */}
       {modal === 'create' && (

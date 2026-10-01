@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator')
 const Pack    = require('../models/Pack')
+const { pageParams, pageResult, searchRegex } = require('../utils/paging')
 
 const PRODUCT_FIELDS = 'name reference brand category salePrice images stock'
 
@@ -32,31 +33,24 @@ function sanitizeBody(body) {
 }
 
 async function getAll(req, res) {
-  const { search, page = 1, limit = 20, archived = 'false' } = req.query
+  const { search, archived = 'false' } = req.query
+  const paging = pageParams(req.query)
 
   const filter = { isActive: archived === 'true' ? false : true }
-  const q = search?.trim() || ''
-  if (q) {
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    filter.name = { $regex: escaped, $options: 'i' }
-  }
+  const re = searchRegex(search)
+  if (re) filter.name = re
 
-  const skip  = (Number(page) - 1) * Number(limit)
-  const total = await Pack.countDocuments(filter)
+  const [total, packs] = await Promise.all([
+    Pack.countDocuments(filter),
+    Pack.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(paging.skip)
+      .limit(paging.limit)
+      .populate('products.product', PRODUCT_FIELDS)
+      .populate('createdBy', 'username fullName'),
+  ])
 
-  const packs = await Pack.find(filter)
-    .skip(skip)
-    .limit(Number(limit))
-    .sort({ createdAt: -1 })
-    .populate('products.product', PRODUCT_FIELDS)
-    .populate('createdBy', 'username fullName')
-
-  res.json({
-    data:       packs,
-    total,
-    page:       Number(page),
-    totalPages: Math.ceil(total / Number(limit)),
-  })
+  res.json(pageResult(packs, total, paging))
 }
 
 async function getById(req, res) {

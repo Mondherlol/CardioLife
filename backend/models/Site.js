@@ -45,6 +45,8 @@ const ARMOIRE_PILES = ['ok', 'a_remplacer', '']
  * l'alerte « armoires dont les piles sont à remplacer ».
  */
 const armoireSchema = new mongoose.Schema({
+  // Modèle du catalogue (catégorie « Armoires ») ; `model` en garde le libellé.
+  product:         { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
   model:           { type: String, trim: true },   // AIVIA 100, AIVIA S, AIVIA IN…
   pilesStatus:     { type: String, enum: ARMOIRE_PILES, default: '' },
   pilesCheckedAt:  Date,                            // dernier constat de l'état des piles

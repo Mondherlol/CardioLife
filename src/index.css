@@ -21382,3 +21382,104 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 @media (max-width: 720px) {
   .arm-alert-site { padding-left: 12px; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   LISTES CHARGÉES AU DÉFILEMENT
+   Le pied de liste remplace la pagination. Sa sentinelle est une
+   bande invisible qui remonte au-dessus de lui : elle devient
+   visible ~1 écran avant le bas, et c'est ce qui déclenche le lot
+   suivant — la liste se complète avant qu'on n'y arrive.
+   ═══════════════════════════════════════════════════════════ */
+.list-footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.list-sentinel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 600px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.list-footer-more,
+.list-footer-end,
+.list-footer-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list-footer-spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+
+.list-footer-end::before,
+.list-footer-end::after {
+  content: '';
+  width: 28px;
+  height: 1px;
+  background: var(--border);
+}
+
+.list-footer-error { color: var(--red-600); }
+
+/* ── Liste des clients : état des consommables ───────────── */
+.conso-cell { display: flex; flex-direction: column; gap: 3px; }
+.conso-cell-line { display: flex; flex-wrap: wrap; gap: 4px; }
+.conso-cell-note { font-size: 11px; font-weight: 600; color: var(--red-600); }
+
+/* En-tête à deux tris (« Batteries : % · DLC »). */
+.th-sort-group { display: inline-flex; align-items: center; gap: 6px; }
+.th-sort-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.th-sort-chip:hover { color: var(--orange-600); border-color: var(--orange-500); }
+.th-sort-chip--on { color: var(--orange-600); border-color: var(--orange-500); background: var(--orange-50); }
+
+/* Fiche produit : état d'une pièce posée sur un DAE. */
+.installed-state { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+
+/* Import : pièces rattachées aux DAE. */
+.ci-parts { display: flex; flex-direction: column; gap: 10px; }
+.ci-parts-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ci-parts-title {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ci-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.ci-part .ci-model-badge { margin-left: 0; }

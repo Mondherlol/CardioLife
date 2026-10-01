@@ -5,7 +5,7 @@ const fs            = require('fs')
 const Product       = require('../models/Product')
 const ProductItem   = require('../models/ProductItem')
 const StockMovement = require('../models/StockMovement')
-const { listInstallations } = require('../utils/deaParc')
+const Site          = require('../models/Site')
 const { syncProductStock, IN_STOCK_STATUSES } = require('../utils/productItems')
 
 async function getAll(req, res) {
@@ -392,17 +392,54 @@ async function assignSerials(req, res) {
   res.json(synced || product)
 }
 
-// Unités de ce produit (identifiées par n° de série) actuellement posées chez
-// des clients. Le parc vit dans les DEA des sites.
+/**
+ * Où ce produit est posé chez les clients.
+ *
+ * Le parc vit dans les DEA des sites : un produit y figure comme appareil, ou
+ * comme pièce montée sur un appareil — batterie, électrodes, armoire. Une
+ * pièce reprise d'un fichier, sans n° de lot, n'a pas d'exemplaire au stock :
+ * c'est ici qu'on voit sur quels DAE elle se trouve, et quand elle périme.
+ */
 async function getClientStock(req, res) {
-  const rows = await listInstallations({})
-  const installs = rows
-    .filter(r =>
-      String(r.deviceProduct?._id || r.deviceProduct) === String(req.params.id) &&
-      r.serialNumber &&
-      r.status === 'installe')
-    .sort((a, b) => new Date(b.installationDate || 0) - new Date(a.installationDate || 0))
-  res.json(installs)
+  const id = String(req.params.id)
+  if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Produit invalide.' })
+
+  const sites = await Site.find({
+    isActive: true,
+    $or: [
+      { 'deas.product': id }, { 'deas.batteries.product': id },
+      { 'deas.electrodes.product': id }, { 'deas.armoire.product': id },
+    ],
+  }).populate('client', 'name').lean()
+
+  const same = v => v && String(v) === id
+  const rows = []
+  for (const site of sites) {
+    for (const dea of site.deas || []) {
+      const base = {
+        dea: dea._id, client: site.client?._id || null, clientName: site.client?.name || '',
+        site: site._id, siteName: site.name,
+        deviceType: dea.deviceType || '', serialNumber: dea.serialNumber || '', location: dea.location || '',
+      }
+      if (same(dea.product) && dea.status === 'installe') {
+        rows.push({ ...base, role: 'dae', date: dea.installationDate || null })
+      }
+      for (const b of dea.batteries || []) {
+        if (same(b.product)) rows.push({ ...base, role: 'batterie', expiryDate: b.expiryDate || null, level: b.level ?? null })
+      }
+      for (const e of dea.electrodes || []) {
+        if (same(e.product)) rows.push({ ...base, role: 'electrodes', kind: e.kind || '', expiryDate: e.expiryDate || null })
+      }
+      if (same(dea.armoire?.product)) {
+        rows.push({ ...base, role: 'armoire', pilesStatus: dea.armoire.pilesStatus || '', date: dea.armoire.pilesCheckedAt || null })
+      }
+    }
+  }
+
+  // La péremption la plus proche d'abord ; sans date, à la fin, par client.
+  const t = d => (d ? new Date(d).getTime() : Infinity)
+  rows.sort((a, b) => t(a.expiryDate) - t(b.expiryDate) || a.clientName.localeCompare(b.clientName, 'fr'))
+  res.json(rows)
 }
 
 async function getMovements(req, res) {

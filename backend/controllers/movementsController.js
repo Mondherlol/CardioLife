@@ -1,61 +1,55 @@
 const StockMovement = require('../models/StockMovement')
+const { pageParams, pageResult } = require('../utils/paging')
+
+const POPULATE = [
+  { path: 'product',   select: 'name reference category' },
+  { path: 'createdBy', select: 'username fullName'       },
+]
 
 async function getAll(req, res) {
-  const { page = 1, limit = 20, product, type, category } = req.query
+  const { product, type, category } = req.query
+  const paging = pageParams(req.query)
 
   const filter = {}
   if (product) filter.product = product
   if (type)    filter.type = type
 
-  const skip  = (Number(page) - 1) * Number(limit)
-
-  // Si filtre catégorie demandé on filtre via lookup, sinon requête simple
+  // `_id` départage les mouvements d'une même seconde : sans lui, un lot chargé
+  // au défilement pourrait en répéter ou en sauter un.
+  const sort = { createdAt: -1, _id: -1 }
   let movements, total
 
   if (category) {
-    // Aggregation pour filtrer par catégorie du produit
-    const pipeline = [
-      {
-        $lookup: {
-          from:         'products',
-          localField:   'product',
-          foreignField: '_id',
-          as:           'productDoc',
-        },
-      },
+    // Filtre par catégorie du produit : il faut passer par le produit. Le
+    // décompte et le lot sortent de la même requête plutôt que de tout lire
+    // une première fois pour compter.
+    const [res] = await StockMovement.aggregate([
+      { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'productDoc' } },
       { $unwind: '$productDoc' },
       { $match: { 'productDoc.category': category, ...filter } },
-      { $sort: { createdAt: -1 } },
-    ]
-    const all = await StockMovement.aggregate([...pipeline])
-    total = all.length
-
-    const paginated = await StockMovement.aggregate([
-      ...pipeline,
-      { $skip: skip },
-      { $limit: Number(limit) },
+      { $project: { productDoc: 0 } },
+      { $sort: sort },
+      {
+        $facet: {
+          total: [{ $count: 'n' }],
+          data:  [{ $skip: paging.skip }, { $limit: paging.limit }],
+        },
+      },
     ])
-
-    movements = await StockMovement.populate(paginated, [
-      { path: 'product',   select: 'name reference category' },
-      { path: 'createdBy', select: 'username fullName'       },
-    ])
+    total     = res?.total?.[0]?.n || 0
+    movements = await StockMovement.populate(res?.data || [], POPULATE)
   } else {
-    total = await StockMovement.countDocuments(filter)
-    movements = await StockMovement.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .populate('product',   'name reference category')
-      .populate('createdBy', 'username fullName')
+    ;[total, movements] = await Promise.all([
+      StockMovement.countDocuments(filter),
+      StockMovement.find(filter)
+        .sort(sort)
+        .skip(paging.skip)
+        .limit(paging.limit)
+        .populate(POPULATE),
+    ])
   }
 
-  res.json({
-    data:       movements,
-    total,
-    page:       Number(page),
-    totalPages: Math.ceil(total / Number(limit)),
-  })
+  res.json(pageResult(movements, total, paging))
 }
 
 module.exports = { getAll }

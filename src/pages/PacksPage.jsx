@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { toast } from 'react-toastify'
 import {
   Plus, Search, Pencil, Trash2, X, AlertTriangle, Package, Boxes,
-  ChevronLeft, ChevronRight, RotateCcw, Trash, Archive,
+  RotateCcw, Trash, Archive,
   Minus, GraduationCap, Tag, Sparkles,
 } from 'lucide-react'
 import {
@@ -11,9 +11,12 @@ import {
 } from '../api/packs'
 import { getProducts, productImageUrl } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
+import { useInfiniteList, useDebouncedValue } from '../hooks/useInfiniteList'
 import ComboSearch from '../components/ComboSearch'
+import ListFooter from '../components/ListFooter'
 
-const LIMIT = 24
+/* Lots chargés au défilement, en multiple de colonnes de la grille. */
+const PAGE_SIZE = 24
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -475,21 +478,17 @@ function DestroyConfirm({ pack, onClose, onDone }) {
    ───────────────────────────────────────────── */
 export default function PacksPage() {
   const [tab,       setTab]       = useState('active')
-  const [packs,     setPacks]     = useState([])
   const [products,  setProducts]  = useState([])
-  const [total,     setTotal]     = useState(0)
-  const [page,      setPage]      = useState(1)
   const [search,    setSearch]    = useState('')
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState('')
+  // Une requête par recherche, pas par lettre tapée.
+  const query = useDebouncedValue(search.trim(), 300)
   const [modal,     setModal]     = useState(null)   // 'create' | pack
   const [archiving, setArchiving] = useState(null)
   const [destroying,setDestroying]= useState(null)
-
-  useLoadingBar(loading)
+  // La grille défile avec la page : de nouveaux critères la ramènent en haut.
+  const pageRef = useRef(null)
 
   const isArchived = tab === 'archived'
-  const totalPages = Math.ceil(total / LIMIT)
 
   // Catalogue produits pour le sélecteur (chargé une fois)
   useEffect(() => {
@@ -498,41 +497,36 @@ export default function PacksPage() {
       .catch(() => {})
   }, [])
 
-  const fetchPacks = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false' }
-      if (search) params.search = search
-      const res = await getPacks(params)
-      setPacks(res.data || [])
-      setTotal(res.total || 0)
-    } catch (err) {
-      const msg = formatApiError(err)
-      setError(msg)
-      toast.error(msg)
-    } finally {
-      setLoading(false)
-    }
-  }, [page, search, isArchived])
+  const fetchPage = useCallback(({ skip, limit }) => {
+    const params = { skip, limit, archived: isArchived ? 'true' : 'false' }
+    if (query) params.search = query
+    return getPacks(params)
+  }, [query, isArchived])
 
-  useEffect(() => { fetchPacks() }, [fetchPacks])
-  useEffect(() => { setPage(1) }, [search, tab])
+  const {
+    items: packs, total, loading, loadingMore, error, hasMore, reload, retry, sentinelRef,
+  } = useInfiniteList(fetchPage, [fetchPage], { pageSize: PAGE_SIZE })
+
+  useLoadingBar(loading)
+
+  useEffect(() => { if (error) toast.error(error) }, [error])
+  // Nouveaux critères : la grille repart du haut.
+  useEffect(() => { if (pageRef.current) pageRef.current.scrollTop = 0 }, [fetchPage])
 
   async function handleRestore(pack) {
     try {
       await restorePack(pack._id)
       toast.success(`${pack.name} restauré.`)
-      fetchPacks()
+      reload()
     } catch (err) { toast.error(formatApiError(err)) }
   }
 
-  function handleSaved()     { setModal(null);      fetchPacks() }
-  function handleArchived()  { setArchiving(null);  fetchPacks() }
-  function handleDestroyed() { setDestroying(null); fetchPacks() }
+  function handleSaved()     { setModal(null);      reload() }
+  function handleArchived()  { setArchiving(null);  reload() }
+  function handleDestroyed() { setDestroying(null); reload() }
 
   return (
-    <div className="page-content">
+    <div className="page-content" ref={pageRef}>
       {/* En-tête */}
       <div className="page-header">
         <div>
@@ -573,7 +567,7 @@ export default function PacksPage() {
       </div>
 
       {/* Grille de packs */}
-      {error && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
+      {error && !packs.length && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
 
       {loading ? (
         <div className="table-loading"><span className="spinner" /></div>
@@ -581,11 +575,11 @@ export default function PacksPage() {
         <div className="table-empty">
           <Boxes size={36} color="var(--gray-300)" />
           <p>
-            {search
+            {query
               ? 'Aucun pack pour cette recherche.'
               : isArchived ? 'Aucun pack archivé.' : 'Aucun pack pour le moment.'}
           </p>
-          {!search && !isArchived && (
+          {!query && !isArchived && (
             <button className="btn btn--primary" onClick={() => setModal('create')}>
               <Plus size={14} /> Créer le premier pack
             </button>
@@ -607,17 +601,18 @@ export default function PacksPage() {
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="pagination">
-          <button className="pag-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-            <ChevronLeft size={15} />
-          </button>
-          <span className="pag-info">Page {page} / {totalPages}</span>
-          <button className="pag-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
-            <ChevronRight size={15} />
-          </button>
-        </div>
+      {/* Fin de liste : la sentinelle charge le lot suivant à l'approche du bas. */}
+      {!loading && packs.length > 0 && (
+        <ListFooter
+          sentinelRef={sentinelRef}
+          shown={packs.length}
+          total={total}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          error={error}
+          onRetry={retry}
+          noun={['pack', 'packs']}
+        />
       )}
 
       {/* Modals */}

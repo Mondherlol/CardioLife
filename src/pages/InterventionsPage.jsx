@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Wrench, Plus, Search, X, CheckCircle2,
   Clock, AlertCircle, Calendar, MapPin, Zap, User,
-  ChevronDown, AlertTriangle, ArrowRight, ChevronLeft, ChevronRight,
+  ChevronDown, AlertTriangle, ArrowRight,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
@@ -12,6 +12,8 @@ import { get } from '../api/http'
 import ControlCreateModal from '../components/ControlCreateModal'
 import InstallationCompleteModal from '../components/InstallationCompleteModal'
 import { getInstallations } from '../api/installations'
+import { useProgressiveList } from '../hooks/useInfiniteList'
+import ListFooter from '../components/ListFooter'
 
 /* ─── Constants ─────────────────────────────────────────────── */
 
@@ -317,7 +319,9 @@ const STATUS_FILTERS = [
   { value: 'termine',  label: 'Terminées' },
 ]
 
-const PAGE_SIZE = 100
+/* Lignes montées par lot au défilement : la liste entière est déjà là, seul
+   son rendu se fait progressivement. */
+const RENDER_STEP = 50
 
 /* `embedded` : monté comme onglet de la page Maintenance — le titre de la page
    porte déjà le contexte, seul le sous-titre et les actions restent. */
@@ -334,7 +338,6 @@ export default function InterventionsPage({ embedded = false }) {
   const [statusFilter, setStatus] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [sortDir, setSortDir]     = useState('desc')  // tri par date planifiée
-  const [page, setPage]           = useState(1)
   // Poses assignées au technicien : elles précèdent les contrôles, c'est du
   // matériel qui attend d'être mis en service.
   const [poses, setPoses]         = useState([])
@@ -364,7 +367,6 @@ export default function InterventionsPage({ embedded = false }) {
 
   useEffect(() => { fetchAll() }, [fetchAll])
   useEffect(() => { fetchPoses() }, [fetchPoses])
-  useEffect(() => { setPage(1) }, [search, statusFilter, sortDir])
 
   const filtered = useMemo(() => {
     let list = all
@@ -382,7 +384,7 @@ export default function InterventionsPage({ embedded = false }) {
     return list
   }, [all, statusFilter, search])
 
-  // Tri par date planifiée (par défaut la plus récente d'abord) + pagination
+  // Tri par date planifiée (par défaut la plus récente d'abord)
   const sortedFiltered = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1
     return [...filtered].sort((a, b) => {
@@ -395,8 +397,10 @@ export default function InterventionsPage({ embedded = false }) {
     })
   }, [filtered, sortDir])
 
-  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / PAGE_SIZE))
-  const pageItems  = sortedFiltered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  // Nouveaux critères : le rendu repart du premier lot.
+  const progressive = useProgressiveList(sortedFiltered, {
+    step: RENDER_STEP, resetKey: `${search}|${statusFilter}|${sortDir}`,
+  })
 
   const stats = useMemo(() => ({
     total:    all.length,
@@ -550,7 +554,7 @@ export default function InterventionsPage({ embedded = false }) {
               </tr>
             </thead>
             <tbody>
-              {pageItems.map(iv => (
+              {progressive.visible.map(iv => (
                 <AdminRow
                   key={iv._id}
                   intervention={iv}
@@ -567,16 +571,14 @@ export default function InterventionsPage({ embedded = false }) {
             </tbody>
           </table>
 
-          {totalPages > 1 && (
-            <div className="pagination">
-              <button className="pag-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-                <ChevronLeft size={15} />
-              </button>
-              <span className="pag-info">Page {page} / {totalPages} · {sortedFiltered.length} contrôle{sortedFiltered.length !== 1 ? 's' : ''}</span>
-              <button className="pag-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
-                <ChevronRight size={15} />
-              </button>
-            </div>
+          {sortedFiltered.length > 0 && (
+            <ListFooter
+              sentinelRef={progressive.sentinelRef}
+              shown={progressive.shown}
+              total={sortedFiltered.length}
+              hasMore={progressive.hasMore}
+              noun={['contrôle', 'contrôles']}
+            />
           )}
         </div>
       )}

@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useInfiniteList } from '../hooks/useInfiniteList'
+import ListFooter from '../components/ListFooter'
 import { toast } from 'react-toastify'
 import {
   Plus, Search, Pencil, Trash2, X, AlertTriangle, ArrowLeft,
-  Package, ChevronLeft, ChevronRight, RotateCcw, Trash, Archive,
+  Package, ChevronRight, RotateCcw, Trash, Archive,
   TrendingUp, TrendingDown, SlidersHorizontal,
   History, User, Hash, Layers, Boxes, Clock,
   MoreVertical, Eye, PackageOpen, LayoutGrid, List, FileSpreadsheet,
@@ -944,17 +946,11 @@ export default function StockPage() {
   const [viewingMovements,      setViewingMovements]      = useState(null)
   const [viewingMovementDetail, setViewingMovementDetail] = useState(null)
 
-  const [allMovements, setAllMovements] = useState([])
-  const [mvTotal,      setMvTotal]      = useState(0)
-  const [mvPage,       setMvPage]       = useState(1)
-  const [mvLoading,    setMvLoading]    = useState(false)
-
   useLoadingBar(loading)
 
   const isMovements  = tab === 'movements'
   const isArchived   = tab === 'archived'
   const isParc       = tab === 'parc'
-  const mvTotalPages = Math.ceil(mvTotal / 50)
 
   const catBySlug = useMemo(
     () => Object.fromEntries(categories.map(c => [c.slug, c])),
@@ -1004,16 +1000,16 @@ export default function StockPage() {
 
   useEffect(() => { fetchProducts() }, [fetchProducts])
 
-  const fetchAllMovements = useCallback(async () => {
-    setMvLoading(true)
-    try {
-      const res = await getAllMovements({ page: mvPage, limit: 50 })
-      setAllMovements(Array.isArray(res) ? res : (res.data || []))
-      setMvTotal(res.total || 0)
-    } catch { setAllMovements([]) } finally { setMvLoading(false) }
-  }, [mvPage])
+  /* Mouvements de stock, chargés au défilement — et seulement quand l'onglet
+     est ouvert : chaque ouverture relit le journal, qui a pu bouger entre-temps. */
+  const fetchMovementsPage = useCallback(({ skip, limit }) => (
+    isMovements ? getAllMovements({ skip, limit }) : Promise.resolve({ data: [], total: 0 })
+  ), [isMovements])
 
-  useEffect(() => { if (isMovements) fetchAllMovements() }, [isMovements, fetchAllMovements])
+  const {
+    items: allMovements, total: mvTotal, loading: mvLoading, loadingMore: mvLoadingMore,
+    error: mvError, hasMore: mvHasMore, retry: mvRetry, sentinelRef: mvSentinelRef,
+  } = useInfiniteList(fetchMovementsPage, [fetchMovementsPage], { pageSize: 50 })
 
   /* Marques et fournisseurs proposés : ceux réellement présents dans la vue. */
   const brands    = useMemo(() => [...new Set(models.map(p => p.brand).filter(Boolean))].sort(), [models])
@@ -1416,18 +1412,19 @@ export default function StockPage() {
               </tbody>
             </table>
           )}
-        </div>
-      )}
 
-      {isMovements && mvTotalPages > 1 && (
-        <div className="pagination">
-          <button className="pag-btn" disabled={mvPage === 1} onClick={() => setMvPage(p => p - 1)}>
-            <ChevronLeft size={15} />
-          </button>
-          <span className="pag-info">Page {mvPage} / {mvTotalPages}</span>
-          <button className="pag-btn" disabled={mvPage === mvTotalPages} onClick={() => setMvPage(p => p + 1)}>
-            <ChevronRight size={15} />
-          </button>
+          {!mvLoading && allMovements.length > 0 && (
+            <ListFooter
+              sentinelRef={mvSentinelRef}
+              shown={allMovements.length}
+              total={mvTotal}
+              hasMore={mvHasMore}
+              loadingMore={mvLoadingMore}
+              error={mvError}
+              onRetry={mvRetry}
+              noun={['mouvement', 'mouvements']}
+            />
+          )}
         </div>
       )}
 

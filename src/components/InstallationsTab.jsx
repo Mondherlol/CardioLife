@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   HeartPulse, Search, X, MapPin, User, Calendar, CheckCircle2,
-  Clock, AlertTriangle, ChevronLeft, ChevronRight,
+  Clock, AlertTriangle,
 } from 'lucide-react'
 import { getInstallations } from '../api/installations'
 import InstallationCompleteModal from './InstallationCompleteModal'
+import ListFooter from './ListFooter'
+import { useProgressiveList } from '../hooks/useInfiniteList'
 import { useAuth } from '../context/AuthContext'
 import { isAdmin } from '../lib/access'
 
@@ -46,7 +48,9 @@ const FILTERS = [
   { value: 'faite',    label: 'Faites' },
 ]
 
-const PAGE_SIZE = 100
+/* Lignes montées par lot au défilement : le parc entier est déjà chargé, seul
+   son rendu se fait progressivement. */
+const RENDER_STEP = 50
 
 /**
  * Le parc vu sous l'angle du travail à faire : ce qui reste à poser, ce qui est
@@ -64,7 +68,6 @@ export default function InstallationsTab({ embedded = false }) {
   const [denied, setDenied]   = useState(false)
   const [search, setSearch]   = useState('')
   const [filter, setFilter]   = useState('')
-  const [page, setPage]       = useState(1)
   const [posing, setPosing]   = useState(null)
 
   const load = useCallback(async () => {
@@ -84,7 +87,6 @@ export default function InstallationsTab({ embedded = false }) {
   }, [])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setPage(1) }, [search, filter])
 
   const rows = useMemo(() => all.map(i => ({ ...i, bucket: bucketOf(i) })), [all])
 
@@ -121,8 +123,8 @@ export default function InstallationsTab({ embedded = false }) {
     })
   }, [rows, filter, search])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pageItems  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  // Nouveaux critères : le rendu repart du premier lot.
+  const progressive = useProgressiveList(filtered, { step: RENDER_STEP, resetKey: `${search}|${filter}` })
 
   if (denied) {
     return (
@@ -209,7 +211,7 @@ export default function InstallationsTab({ embedded = false }) {
               </tr>
             </thead>
             <tbody>
-              {pageItems.map(inst => {
+              {progressive.visible.map(inst => {
                 const late = inst.bucket === 'en_cours' && inst.scheduledDate &&
                   new Date(inst.scheduledDate) < new Date(new Date().setHours(0, 0, 0, 0))
                 return (
@@ -277,18 +279,14 @@ export default function InstallationsTab({ embedded = false }) {
             </tbody>
           </table>
 
-          {totalPages > 1 && (
-            <div className="pagination">
-              <button className="pag-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-                <ChevronLeft size={15} />
-              </button>
-              <span className="pag-info">
-                Page {page} / {totalPages} · {filtered.length} installation{filtered.length !== 1 ? 's' : ''}
-              </span>
-              <button className="pag-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
-                <ChevronRight size={15} />
-              </button>
-            </div>
+          {filtered.length > 0 && (
+            <ListFooter
+              sentinelRef={progressive.sentinelRef}
+              shown={progressive.shown}
+              total={filtered.length}
+              hasMore={progressive.hasMore}
+              noun={['installation', 'installations']}
+            />
           )}
         </div>
       )}

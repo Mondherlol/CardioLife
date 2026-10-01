@@ -4,10 +4,10 @@ import { toast } from 'react-toastify'
 import {
   ArrowLeft, Pencil, SlidersHorizontal, X, AlertTriangle, Package,
   TrendingUp, TrendingDown, History, User, ImagePlus,
-  Hash, Layers, Search, Boxes, Camera,
+  Hash, Layers, Search, Boxes, Camera, Building2,
 } from 'lucide-react'
 import {
-  getProduct, getMovements, adjustStock,
+  getProduct, getMovements, adjustStock, getProductInstallations,
   uploadProductImage, deleteProductImage, productImageUrl,
 } from '../api/products'
 import { useLoadingBar } from '../hooks/useLoadingBar'
@@ -553,9 +553,94 @@ function ProductPhoto({ product, onChanged }) {
    de ses mouvements. Tout ce qui décrit le produit lui-même s'édite dans la
    modale « Modifier ». */
 const TABS = [
-  { key: 'articles',   label: 'Articles',   icon: Boxes   },
-  { key: 'mouvements', label: 'Mouvements', icon: History },
+  { key: 'articles',   label: 'Articles',         icon: Boxes     },
+  { key: 'clients',    label: 'Chez les clients', icon: Building2 },
+  { key: 'mouvements', label: 'Mouvements',       icon: History   },
 ]
+
+/* ── Chez les clients ─────────────────────────────────────────
+   Les DAE du parc où ce produit est posé : l'appareil lui-même, ou une pièce
+   montée dessus (batterie, électrodes, armoire). Une pièce reprise d'un fichier
+   sans n° de lot n'a pas d'exemplaire au stock : c'est ici qu'on la retrouve. */
+const ROLE_LABELS = { dae: 'Appareil', batterie: 'Batterie', electrodes: 'Électrodes', armoire: 'Armoire' }
+const KIND_LABELS = { adulte: 'adulte', enfant: 'pédiatriques' }
+
+function shortDate(d) {
+  return d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null
+}
+function expiryTone(d) {
+  if (!d) return 'ok'
+  const days = Math.round((new Date(d) - new Date()) / 86400000)
+  return days < 0 ? 'overdue' : days <= 60 ? 'soon' : 'ok'
+}
+
+function InstalledState({ row }) {
+  if (row.role === 'armoire') {
+    if (row.pilesStatus === 'a_remplacer') return <span className="next-ctrl next-ctrl--overdue">Piles à remplacer</span>
+    if (row.pilesStatus === 'ok') return <span className="next-ctrl next-ctrl--ok">Piles en état</span>
+    return <span className="cell-muted">Piles non contrôlées</span>
+  }
+  if (row.role === 'dae') {
+    return row.date ? <span className="cell-muted">Posé le {shortDate(row.date)}</span> : <span className="cell-muted">—</span>
+  }
+  return (
+    <span className="installed-state">
+      {row.level != null && (
+        <span className={`next-ctrl next-ctrl--${row.level <= 25 ? 'overdue' : row.level < 50 ? 'soon' : 'ok'}`}>{row.level} %</span>
+      )}
+      {row.expiryDate
+        ? <span className={`next-ctrl next-ctrl--${expiryTone(row.expiryDate)}`}>DLC {shortDate(row.expiryDate)}</span>
+        : <span className="cell-muted">DLC —</span>}
+    </span>
+  )
+}
+
+function InstalledTab({ rows, loading, onOpenClient, onOpenDevice }) {
+  if (loading) return <div className="table-loading" style={{ padding: '32px 0' }}><span className="spinner" /></div>
+  if (!rows.length) {
+    return (
+      <div className="pd-empty">
+        <Building2 size={28} color="var(--gray-300)" />
+        <p>Ce produit n'est posé sur aucun DAE du parc.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Client / Site</th>
+            <th>DAE</th>
+            <th>Monté comme</th>
+            <th>État</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={`${r.dea}-${r.role}-${i}`} className="row--clickable" onClick={() => onOpenDevice(r.dea)}>
+              <td>
+                <button type="button" className="cell-primary cell-link" disabled={!r.client}
+                  onClick={e => { e.stopPropagation(); if (r.client) onOpenClient(r.client) }}>
+                  {r.clientName || '—'}
+                </button>
+                <div className="cell-secondary">{r.siteName}{r.location ? ` · ${r.location}` : ''}</div>
+              </td>
+              <td>
+                <div className="cell-primary">{r.deviceType || 'DAE'}</div>
+                {r.serialNumber && <div className="cell-secondary">{r.serialNumber}</div>}
+              </td>
+              <td className="cell-muted">
+                {ROLE_LABELS[r.role]}{r.role === 'electrodes' && KIND_LABELS[r.kind] ? ` ${KIND_LABELS[r.kind]}` : ''}
+              </td>
+              <td><InstalledState row={r} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 export default function ProductDetailPage() {
   const { id }   = useParams()
@@ -570,6 +655,8 @@ export default function ProductDetailPage() {
   const [adjOpen,    setAdjOpen]    = useState(false)
   const [activeTab,  setActiveTab]  = useState('articles')
   const [mvDetail,   setMvDetail]   = useState(null)
+  const [installed,  setInstalled]  = useState([])
+  const [instLoading, setInstLoading] = useState(true)
 
   useLoadingBar(loading)
 
@@ -598,6 +685,17 @@ export default function ProductDetailPage() {
 
   useEffect(() => { loadProduct()   }, [loadProduct])
   useEffect(() => { loadMovements() }, [loadMovements])
+
+  // Les DAE où ce produit est posé — appareil, batterie, électrodes ou armoire.
+  useEffect(() => {
+    let alive = true
+    setInstLoading(true)
+    getProductInstallations(id)
+      .then(rows => { if (alive) setInstalled(Array.isArray(rows) ? rows : []) })
+      .catch(() => { if (alive) setInstalled([]) })
+      .finally(() => { if (alive) setInstLoading(false) })
+    return () => { alive = false }
+  }, [id])
   useEffect(() => {
     getProductCategories().then(d => setCategories(Array.isArray(d) ? d : [])).catch(() => {})
   }, [])
@@ -670,6 +768,9 @@ export default function ProductDetailPage() {
               {t.key === 'mouvements' && !mvLoading && movements.length > 0 && (
                 <span className="pd-count">{movements.length}</span>
               )}
+              {t.key === 'clients' && !instLoading && installed.length > 0 && (
+                <span className="pd-count">{installed.length}</span>
+              )}
             </button>
           )
         })}
@@ -677,6 +778,15 @@ export default function ProductDetailPage() {
 
       {activeTab === 'articles' && (
         <ProductItemsTab product={product} category={category} onStockChanged={refresh} />
+      )}
+
+      {activeTab === 'clients' && (
+        <InstalledTab
+          rows={installed}
+          loading={instLoading}
+          onOpenClient={cid => navigate(`/clients/${cid}`)}
+          onOpenDevice={deaId => navigate(`/devices/${deaId}`)}
+        />
       )}
 
       {activeTab === 'mouvements' && (

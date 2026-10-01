@@ -6,7 +6,7 @@ import {
   XCircle, AlertTriangle, ChevronRight, RotateCcw, Check,
   Users, Info, Building2, HeartPulse, Columns3, CalendarClock,
   Package, Sparkles, Link2, Ban, Calendar, FileSignature, Wand2,
-  ClipboardList, GitMerge, Archive, ShieldAlert,
+  ClipboardList, GitMerge, Archive, ShieldAlert, BatteryMedium,
 } from 'lucide-react'
 import { validateImport, executeImport } from '../api/clients'
 import { toast } from 'react-toastify'
@@ -1007,6 +1007,44 @@ export default function ClientImportPage() {
               </div>
             )}
 
+            {/* Pièces montées sur les DAE : au catalogue, et rattachées à leur appareil. */}
+            {validation.parts?.length > 0 && (
+              <div className="ci-card">
+                <div className="ci-card-header">
+                  <BatteryMedium size={15} />
+                  <span>Batteries, électrodes et armoires ({validation.parts.length})</span>
+                </div>
+                <div className="ci-card-body">
+                  <p className="ci-format-intro">
+                    Chaque pièce citée dans le fichier est rattachée à son DAE, et son modèle entre
+                    au catalogue s'il n'y est pas — les électrodes par modèle d'appareil, car elles
+                    ne vont pas d'un DAE à l'autre. Sans n° de lot dans le fichier, aucun article de
+                    stock n'est créé : la fiche du produit liste les DAE où il est posé.
+                  </p>
+                  <div className="ci-parts">
+                    {[['batteries', 'Batteries'], ['electrodes', 'Électrodes'], ['armoires', 'Armoires']].map(([cat, label]) => {
+                      const list = validation.parts.filter(p => p.category === cat)
+                      if (!list.length) return null
+                      return (
+                        <div key={cat} className="ci-parts-group">
+                          <span className="ci-parts-title">{label}</span>
+                          {list.map(p => (
+                            <span key={p.key} className="ci-part">
+                              {p.name}
+                              <span className="ci-model-count">× {p.count}</span>
+                              {p.exists
+                                ? <span className="ci-model-badge ci-model-badge--ok"><CheckCircle2 size={11} /> au catalogue</span>
+                                : <span className="ci-model-badge ci-model-badge--new"><Sparkles size={11} /> créé</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Options d'import */}
             <div className="ci-card">
               <div className="ci-card-header">
@@ -1206,6 +1244,11 @@ export default function ClientImportPage() {
               {importRes.summary.modelsCreated > 0 && (
                 <div className="ci-summary-chip ci-summary-chip--total">
                   <Sparkles size={14} /><strong>{importRes.summary.modelsCreated}</strong> modèle(s) créé(s)
+                </div>
+              )}
+              {importRes.summary.partsCreated > 0 && (
+                <div className="ci-summary-chip ci-summary-chip--total">
+                  <BatteryMedium size={14} /><strong>{importRes.summary.partsCreated}</strong> batterie(s), électrode(s) ou armoire(s) au catalogue
                 </div>
               )}
             </div>

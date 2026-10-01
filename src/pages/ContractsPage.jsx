@@ -1,17 +1,20 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   Search, X, FileText, AlertTriangle, Archive, RotateCcw, Trash,
-  ChevronLeft, ChevronRight, Users, Building2, Calendar, Zap, Clock, CheckCircle2,
+  Users, Building2, Calendar, Zap, Clock, CheckCircle2,
 } from 'lucide-react'
 import {
   getContracts, getContractStats, archiveContract, restoreContract, destroyContract,
   CONTRACT_STATUSES, formatPrice,
 } from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
+import { useInfiniteList, useDebouncedValue } from '../hooks/useInfiniteList'
+import ListFooter from '../components/ListFooter'
 
-const LIMIT = 20
+/* Lots chargés au défilement : un lot remplit largement un écran. */
+const PAGE_SIZE = 30
 const STATUS_MAP = Object.fromEntries(CONTRACT_STATUSES.map(s => [s.value, s]))
 
 function formatApiError(err) {
@@ -62,46 +65,44 @@ export default function ContractsPage() {
   const navigate = useNavigate()
 
   const [tab,        setTab]        = useState('active')
-  const [contracts,  setContracts]  = useState([])
   const [stats,      setStats]      = useState(null)
-  const [total,      setTotal]      = useState(0)
-  const [page,       setPage]       = useState(1)
   const [search,     setSearch]     = useState('')
+  // Une requête par recherche, pas par lettre tapée.
+  const query = useDebouncedValue(search.trim(), 300)
   const [statusF,    setStatusF]    = useState('')
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState('')
   const [archiving,  setArchiving]  = useState(null)
   const [destroying, setDestroying] = useState(null)
-
-  useLoadingBar(loading)
+  const tableWrapRef = useRef(null)
 
   const isArchived = tab === 'archived'
-  const totalPages = Math.ceil(total / LIMIT)
 
   const fetchStats = useCallback(async () => {
     try { setStats(await getContractStats()) } catch (_) {}
   }, [])
 
-  const fetchContracts = useCallback(async () => {
-    setLoading(true); setError('')
-    try {
-      const params = { page, limit: LIMIT, archived: isArchived ? 'true' : 'false' }
-      if (search)  params.search = search
-      if (statusF) params.status = statusF
-      const res = await getContracts(params)
-      setContracts(res.data || [])
-      setTotal(res.total || 0)
-    } catch (err) {
-      const msg = formatApiError(err); setError(msg); toast.error(msg)
-    } finally { setLoading(false) }
-  }, [page, search, statusF, isArchived])
+  const fetchPage = useCallback(({ skip, limit }) => {
+    const params = { skip, limit, archived: isArchived ? 'true' : 'false' }
+    if (query)   params.search = query
+    if (statusF) params.status = statusF
+    return getContracts(params)
+  }, [query, statusF, isArchived])
+
+  const {
+    items: contracts, total, loading, loadingMore, error, hasMore, reload, retry, sentinelRef,
+  } = useInfiniteList(fetchPage, [fetchPage], { pageSize: PAGE_SIZE })
+
+  useLoadingBar(loading)
 
   useEffect(() => { fetchStats() }, [fetchStats])
-  useEffect(() => { fetchContracts() }, [fetchContracts])
-  useEffect(() => { setPage(1) }, [search, tab, statusF])
+  useEffect(() => { if (error) toast.error(error) }, [error])
+  // Nouveaux critères : la liste repart du haut.
+  useEffect(() => { if (tableWrapRef.current) tableWrapRef.current.scrollTop = 0 }, [fetchPage])
+
+  /* Après une action sur une ligne : la liste se recharge sans perdre sa place. */
+  function refresh() { reload(); fetchStats() }
 
   async function handleRestore(c) {
-    try { await restoreContract(c._id); toast.success('Contrat restauré.'); fetchContracts(); fetchStats() }
+    try { await restoreContract(c._id); toast.success('Contrat restauré.'); refresh() }
     catch (err) { toast.error(formatApiError(err)) }
   }
 
@@ -173,15 +174,15 @@ export default function ContractsPage() {
       </div>
 
       {/* Tableau */}
-      <div className="table-wrap">
-        {error && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
+      <div className="table-wrap" ref={tableWrapRef}>
+        {error && !contracts.length && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
         {loading ? (
           <div className="table-loading"><span className="spinner" /></div>
         ) : contracts.length === 0 ? (
           <div className="table-empty">
             <FileText size={36} color="var(--gray-300)" />
-            <p>{search || statusF ? 'Aucun contrat pour ces critères.' : isArchived ? 'Aucun contrat archivé.' : 'Aucun contrat enregistré.'}</p>
-            {!search && !isArchived && (
+            <p>{query || statusF ? 'Aucun contrat pour ces critères.' : isArchived ? 'Aucun contrat archivé.' : 'Aucun contrat enregistré.'}</p>
+            {!query && !isArchived && (
               <button className="btn btn--primary" onClick={() => navigate('/clients')}>
                 <Users size={14} /> Créer un contrat depuis la fiche d'un client
               </button>
@@ -270,16 +271,21 @@ export default function ContractsPage() {
             </tbody>
           </table>
         )}
-      </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="pagination">
-          <button className="pag-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={15} /></button>
-          <span className="pag-info">Page {page} / {totalPages}</span>
-          <button className="pag-btn" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={15} /></button>
-        </div>
-      )}
+        {/* Fin de liste : la sentinelle charge le lot suivant à l'approche du bas. */}
+        {!loading && contracts.length > 0 && (
+          <ListFooter
+            sentinelRef={sentinelRef}
+            shown={contracts.length}
+            total={total}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            error={error}
+            onRetry={retry}
+            noun={['contrat', 'contrats']}
+          />
+        )}
+      </div>
 
       {archiving && (
         <ConfirmModal
@@ -287,7 +293,7 @@ export default function ContractsPage() {
           confirmLabel="Archiver" danger
           body={<p className="delete-confirm-text">Archiver le contrat <strong>{archiving.contractNumber || archiving.clientName}</strong> ? Les installations liées restent dans le parc.</p>}
           onClose={() => setArchiving(null)}
-          onConfirm={async () => { await archiveContract(archiving._id); toast.success('Contrat archivé.'); setArchiving(null); fetchContracts(); fetchStats() }}
+          onConfirm={async () => { await archiveContract(archiving._id); toast.success('Contrat archivé.'); setArchiving(null); refresh() }}
         />
       )}
       {destroying && (
@@ -296,7 +302,7 @@ export default function ContractsPage() {
           confirmLabel="Supprimer définitivement" danger
           body={<div className="destroy-warning"><AlertTriangle size={18} /><p>Action <strong>irréversible</strong>. Les installations liées ne sont pas supprimées.</p></div>}
           onClose={() => setDestroying(null)}
-          onConfirm={async () => { await destroyContract(destroying._id); toast.success('Contrat supprimé.'); setDestroying(null); fetchContracts(); fetchStats() }}
+          onConfirm={async () => { await destroyContract(destroying._id); toast.success('Contrat supprimé.'); setDestroying(null); refresh() }}
         />
       )}
     </div>

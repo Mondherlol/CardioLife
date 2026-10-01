@@ -386,6 +386,33 @@ const BATTERIES = [
     aliases: ['pile cr123', 'piles cr123', 'pile cr123a', 'piles cr123a', 'cr123', 'cr123a', 'duracell cr123a'] },
 ]
 
+/* Pièces montées sur les DAE — batteries, électrodes, armoires. Elles entrent
+   au catalogue comme les modèles d'appareils, et chaque DAE pointe vers les
+   siennes. Une batterie ou des électrodes ne vont que sur une famille
+   d'appareils : leur nom porte cette famille (les G5 automatique et
+   semi-automatique partagent les mêmes). */
+const FAMILY_LABELS = { g5: 'Powerheart G5', g3: 'Powerheart G3', 'zoll-plus': 'ZOLL AED Plus', 'zoll-3': 'ZOLL AED 3' }
+const ELECTRODE_LABELS = {
+  adulte:      'Électrodes adulte',
+  rcp:         'Électrodes adulte avec capteur RCP',
+  universelle: 'Électrodes universelles',
+  enfant:      'Électrodes pédiatriques',
+}
+const PART_CATEGORIES = { batteries: 'batteries', electrodes: 'electrodes', armoires: 'armoires' }
+
+/** Famille d'appareils d'un modèle, telle qu'elle se lit dans le nom d'une pièce. */
+function partsFamily(model) {
+  const m = canonicalModel(model)
+  return { label: FAMILY_LABELS[m.family] || m.label || '', brand: m.brand || '' }
+}
+
+function electrodeName(type, model) {
+  const { label } = partsFamily(model)
+  return label ? `${ELECTRODE_LABELS[type]} ${label}` : ELECTRODE_LABELS[type]
+}
+
+const armoireProductName = model => (model ? `Armoire ${model}` : '')
+
 /* Armoires du parc : ramenées à un libellé unique, comme les modèles de DAE. */
 const ARMOIRES = [
   { label: 'AIVIA 100', aliases: ['aivia 100', 'aivia100'] },
@@ -1507,10 +1534,11 @@ function finalizeDea(dea, ctx) {
   dea.electrodes = []
   const a = best(adult), u = best(univ), c = best(child)
   if (a) dea.electrodes.push({ kind: 'adulte', expiry: a.expiry, lot: a.lot || '',
-    productName: a.name || (a.rcp ? 'Électrodes adulte avec capteur RCP' : 'Électrodes adulte') })
-  if (u) dea.electrodes.push({ kind: '', expiry: u.expiry, lot: '', productName: 'Électrodes universelles' })
+    productName: a.name || electrodeName(a.rcp ? 'rcp' : 'adulte', dea.model) })
+  if (u) dea.electrodes.push({ kind: '', expiry: u.expiry, lot: '',
+    productName: electrodeName('universelle', dea.model) })
   if (c) dea.electrodes.push({ kind: 'enfant', expiry: c.expiry, lot: c.lot || '',
-    productName: c.name || 'Électrodes pédiatriques' })
+    productName: c.name || electrodeName('enfant', dea.model) })
 
   /* Armoire : son modèle, et l'état des piles de l'alarme constaté — daté du
      dernier contrôle quand le fichier en donne un. */
@@ -2098,6 +2126,14 @@ async function validate(req, res) {
   const sites = plan.clients.flatMap(c => c.sites)
   const deas  = sites.flatMap(s => s.deas)
 
+  // Pièces rattachées aux DAE : celles que le catalogue n'a pas encore seront créées.
+  const parts = collectParts(plan.clients)
+  const knownParts = parts.length
+    ? await Product.find({ $or: parts.map(p => ({ name: exactRe(p.name) })) }).select('name').lean()
+    : []
+  const knownPartKeys = new Set(knownParts.map(p => keyOf(p.name)))
+  parts.forEach(p => { p.exists = knownPartKeys.has(p.key) })
+
   res.json({
     sheetName,
     columns: columns.map(c => ({
@@ -2111,6 +2147,7 @@ async function validate(req, res) {
     dateFormat: { order, certain: detected.certain, forced: ['dmy', 'mdy'].includes(forced) },
     models,
     catalog,
+    parts,
     results,
     analysis: report.toJSON(),
     clientGroups: suggestClientMerges(plan.clients),
@@ -2201,6 +2238,73 @@ async function buildModelMap(decisions, labels, userId) {
   return { map, created }
 }
 
+/* ── Pièces : batteries, électrodes, armoires ────────────────── */
+
+/**
+ * Pièces citées par le plan, une entrée par modèle : c'est la liste des
+ * produits que l'import rattache aux DAE — et crée au catalogue s'il ne les
+ * connaît pas encore.
+ */
+function collectParts(clients) {
+  const parts = new Map()
+  const add = (category, name, brand) => {
+    if (!name) return
+    const key = keyOf(name)
+    if (!parts.has(key)) parts.set(key, { key, category, name, brand: brand || '', count: 0 })
+    parts.get(key).count++
+  }
+  for (const c of clients) for (const s of c.sites) for (const d of s.deas) {
+    const family = partsFamily(d.model)
+    if (d.battery?.productName) {
+      // Des piles CR123A du commerce ne sont pas une pièce de la marque de l'appareil.
+      add(PART_CATEGORIES.batteries, d.battery.productName, /^piles?\b/i.test(d.battery.productName) ? '' : family.brand)
+    }
+    for (const e of d.electrodes || []) add(PART_CATEGORIES.electrodes, e.productName, family.brand)
+    if (d.armoire?.model) {
+      add(PART_CATEGORIES.armoires, armoireProductName(d.armoire.model),
+        /^aivia\b/i.test(d.armoire.model) ? 'AIVIA' : '')
+    }
+  }
+  return [...parts.values()].sort((a, b) => a.category.localeCompare(b.category) || b.count - a.count)
+}
+
+/**
+ * Produits du catalogue pour ces pièces : repris s'ils existent sous le même
+ * nom, créés sinon dans leur catégorie. Rend la table « nom → produit ».
+ *
+ * Aucun exemplaire de stock n'est créé pour elles : le fichier ne donne ni
+ * n° de lot ni n° de série, et une pièce sans numéro ne se suit pas au stock
+ * — elle repartirait « disponible » le jour où on la remplace sur le DAE.
+ */
+async function buildPartsMap(parts, userId) {
+  const map     = new Map()
+  const created = []
+  if (!parts.length) return { map, created }
+
+  await seedIfEmpty()
+  const categories = new Set((await ProductCategory.find().select('slug').lean()).map(c => c.slug))
+
+  for (const part of parts) {
+    let product = await Product.findOne({ name: exactRe(part.name) }).select('_id name').lean()
+    if (!product) {
+      const lotTracked = part.category === PART_CATEGORIES.batteries || part.category === PART_CATEGORIES.electrodes
+      product = await Product.create({
+        name:      part.name,
+        brand:     part.brand,
+        category:  categories.has(part.category) ? part.category : 'autres',
+        requiresLotNumber: lotTracked,
+        stock: 0,
+        listedOnWebsite: false,
+        notes: 'Modèle créé par l’import du parc',
+        createdBy: userId,
+      })
+      created.push({ _id: String(product._id), name: product.name, category: part.category })
+    }
+    map.set(part.key, product._id)
+  }
+  return { map, created }
+}
+
 /* ── Écriture d'un DAE ───────────────────────────────────────── */
 
 function mergeNotes(existing, lines) {
@@ -2215,7 +2319,8 @@ function mergeNotes(existing, lines) {
  * n-ième appareil du même modèle au même emplacement — ce qui garde un
  * second import du même fichier sans doublon. Rien de vide n'efface l'existant.
  */
-function upsertDea(site, pd, productId, used) {
+function upsertDea(site, pd, productId, used, partsMap = new Map()) {
+  const partOf = name => (name ? partsMap.get(keyOf(name)) || null : null)
   let dea
   if (pd.serial) {
     dea = site.deas.find(d => serialKey(d.serialNumber) === serialKey(pd.serial))
@@ -2252,6 +2357,7 @@ function upsertDea(site, pd, productId, used) {
       batt = dea.batteries[dea.batteries.length - 1]
     }
     if (b0.productName) batt.productName    = b0.productName
+    if (partOf(b0.productName)) batt.product = partOf(b0.productName)
     if (b0.serial)      batt.serialNumber   = b0.serial
     if (b0.lot)         batt.lotNumber      = b0.lot
     if (b0.activation)  batt.activationDate = asDate(b0.activation)
@@ -2268,6 +2374,7 @@ function upsertDea(site, pd, productId, used) {
     }
     elec.kind = e.kind
     if (e.productName) elec.productName = e.productName
+    if (partOf(e.productName)) elec.product = partOf(e.productName)
     if (e.lot)         elec.lotNumber   = e.lot
     if (e.expiry)      elec.expiryDate  = asDate(e.expiry)
   }
@@ -2275,6 +2382,8 @@ function upsertDea(site, pd, productId, used) {
   if (pd.armoire) {
     if (!dea.armoire) dea.armoire = {}
     if (pd.armoire.model) dea.armoire.model = pd.armoire.model
+    const armoireProduct = partOf(armoireProductName(pd.armoire.model))
+    if (armoireProduct) dea.armoire.product = armoireProduct
     if (pd.armoire.pilesStatus) {
       dea.armoire.pilesStatus = pd.armoire.pilesStatus
       if (pd.armoire.pilesCheckedAt) dea.armoire.pilesCheckedAt = asDate(pd.armoire.pilesCheckedAt)
@@ -2567,6 +2676,16 @@ async function execute(req, res) {
     return res.status(400).json({ message: `Modèles de DAE : ${err.message}` })
   }
 
+  // Batteries, électrodes et armoires : au catalogue, et rattachées à leur DAE.
+  let partsMap, partsCreated
+  try {
+    const built  = await buildPartsMap(collectParts(plan.clients), req.user._id)
+    partsMap     = built.map
+    partsCreated = built.created
+  } catch (err) {
+    return res.status(400).json({ message: `Batteries, électrodes et armoires : ${err.message}` })
+  }
+
   const nextNumber = await contractNumberer()
   const results = []
 
@@ -2615,7 +2734,7 @@ async function execute(req, res) {
         const used = new Map()
         for (const pd of ps.deas) {
           const productId = modelMap.get(keyOf(pd.model)) || null
-          const { dea, created } = upsertDea(site, pd, productId, used)
+          const { dea, created } = upsertDea(site, pd, productId, used, partsMap)
           pd.ref = dea
           if (created) deasCreated++; else deasUpdated++
         }
@@ -2693,6 +2812,7 @@ async function execute(req, res) {
   res.json({
     results,
     modelsCreated,
+    partsCreated,
     reset: resetReport,
     summary: {
       imported: results.filter(r => r.success).length,
@@ -2707,6 +2827,7 @@ async function execute(req, res) {
       controlsPlanned:  sum('controlsPlanned'),
       controlsHistory:  sum('controlsHistory'),
       modelsCreated:    modelsCreated.length,
+      partsCreated:     partsCreated.length,
     },
   })
 }

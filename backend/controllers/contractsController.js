@@ -6,6 +6,7 @@ const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
 const { listInstallations } = require('../utils/deaParc')
 const { syncContractControls, syncSiteNextControl, addMonths } = require('../utils/controls')
+const { pageParams, pageResult, searchRegex } = require('../utils/paging')
 
 const { STATUSES } = Contract
 
@@ -83,28 +84,28 @@ async function getStats(req, res) {
 
 /* ── Liste ────────────────────────────────────────────── */
 async function getAll(req, res) {
-  const { search, status, type, client, site, page = 1, limit = 20, archived = 'false' } = req.query
+  const { search, status, type, client, site, archived = 'false' } = req.query
+  const paging = pageParams(req.query)
 
   const filter = { isActive: archived === 'true' ? false : true }
   if (status) filter.status = status
   if (type)   filter.type   = type
   if (client) filter.client = client
   if (site)   filter.site   = site
-  const q = search?.trim() || ''
-  if (q) {
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = { $regex: escaped, $options: 'i' }
-    filter.$or = [{ contractNumber: re }, { clientName: re }, { siteName: re }]
-  }
+  const re = searchRegex(search)
+  if (re) filter.$or = [{ contractNumber: re }, { clientName: re }, { siteName: re }]
 
-  const skip  = (Number(page) - 1) * Number(limit)
-  const total = await Contract.countDocuments(filter)
-  const data  = await Contract.find(filter)
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(Number(limit))
-    .populate(POPULATE)
-    .lean()
+  // `_id` départage les contrats créés dans la même seconde (import du parc) :
+  // sans lui, un lot chargé au défilement pourrait répéter ou sauter un contrat.
+  const [total, data] = await Promise.all([
+    Contract.countDocuments(filter),
+    Contract.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(paging.skip)
+      .limit(paging.limit)
+      .populate(POPULATE)
+      .lean(),
+  ])
 
   // Prochain contrôle par contrat (contrôle non terminé le plus proche)
   const ids = data.map(c => c._id)
@@ -121,7 +122,7 @@ async function getAll(req, res) {
     deaCount: deaCounts[String(c.site?._id || c.site)] || 0,
   }))
 
-  res.json({ data: rows, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) })
+  res.json(pageResult(rows, total, paging))
 }
 
 async function getById(req, res) {
