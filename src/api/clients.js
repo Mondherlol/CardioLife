@@ -48,10 +48,10 @@ export function validateImport(file, { dateFormat } = {}) {
   return authFetch(`${API_BASE}/clients/import/validate`, { method: 'POST', body: form })
 }
 
-export function executeImport(rows, { models = [], options = {} } = {}) {
+export function executeImport(rows, { models = [], clientMerges = [], options = {} } = {}) {
   return authFetch(`${API_BASE}/clients/import/execute`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ rows, models, options }),
+    body:    JSON.stringify({ rows, models, clientMerges, options }),
   })
 }

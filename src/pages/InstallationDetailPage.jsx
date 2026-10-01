@@ -4,9 +4,10 @@ import {
   ArrowLeft, Pencil, Trash2, Zap, MapPin, Calendar,
   Activity, AlertTriangle, X, Battery, Plus, CheckCircle2,
   ClipboardList, Clock, ChevronRight, Check, User, Wrench, FileText,
-  Save, CalendarClock,
+  Save, CalendarClock, Archive,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
+import { armoireStatus } from '../components/siteHelpers'
 import { useAuth } from '../context/AuthContext'
 import { getInstallation, deleteInstallation, updateInstallation, completeInstallation } from '../api/installations'
 import { getInterventions, createIntervention, deleteIntervention } from '../api/interventions'
@@ -633,6 +634,27 @@ export default function InstallationDetailPage() {
                 </dl>
               </div>
             ))}
+
+            {/* Armoire sonore : ses piles se contrôlent comme la batterie du DAE. */}
+            {inst.armoire && (inst.armoire.model || inst.armoire.pilesStatus) && (() => {
+              const st = armoireStatus(inst.armoire)
+              return (
+                <div className="inst-section-card">
+                  <div className="inst-section-title">
+                    <Archive size={14} /> Armoire
+                    {st.model && <span className="inst-section-subtitle">{st.model}</span>}
+                  </div>
+                  <dl className="inst-details-grid">
+                    <DetailItem label="Piles de l'alarme" value={
+                      <span className={`items-cell-date items-cell-date--${st.level}`}>{st.piles.label}</span>
+                    } />
+                    <DetailItem label="Dernier contrôle des piles" value={formatDate(inst.armoire.pilesCheckedAt)} />
+                    <DetailItem label="Dernier remplacement"       value={formatDate(inst.armoire.pilesReplacedAt)} />
+                    <DetailItem label="Notes"                      value={inst.armoire.notes} />
+                  </dl>
+                </div>
+              )
+            })()}
 
             <div className="inst-section-card">
               <div className="inst-section-title"><Calendar size={14} /> Suivi</div>

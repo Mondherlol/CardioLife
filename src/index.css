@@ -18303,6 +18303,160 @@ button {
 
 .ci-opt--sub .input { width: auto; }
 
+/* Contenu courant d'une carte d'import, aligné sur son en-tête. */
+.ci-card-body { padding: 14px 18px; }
+.ci-card-body > :last-child { margin-bottom: 0; }
+
+.ci-summary-chip--info {
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+
+/* Précision accolée à une pastille (« dont 22 sans n° »). */
+.ci-chip-sub {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ci-sheet-name {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Corrections appliquées d'office à une ligne. */
+.ci-fix-list li { color: var(--blue-600); }
+
+.ci-row-filter {
+  margin-left: auto;
+  width: auto;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* ── Analyse du fichier ──────────────────────────────── */
+.ci-an-section {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.ci-an-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+.ci-an-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ci-an-head:hover { background: var(--gray-50); }
+.ci-an-group--warn  .ci-an-head svg:first-child { color: var(--amber-500); }
+.ci-an-group--error .ci-an-head svg:first-child { color: var(--red-500); }
+.ci-an-group--info  .ci-an-head svg:first-child { color: var(--blue-500); }
+
+.ci-an-title { flex: 1; font-weight: 600; min-width: 0; }
+
+.ci-an-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ci-an-body {
+  padding: 4px 12px 10px 34px;
+  border-top: 1px solid var(--border-light);
+}
+
+.ci-an-hint {
+  margin: 6px 0;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.ci-an-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ci-an-items li {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.ci-an-rows {
+  flex-shrink: 0;
+  max-width: 40%;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* ── Clients à regrouper ─────────────────────────────── */
+.ci-merge {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.ci-merge--on { border-color: var(--brand); background: var(--brand-light); }
+
+.ci-merge-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.ci-merge-names {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ci-merge-reasons {
+  margin: 3px 0 0 24px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.ci-merge .ci-choice-fields { padding: 8px 0 2px 24px; }
+
+@media (max-width: 720px) {
+  .ci-an-items li { flex-direction: column; gap: 0; }
+  .ci-an-rows { max-width: none; text-align: left; }
+  .ci-row-filter { max-width: 55%; }
+}
+
 
 /* ── Photo du produit dans l'en-tête ──────────────────────
    Un seul visuel, cliquable : il remplace l'ancienne galerie de l'onglet
@@ -21116,3 +21270,115 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 }
 .sp-backup .sp-danger-head,
 .sp-backup .sp-danger-title { color: var(--text-primary); }
+
+/* ═══════════════════════════════════════════════════════════
+   ARMOIRES — modèle et piles de l'alarme
+   L'armoire est sonore : l'état de ses piles se lit comme celui
+   des consommables, et nourrit l'alerte du tableau de bord.
+   ═══════════════════════════════════════════════════════════ */
+.arm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--gray-50);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.12s;
+}
+.arm-chip:hover { filter: brightness(0.95); }
+.arm-chip--full { padding: 4px 9px; font-size: 11.5px; }
+.arm-chip--ok      { background: var(--green-50); border-color: var(--green-100); color: var(--green-700); }
+.arm-chip--expired { background: var(--red-50);   border-color: var(--red-100);   color: var(--red-700); }
+.arm-chip--unknown { background: var(--blue-50);  border-color: var(--blue-100);  color: var(--blue-700); }
+.arm-chip--none    { color: var(--text-muted); border-style: dashed; }
+
+.arm-chip-state {
+  padding-left: 5px;
+  margin-left: 1px;
+  border-left: 1px solid currentColor;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+.arm-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.arm-replaced-btn { margin-top: 8px; }
+
+.choice-btn--on-red {
+  border-color: var(--red-600);
+  background: var(--red-50);
+  color: var(--red-700);
+  box-shadow: inset 0 0 0 1px var(--red-600);
+}
+
+/* Fenêtre de l'alerte « piles à remplacer » : un bloc par client. */
+.arm-alert-modal { max-width: 640px; }
+.arm-alert-intro { margin: 0 0 12px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
+.arm-alert-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.arm-alert-client { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+.arm-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: var(--gray-50);
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.arm-alert-head:hover:not(:disabled) { background: var(--gray-100); }
+.arm-alert-head:disabled { cursor: default; }
+.arm-alert-name { flex: 1; font-weight: 700; }
+.arm-alert-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--red-50);
+  color: var(--red-700);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.arm-alert-site { padding: 8px 12px 10px 34px; border-top: 1px solid var(--border-light); }
+.arm-alert-site-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.arm-alert-site ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.arm-alert-site li { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--text-primary); }
+.arm-alert-muted { color: var(--text-muted); }
+
+/* ── Import en mode « repartir de zéro » ─────────────────── */
+.ci-banner--danger {
+  margin: 0;
+  background: var(--red-50);
+  border-color: var(--red-100);
+  color: var(--red-700);
+}
+.ci-banner--danger svg { color: var(--red-600); }
+
+.ci-reset-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border-light);
+  background: var(--red-50);
+}
+
+.devfix-task--danger { border-color: var(--red-100); }
+.devfix-task--danger .devfix-task-icon { background: var(--red-50); color: var(--red-600); }
+
+@media (max-width: 720px) {
+  .arm-alert-site { padding-left: 12px; }
+}

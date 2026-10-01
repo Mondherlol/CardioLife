@@ -4,6 +4,7 @@ const fsp    = require('fs/promises')
 const crypto = require('crypto')
 const multer = require('multer')
 const AppSettings = require('../models/AppSettings')
+const { resetBusinessData } = require('../utils/resetData')
 
 /* Le logo vit avec les autres uploads : il doit survivre à un redéploiement du
    code, ce qui exclut de l'écrire dans les fichiers statiques du front. */
@@ -74,34 +75,11 @@ async function deleteLogo(req, res) {
 /* ── Réinitialisation de la base ──────────────────────────────── */
 
 /**
- * Collections vidées par la remise à zéro : toutes les données métier.
- *
- * `User` en est volontairement absent — c'est la seule chose qu'on garde, pour
- * ne pas se retrouver enfermé dehors. `AppSettings` aussi : ce sont les réglages
- * de l'application, pas des données saisies.
- */
-const RESET_MODELS = [
-  'Client', 'Site', 'Contract', 'Intervention', 'Control', 'Formation',
-  'Appointment', 'Replacement', 'Document',
-  'Product', 'ProductCategory', 'ProductItem', 'StockMovement', 'Pack',
-].map(name => ({ name, model: require(`../models/${name}`) }))
-
-/* Dossiers d'uploads liés à ces données : les fichiers n'auraient plus aucun
-   enregistrement pour les désigner. `avatars` reste — il appartient aux users. */
-const RESET_UPLOAD_DIRS = ['clients', 'documents', 'formations', 'interventions', 'products']
-
-async function emptyDir(dir) {
-  const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])
-  for (const entry of entries) {
-    await fsp.rm(path.join(dir, entry.name), { recursive: true, force: true }).catch(() => {})
-  }
-}
-
-/**
  * POST /api/app-settings/reset — remise à zéro complète, hors comptes.
  *
  * Réservée au super admin et protégée par une phrase de confirmation : le geste
- * est irréversible et ne doit pas pouvoir partir d'un clic malheureux.
+ * est irréversible et ne doit pas pouvoir partir d'un clic malheureux. Ce qui
+ * est effacé — et ce qui survit — est décrit dans `utils/resetData`.
  */
 async function reset(req, res) {
   if (req.user.role !== 'superadmin') {
@@ -111,17 +89,10 @@ async function reset(req, res) {
     return res.status(422).json({ message: 'Confirmation manquante.' })
   }
 
-  const deleted = {}
-  for (const { name, model } of RESET_MODELS) {
-    const { deletedCount } = await model.deleteMany({})
-    deleted[name] = deletedCount
-  }
-
-  if (req.body?.keepFiles !== true) {
-    for (const dir of RESET_UPLOAD_DIRS) {
-      await emptyDir(path.join(__dirname, '..', 'uploads', dir))
-    }
-  }
+  const deleted = await resetBusinessData({
+    keepFiles: req.body?.keepFiles === true,
+    wipeTodos: req.body?.wipeTodos === true,
+  })
 
   console.warn(`[RESET] Base réinitialisée par ${req.user.username} (${req.user._id})`,
     JSON.stringify(deleted))

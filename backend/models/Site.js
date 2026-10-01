@@ -32,6 +32,26 @@ const batterySchema = new mongoose.Schema({
   notes:          { type: String, trim: true },
 })
 
+/* États des piles de l'alarme d'une armoire. Deux réponses suffisent à la
+   question que pose le contrôle : on les laisse, ou on les change. */
+const ARMOIRE_PILES = ['ok', 'a_remplacer', '']
+
+/**
+ * Armoire qui abrite le DEA.
+ *
+ * Les armoires sont sonores : leur alarme fonctionne sur piles, et ces piles
+ * font partie du contrôle technique au même titre que la batterie du DEA. On
+ * garde le dernier constat et le dernier remplacement — c'est ce qui alimente
+ * l'alerte « armoires dont les piles sont à remplacer ».
+ */
+const armoireSchema = new mongoose.Schema({
+  model:           { type: String, trim: true },   // AIVIA 100, AIVIA S, AIVIA IN…
+  pilesStatus:     { type: String, enum: ARMOIRE_PILES, default: '' },
+  pilesCheckedAt:  Date,                            // dernier constat de l'état des piles
+  pilesReplacedAt: Date,                            // dernier remplacement des piles
+  notes:           { type: String, trim: true },
+}, { _id: false })
+
 /* Un DEA posé sur le site. Seule source de vérité du parc : la collection
    Installation a été supprimée au profit de ces sous-documents. */
 const deaSchema = new mongoose.Schema({
@@ -58,6 +78,8 @@ const deaSchema = new mongoose.Schema({
 
   electrodes: { type: [electrodeSchema], default: [] },
   batteries:  { type: [batterySchema],   default: [] },
+  // Absente tant que personne n'a dit dans quelle armoire est l'appareil.
+  armoire:    { type: armoireSchema, default: undefined },
 
   notes: { type: String, trim: true },
 }, { timestamps: true })
@@ -103,3 +125,4 @@ siteSchema.index({ 'deas._id': 1 })
 siteSchema.index({ 'deas.serialNumber': 1 })
 
 module.exports = mongoose.model('Site', siteSchema)
+module.exports.ARMOIRE_PILES = ARMOIRE_PILES

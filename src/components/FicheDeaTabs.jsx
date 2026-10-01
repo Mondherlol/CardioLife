@@ -13,7 +13,7 @@ export function deaLabel(dea) {
 const PROGRESS_FIELDS = [
   'serialNumber', 'batteriePeremption', 'batteriePct', 'batterieEtat',
   'electrodesPeremptionAdulte', 'electrodesEmballage', 'electrodesAdaptees',
-  'voyantVert', 'autotests', 'armoireAccessible', 'observation',
+  'voyantVert', 'autotests', 'armoireAccessible', 'armoirePiles', 'observation',
 ]
 
 export function ficheProgress(f) {

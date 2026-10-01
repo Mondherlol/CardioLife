@@ -7,7 +7,7 @@ import {
   Shield, Battery, Radio, Package, StickyNote, Calendar, User,
   ChevronDown, ClipboardList, History, Download, FileText, Building2, Wrench, Check,
   Pencil, Lock, Unlock, BatteryMedium, AlertTriangle, GraduationCap, Minus, HeartPulse,
-  PlayCircle,
+  PlayCircle, Archive,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -22,7 +22,7 @@ import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
 import FicheDeaTabs, { deaLabel as deaLabelOf } from '../components/FicheDeaTabs'
 import DeaItemsModal from '../components/DeaItemsModal'
-import { expiryHint } from '../components/siteHelpers'
+import { expiryHint, ARMOIRE_MODELS } from '../components/siteHelpers'
 import {
   getReplacements, replacementKind, replacementStatus, replacementReason,
 } from '../api/replacements'
@@ -669,7 +669,11 @@ export default function InterventionFichePage() {
         autotests:         f.autotests,
         armoire:           f.armoire ?? '',
         armoireAccessible: f.armoireAccessible,
-        armoirePiles:      f.armoirePiles,
+        // Le modèle d'armoire est connu du parc : il n'a pas à être ressaisi.
+        armoireModele:          f.armoireModele || dea?.armoire?.model || '',
+        armoirePiles:           f.armoirePiles,
+        armoirePilesRemplacees: f.armoirePilesRemplacees,
+        armoirePilesNote:       f.armoirePilesNote ?? '',
 
         dernierControle:  f.dernierControle,
         prochainControle: f.prochainControle,
@@ -842,6 +846,7 @@ export default function InterventionFichePage() {
       key: String(dea._id), dea: dea._id, deaLabel: deaLabelOf(dea),
       serialNumber: dea.serialNumber || '', emplacement: dea.location || '',
       signaletique: '', electrodesType: '', armoire: '', observation: '',
+      armoireModele: dea.armoire?.model || '', armoirePilesNote: '',
       batterieNote: '', electrodesNote: '',
       batterieRemplaceeRef: '', electrodesRemplaceesRef: '', kitRemplaceRef: '',
     }])
@@ -1102,6 +1107,9 @@ export default function InterventionFichePage() {
      batterie que personne n'a identifiée. */
   const parcBatteries  = activeDea?.batteries  || []
   const parcElectrodes = activeDea?.electrodes || []
+  // Armoire telle que le parc la connaît : rappelée en tête de sa section.
+  const parcArmoire    = activeDea?.armoire && (activeDea.armoire.model || activeDea.armoire.pilesStatus)
+    ? activeDea.armoire : null
   /* Le verrou suppose un appareil connu du parc. Une fiche qui n'est rattachée
      à aucun DAE — visite d'avant les sites, appareil retiré du parc depuis —
      se saisit comme avant : la bloquer ne la rendrait pas plus juste. */
@@ -1757,27 +1765,77 @@ export default function InterventionFichePage() {
                   {savedField === 'autotests' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
 
-                {/* État général de l'appareil et de son armoire. */}
+                {/* État général de l'appareil. */}
                 <AutoField label="État général du DAE" icon={Shield}>
                   <div className="fiche-check-group">
                     <CheckPoint label="Voyant de fonctionnement au vert"
                       value={fiche.voyantVert} readOnly={readOnly}
                       onChange={v => checkPoint('voyantVert', v)} />
-                    <CheckPoint label="Armoire accessible et correctement signalée"
-                      value={fiche.armoireAccessible} readOnly={readOnly}
-                      onChange={v => checkPoint('armoireAccessible', v)} />
-                    <CheckPoint label="État des piles de l'armoire"
-                      value={fiche.armoirePiles} readOnly={readOnly}
-                      onChange={v => checkPoint('armoirePiles', v)} />
                   </div>
                 </AutoField>
 
-                <AutoField label="Armoire" icon={Package} saving={savingField === 'armoire'}>
+                {/* Armoire : sonore, ses piles font partie du contrôle. Le
+                    constat remonte sur la fiche client et alimente l'alerte
+                    « armoires dont les piles sont à remplacer ». */}
+                <AutoField label="Armoire" icon={Archive}
+                  saving={['armoire', 'armoireModele', 'armoirePilesNote'].includes(savingField)}>
+                  {parcArmoire && (
+                    <div className={`fiche-parc-bar${parcArmoire.pilesStatus === 'a_remplacer' ? ' fiche-parc-bar--missing' : ''}`}>
+                      <Archive size={14} />
+                      <span>
+                        Dernier état connu : <strong>{parcArmoire.model || 'modèle non renseigné'}</strong>
+                        {' · '}piles {parcArmoire.pilesStatus === 'a_remplacer' ? 'à remplacer'
+                          : parcArmoire.pilesStatus === 'ok' ? 'en état' : 'non contrôlées'}
+                        {parcArmoire.pilesCheckedAt && <> ({fmtShort(parcArmoire.pilesCheckedAt)})</>}
+                      </span>
+                    </div>
+                  )}
+
+                  <span className="fiche-sub-label">Modèle</span>
+                  <input {...field('armoireModele', fiche.armoireModele, 'Ex : AIVIA 100')} />
+                  {!readOnly && (
+                    <Presets presets={ARMOIRE_MODELS} value={fiche.armoireModele}
+                      onSelect={v => handlePreset('armoireModele', v)} />
+                  )}
+
+                  <span className="fiche-sub-label">État de l'armoire</span>
                   <input {...field('armoire', fiche.armoire, 'Description libre…')} />
                   {!readOnly && (
                     <Presets presets={ARM_PRESETS} value={fiche.armoire} onSelect={v => handlePreset('armoire', v)} />
                   )}
-                  {savedField === 'armoire' && <span className="fiche-saved-ok">✓</span>}
+
+                  <div className="fiche-check-group">
+                    <CheckPoint label="Armoire accessible et correctement signalée"
+                      value={fiche.armoireAccessible} readOnly={readOnly}
+                      onChange={v => checkPoint('armoireAccessible', v)} />
+                    <CheckPoint label="Alarme sonore : piles en état de marche"
+                      value={fiche.armoirePiles} readOnly={readOnly}
+                      onChange={v => checkPoint('armoirePiles', v)} />
+                    <div className="fiche-check">
+                      <span className="fiche-check-label">Piles de l'alarme remplacées</span>
+                      <div className="fiche-presets">
+                        {[{ v: true, label: 'Oui' }, { v: false, label: 'Non' }].map(o => (
+                          <button key={String(o.v)} type="button"
+                            className={`fiche-preset-chip${fiche.armoirePilesRemplacees === o.v ? ' fiche-preset-chip--active' : ''}`}
+                            disabled={readOnly}
+                            onClick={() => checkPoint('armoirePilesRemplacees',
+                              fiche.armoirePilesRemplacees === o.v ? undefined : o.v)}>
+                            {o.v ? <Check size={12} /> : <X size={12} />} {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <span className="fiche-sub-label">Note sur les piles</span>
+                  <textarea
+                    {...field('armoirePilesNote', fiche.armoirePilesNote, 'Type de piles posées, alarme testée…')}
+                    className={`fiche-input fiche-textarea-sm${readOnly ? ' fiche-input--ro' : ''}`}
+                    rows={2}
+                  />
+                  {['armoire', 'armoireModele', 'armoirePilesNote'].includes(savedField) && (
+                    <span className="fiche-saved-ok">✓</span>
+                  )}
                 </AutoField>
 
                 {/* Suivi documentaire — la date du prochain contrôle évite le

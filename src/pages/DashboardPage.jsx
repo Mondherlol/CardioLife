@@ -6,8 +6,9 @@ import {
   AlertTriangle, CalendarClock, Clock, User, MapPin,
   ArrowRight, ChevronRight,
   ChevronLeft, Plus, Activity, BatteryWarning, Zap,
-  CircleDot, TrendingUp, X, Check,
+  CircleDot, TrendingUp, X, Check, Archive,
 } from 'lucide-react'
+import ArmoirePilesModal from '../components/ArmoirePilesModal'
 import { useAuth } from '../context/AuthContext'
 import { canAccess } from '../lib/access'
 import { getAnnualIncreases, applyAnnualIncrease, formatPrice } from '../api/contracts'
@@ -630,6 +631,7 @@ export default function DashboardPage() {
   const [error, setError] = useState('')
   const [increases, setIncreases] = useState(null)
   const [showIncreases, setShowIncreases] = useState(false)
+  const [showArmoires, setShowArmoires] = useState(false)
   const canContracts = canAccess(user, 'contracts')
 
   useLoadingBar(loading)
@@ -753,10 +755,16 @@ export default function DashboardPage() {
       ;(inst.batteries || []).forEach(b => { const d = daysUntil(b.expiryDate); if (d != null && d <= 30) batteries++ })
       ;(inst.electrodes || []).forEach(e => { const d = daysUntil(e.expiryDate); if (d != null && d < 0) electrodes++ })
     })
+    /* Armoires sonores dont les piles de l'alarme sont à changer : le clic
+       ouvre la liste des clients concernés, pas une page générique. */
+    const armoires = installations.filter(i => i.armoire?.pilesStatus === 'a_remplacer').length
     return [
       { key: 'ctrl', count: late,       label: 'contrôles en retard',   icon: AlertTriangle,  tone: 'red',    to: '/planning' },
       { key: 'batt', count: batteries,  label: 'batteries à remplacer', icon: BatteryWarning, tone: 'amber',  to: '/stock?tab=parc&type=batterie' },
       { key: 'elec', count: electrodes, label: 'électrodes expirées',   icon: Zap,            tone: 'orange', to: '/stock?tab=parc&type=electrode' },
+      { key: 'arm',  count: armoires,
+        label: armoires > 1 ? 'armoires nécessitent un remplacement de piles' : 'armoire nécessite un remplacement de piles',
+        icon: Archive, tone: 'amber', onClick: () => setShowArmoires(true) },
     ].filter(a => a.count > 0)
   }, [installations])
 
@@ -857,7 +865,8 @@ export default function DashboardPage() {
               {ALERTS.map(a => {
                 const Icon = a.icon
                 return (
-                  <button key={a.key} className={`dfx-alert dfx-alert--${a.tone}`} onClick={() => go(a.to)}>
+                  <button key={a.key} className={`dfx-alert dfx-alert--${a.tone}`}
+                    onClick={() => (a.onClick ? a.onClick() : go(a.to))}>
                     <Icon size={14} /> <strong>{a.count}</strong> {a.label}
                     <ArrowRight size={13} className="dfx-alert-arrow" />
                   </button>
@@ -879,6 +888,14 @@ export default function DashboardPage() {
           )}
         </div>
       </header>
+
+      {showArmoires && (
+        <ArmoirePilesModal
+          installations={installations}
+          onClose={() => setShowArmoires(false)}
+          onOpenClient={id => navigate(`/clients/${id}`)}
+        />
+      )}
 
       {showIncreases && (
         <IncreasesModal

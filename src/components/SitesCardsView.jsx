@@ -2,7 +2,7 @@ import {
   Phone, Mail, Building2, MapPin, HeartPulse, Hash, CalendarDays, CalendarClock,
   ArrowUpRight, Plus,
 } from 'lucide-react'
-import { formatDate, ItemsButton, ContractChip, NoDeaBox, NextControlChip } from './siteHelpers'
+import { formatDate, ItemsButton, ContractChip, NoDeaBox, NextControlChip, ArmoireChip } from './siteHelpers'
 
 /* Une ligne d'information d'un DEA : icône, libellé, valeur. */
 function DeaField({ icon: Icon, label, children }) {
@@ -62,6 +62,8 @@ function DeaCard({ site, dea, index, total, act }) {
           onClick={() => act.items(site, dea, 'batteries')} />
         <ItemsButton full kind="electrodes" items={dea.electrodes}
           onClick={() => act.items(site, dea, 'electrodes')} />
+        {/* L'armoire est sonore : ses piles se contrôlent comme le reste. */}
+        <ArmoireChip full armoire={dea.armoire} onClick={() => act.armoire(site, dea)} />
       </footer>
     </article>
   )

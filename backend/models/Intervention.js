@@ -72,7 +72,14 @@ const ficheSchema = new Schema({
   // Armoire accessible et correctement signalée (ex-« boîtier »).
   armoire:         { type: String, trim: true },
   armoireAccessible: { type: Boolean },
-  armoirePiles:      { type: Boolean },
+  /* ── Armoire : modèle et piles de l'alarme ──
+     Les armoires sont sonores, leurs piles font partie du contrôle. Le modèle
+     relevé et l'état des piles remontent sur le DAE du parc. */
+  armoireModele:          { type: String, trim: true },
+  // Piles de l'alarme : true en état de marche, false à remplacer.
+  armoirePiles:           { type: Boolean },
+  armoirePilesRemplacees: { type: Boolean },
+  armoirePilesNote:       { type: String, trim: true },
 
   /* ── Suivi documentaire ── */
   dernierControle:  Date,

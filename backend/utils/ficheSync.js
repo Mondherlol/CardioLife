@@ -70,8 +70,39 @@ function apply(target, field, value, label, changes, { date = false } = {}) {
     : `${label} : ${before || 'vide'} → ${value}`)
 }
 
+const PILES_LABELS = { ok: 'en état', a_remplacer: 'à remplacer' }
+
+/**
+ * Armoire du DAE : modèle relevé et état des piles de l'alarme.
+ *
+ * Des piles remplacées pendant la visite sont neuves, quel que soit le constat
+ * coché avant le changement. Le constat est daté du jour de la visite : c'est
+ * cette date qui dit, sur la fiche client, de quand date l'information.
+ */
+function applyArmoire(fiche, dea, local, visitDate) {
+  const status = fiche.armoirePilesRemplacees ? 'ok'
+    : fiche.armoirePiles === true ? 'ok'
+    : fiche.armoirePiles === false ? 'a_remplacer'
+    : null
+  if (!filled(fiche.armoireModele) && !status) return
+
+  if (!dea.armoire) dea.armoire = {}
+  const arm = dea.armoire
+  apply(arm, 'model', fiche.armoireModele, "Type d'armoire", local)
+  if (!status) return
+
+  if (arm.pilesStatus !== status) {
+    local.push(`Piles armoire : ${PILES_LABELS[arm.pilesStatus] || 'non renseignées'} → ${PILES_LABELS[status]}`)
+    arm.pilesStatus = status
+  }
+  if (!sameDay(arm.pilesCheckedAt, visitDate)) arm.pilesCheckedAt = visitDate
+  if (fiche.armoirePilesRemplacees) {
+    apply(arm, 'pilesReplacedAt', visitDate, 'Piles armoire remplacées le', local, { date: true })
+  }
+}
+
 /** Reporte une fiche d'appareil sur le DAE correspondant du parc. */
-function applyFicheToDea(fiche, dea, changes) {
+function applyFicheToDea(fiche, dea, changes, visitDate = new Date()) {
   const name = dea.deviceType || dea.serialNumber || 'DAE'
   const local = []
 
@@ -108,6 +139,8 @@ function applyFicheToDea(fiche, dea, changes) {
     apply(enfant, 'expiryDate', fiche.electrodesPeremptionPediatrique,
       'Péremption électrodes pédiatriques', local, { date: true })
   }
+
+  applyArmoire(fiche, dea, local, visitDate)
 
   local.forEach(c => changes.push(`${name} — ${c}`))
 }
@@ -226,11 +259,15 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
     const site = await Site.findById(siteId)
     if (!site) return changes
 
+    // Jour du constat : la visite elle-même, pas celui où la fiche est relue.
+    const visitDate = intervention.completedDate || intervention.startedAt ||
+      intervention.scheduledDate || new Date()
+
     const touched = []
     for (const fiche of intervention.fiches || []) {
       const dea = resolveDea(site, intervention, fiche)
       if (!dea) continue
-      applyFicheToDea(fiche, dea, changes)
+      applyFicheToDea(fiche, dea, changes, visitDate)
       if (!touched.some(d => String(d._id) === String(dea._id))) touched.push(dea)
     }
 

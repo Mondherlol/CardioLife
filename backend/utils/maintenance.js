@@ -178,7 +178,10 @@ async function resyncFiches({ dry = false, planning = false, userId = null } = {
     }
 
     const changes = []
-    for (const { dea, fiche } of merged.values()) applyFicheToDea(fiche, dea, changes)
+    // Le constat (piles d'armoire notamment) se date à la dernière visite rejouée.
+    for (const { dea, fiche, last } of merged.values()) {
+      applyFicheToDea(fiche, dea, changes, last?.completedDate || last?.scheduledDate || new Date())
+    }
 
     /* Report de l'échéance : seulement celle de la dernière visite, et
        seulement si elle est encore devant nous. Rejouer les précédentes

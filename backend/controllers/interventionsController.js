@@ -150,6 +150,8 @@ const FICHE_LABELS = {
 
   voyantVert: 'Voyant vert', autotests: 'Autotests', armoire: 'Armoire',
   armoireAccessible: 'Armoire accessible', armoirePiles: 'Piles armoire',
+  armoireModele: "Type d'armoire", armoirePilesRemplacees: 'Piles armoire remplacées',
+  armoirePilesNote: 'Note piles armoire',
 
   dernierControle: 'Dernier contrôle', prochainControle: 'Prochain contrôle',
   observation: 'Observation',
@@ -318,6 +320,11 @@ async function parcOf(intervention) {
       _id: e._id, productName: e.productName, kind: e.kind,
       lotNumber: e.lotNumber, expiryDate: e.expiryDate,
     })),
+    // L'armoire et l'état connu de ses piles : la checklist part de là.
+    armoire: d.armoire ? {
+      model: d.armoire.model, pilesStatus: d.armoire.pilesStatus,
+      pilesCheckedAt: d.armoire.pilesCheckedAt, pilesReplacedAt: d.armoire.pilesReplacedAt,
+    } : null,
   }))
 
   // L'appareil visé, s'il y en a un ; à défaut le seul du site, qui ne laisse
@@ -622,7 +629,9 @@ const FICHE_FIELDS = [
   'kitGants', 'kitCiseaux', 'kitRasoir', 'kitMasque', 'kitCompresses',
   'kitRemplace', 'kitRemplaceRef',
   // État général
-  'voyantVert', 'autotests', 'armoire', 'armoireAccessible', 'armoirePiles',
+  'voyantVert', 'autotests', 'armoire', 'armoireAccessible',
+  // Armoire et piles de son alarme
+  'armoireModele', 'armoirePiles', 'armoirePilesRemplacees', 'armoirePilesNote',
   // Suivi documentaire
   'dernierControle', 'prochainControle',
   'observation',

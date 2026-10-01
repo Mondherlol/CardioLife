@@ -47,6 +47,7 @@ function toInstallation(site, dea) {
 
     batteries:  dea.batteries  || [],
     electrodes: dea.electrodes || [],
+    armoire:    dea.armoire    || null,
 
     notes:     dea.notes || '',
     createdAt: dea.createdAt,

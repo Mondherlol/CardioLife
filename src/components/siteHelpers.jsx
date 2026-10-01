@@ -1,5 +1,5 @@
 import {
-  Zap, BatteryMedium, Check, Minus, HeartPulse, Plus, PackageCheck, CalendarClock,
+  Zap, BatteryMedium, Check, Minus, HeartPulse, Plus, PackageCheck, CalendarClock, Archive,
 } from 'lucide-react'
 
 /* Helpers partagés par les deux vues des sites client (tableau et fiches). */
@@ -188,6 +188,83 @@ export function ItemsCell({ kind, items, onClick }) {
           </span>
         )
       })}
+    </button>
+  )
+}
+
+/* ── Armoire du DAE et piles de son alarme ─────────────────── */
+
+/* Modèles d'armoire proposés à la saisie : ceux du parc CardioLife. */
+export const ARMOIRE_MODELS = ['AIVIA 100', 'AIVIA S', 'AIVIA IN']
+
+export const PILES_META = {
+  ok:          { label: 'Piles en état',   short: 'OK',          level: 'ok' },
+  a_remplacer: { label: 'Piles à remplacer', short: 'À remplacer', level: 'expired' },
+  '':          { label: 'Piles non contrôlées', short: 'non contrôlées', level: 'unknown' },
+}
+
+/** État affichable d'une armoire : son modèle et ce qu'on sait de ses piles. */
+export function armoireStatus(armoire) {
+  if (!armoire || (!armoire.model && !armoire.pilesStatus)) {
+    return { level: 'none', model: '', piles: PILES_META[''], date: null }
+  }
+  const piles = PILES_META[armoire.pilesStatus || ''] || PILES_META['']
+  return {
+    level: piles.level,
+    model: armoire.model || '',
+    piles,
+    // La date qui dit de quand date l'information : le remplacement s'il est
+    // le plus récent, sinon le dernier constat.
+    date:  armoire.pilesStatus === 'ok' && armoire.pilesReplacedAt
+      ? armoire.pilesReplacedAt
+      : armoire.pilesCheckedAt || null,
+  }
+}
+
+/**
+ * Pastille de l'armoire : modèle et état des piles de l'alarme. Rouge quand
+ * les piles sont à remplacer — c'est elle que l'alerte du tableau de bord
+ * compte. Le clic ouvre la fiche de l'armoire.
+ */
+export function ArmoireChip({ armoire, onClick, full }) {
+  const st = armoireStatus(armoire)
+  const title = st.level === 'none'
+    ? 'Armoire non renseignée — cliquez pour la décrire'
+    : `${st.model ? `Armoire ${st.model} · ` : ''}${st.piles.label}${st.date ? ` (${formatDate(st.date)})` : ''}`
+  return (
+    <button type="button" className={`arm-chip arm-chip--${st.level}${full ? ' arm-chip--full' : ''}`}
+      title={title} onClick={e => { e.stopPropagation(); onClick() }}>
+      <Archive size={full ? 13 : 11} strokeWidth={2} />
+      <span className="arm-chip-label">{st.model || (full ? 'Armoire' : 'Arm.')}</span>
+      {st.level !== 'none' && <span className="arm-chip-state">{st.piles.short}</span>}
+    </button>
+  )
+}
+
+/** Cellule « Armoire » du tableau des sites : modèle, puis l'état des piles. */
+export function ArmoireCell({ armoire, onClick }) {
+  const st = armoireStatus(armoire)
+  if (st.level === 'none') {
+    return (
+      <button type="button" className="items-cell items-cell--empty"
+        title="Armoire non renseignée — cliquez pour la décrire"
+        onClick={e => { e.stopPropagation(); onClick() }}>
+        <Archive size={12} />
+        <span>Non renseignée</span>
+      </button>
+    )
+  }
+  return (
+    <button type="button" className="items-cell" title="Modifier l'armoire et ses piles"
+      onClick={e => { e.stopPropagation(); onClick() }}>
+      <span className="items-cell-line">
+        <Archive size={11} className="items-cell-icon" />
+        <span className="items-cell-main">{st.model || <span className="items-cell-none">modèle —</span>}</span>
+      </span>
+      <span className="items-cell-line">
+        <span className={`items-cell-date items-cell-date--${st.level}`}>Piles {st.piles.short}</span>
+        {st.date && <span className="items-cell-none">{formatDate(st.date)}</span>}
+      </span>
     </button>
   )
 }

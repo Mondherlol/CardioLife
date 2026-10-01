@@ -291,7 +291,16 @@ export default function InterventionPrintPage() {
                   <td className="pr-dt-center">
                     {(fiche.armoire || '').trim().toLowerCase() === 'conforme'
                       ? 'En bon état'
-                      : (fiche.armoire || '—')}
+                      : (fiche.armoire || (fiche.armoireModele ? '' : '—'))}
+                    {fiche.armoireModele && <span className="pr-dt-note">{fiche.armoireModele}</span>}
+                    {/* Armoire sonore : l'état de ses piles fait partie du rapport. */}
+                    {(fiche.armoirePilesRemplacees || fiche.armoirePiles != null) && (
+                      <span className="pr-dt-note">
+                        {fiche.armoirePilesRemplacees ? 'Piles remplacées'
+                          : fiche.armoirePiles ? 'Piles en état' : 'Piles à remplacer'}
+                      </span>
+                    )}
+                    {fiche.armoirePilesNote && <span className="pr-dt-note">{fiche.armoirePilesNote}</span>}
                   </td>
                 </tr>
                 )

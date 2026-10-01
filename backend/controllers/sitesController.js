@@ -125,6 +125,7 @@ async function listDeas(req, res) {
         nextControlDate:  '$deas.nextControlDate',
         batteries:        '$deas.batteries',
         electrodes:       '$deas.electrodes',
+        armoire:          '$deas.armoire',
         notes:            '$deas.notes',
       },
     },

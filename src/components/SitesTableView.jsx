@@ -1,5 +1,5 @@
 import { ArrowUpRight } from 'lucide-react'
-import { formatDate, ItemsCell, ContractChip, PackChip, NoDeaBox, NextControlChip } from './siteHelpers'
+import { formatDate, ItemsCell, ContractChip, PackChip, NoDeaBox, NextControlChip, ArmoireCell } from './siteHelpers'
 
 /**
  * Vue tableau : une ligne par DEA, les colonnes du site fusionnées sur ses DEA.
@@ -37,6 +37,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
           <col style={{ width: 130 }} />
           <col style={{ width: 175 }} />
           <col style={{ width: 175 }} />
+          <col style={{ width: 150 }} />
         </colgroup>
         <thead>
           <tr>
@@ -49,6 +50,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
             <th><div className="th-inner">Prochain contrôle</div></th>
             <th><div className="th-inner">Batteries</div></th>
             <th><div className="th-inner">Électrodes</div></th>
+            <th><div className="th-inner">Armoire</div></th>
           </tr>
         </thead>
 
@@ -97,7 +99,7 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                 <tr className="sites-xl-row"
                   onContextMenu={e => act.siteMenu(e, site)}>
                   {siteCells}
-                  <td colSpan={6} className="sites-xl-nodea">
+                  <td colSpan={7} className="sites-xl-nodea">
                     <NoDeaBox site={site} act={act} />
                   </td>
                 </tr>
@@ -153,6 +155,11 @@ export default function SitesTableView({ sites, act, contracts = {} }) {
                   <td className="dea-td">
                     <ItemsCell kind="electrodes" items={dea.electrodes}
                       onClick={() => act.items(site, dea, 'electrodes')} />
+                  </td>
+
+                  {/* Armoire sonore : l'état de ses piles décide aussi d'un passage. */}
+                  <td className="dea-td">
+                    <ArmoireCell armoire={dea.armoire} onClick={() => act.armoire(site, dea)} />
                   </td>
                 </tr>
               ))}

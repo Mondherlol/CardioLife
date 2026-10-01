@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Wrench, Play, Eye, CheckCircle2, AlertTriangle, Info, CalendarClock, Trash2,
-  ClipboardList, Boxes,
+  ClipboardList, Boxes, FileSpreadsheet, Download, RotateCcw,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getMaintenanceTasks, runMaintenanceTask } from '../api/maintenance'
+import { downloadBackup } from '../api/appSettings'
 
 /**
  * Reprises de données, lancées depuis l'application.
@@ -319,6 +321,65 @@ function SplitLotsReport({ report }) {
   )
 }
 
+/**
+ * Repartir de zéro avec un fichier de parc.
+ *
+ * Le geste se fait dans l'écran d'import, ouvert en mode « remise à zéro » :
+ * le fichier y est lu et analysé comme d'habitude, les regroupements de clients
+ * et les modèles s'y décident, et la base n'est vidée qu'au dernier clic, dans
+ * la même requête que l'import. Rien n'est perdu tant que ce clic n'a pas eu lieu.
+ */
+function ReimportCard() {
+  const navigate = useNavigate()
+  const [downloading, setDownloading] = useState(false)
+
+  async function backup() {
+    setDownloading(true)
+    try {
+      await downloadBackup()
+      toast.success('Sauvegarde téléchargée.')
+    } catch (err) {
+      toast.error(err.message || 'Le téléchargement a échoué.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <div className="devfix-task devfix-task--danger">
+      <div className="devfix-task-head">
+        <span className="devfix-task-icon"><FileSpreadsheet size={16} /></span>
+        <div>
+          <h3 className="devfix-task-title">Repartir de zéro avec un fichier de parc</h3>
+          <p className="devfix-task-desc">
+            Vide toutes les données métier — clients, parc, contrats, planning, stock,
+            catalogue, documents — puis importe le fichier Excel du parc. Les comptes
+            utilisateurs et les paramètres de l'application sont conservés.
+          </p>
+        </div>
+      </div>
+
+      <p className="ci-legend">
+        <Info size={12} /> 1. Téléchargez une sauvegarde : c'est elle qui permet de revenir en
+        arrière. 2. Ouvrez l'import : lisez le fichier, vérifiez l'analyse et les clients à
+        regrouper, puis tapez <strong>REINITIALISER</strong> — la base n'est vidée qu'à ce
+        moment-là, juste avant l'import.
+      </p>
+
+      <div className="ci-action-row">
+        <button className="btn btn--ghost" onClick={backup} disabled={downloading}>
+          {downloading
+            ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Préparation…</>
+            : <><Download size={14} /> Télécharger une sauvegarde</>}
+        </button>
+        <button className="btn btn--danger" onClick={() => navigate('/clients/import?reset=1')}>
+          <RotateCcw size={14} /> Ouvrir l'import en mode remise à zéro
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function DevFixPanel() {
   const [tasks,   setTasks]   = useState([])
   const [loading, setLoading] = useState(true)
@@ -351,6 +412,8 @@ export default function DevFixPanel() {
       </div>
 
       {error && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
+
+      <ReimportCard />
 
       {tasks.length === 0 && !error
         ? <div className="sp-placeholder">

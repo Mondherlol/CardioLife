@@ -69,7 +69,7 @@ function isAssignedTech(user, dea) {
 const DEA_FIELDS = [
   'deviceType', 'serialNumber', 'location', 'status', 'scheduledDate',
   'technician', 'technicianName', 'contract', 'contractDate', 'controlType',
-  'installationDate', 'nextControlDate', 'batteries', 'electrodes', 'notes',
+  'installationDate', 'nextControlDate', 'batteries', 'electrodes', 'armoire', 'notes',
 ]
 
 function applyBody(dea, body) {

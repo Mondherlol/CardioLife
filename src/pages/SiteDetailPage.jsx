@@ -6,7 +6,7 @@ import {
   HeartPulse, GraduationCap, ClipboardList, FileText, History,
   Package, User, Clock, CheckCircle2, CalendarDays, Hash,
   BatteryMedium, Zap, AlertTriangle, Users, UserPlus,
-  MoreVertical, Trash2, Eye, MinusCircle, ChevronRight,
+  MoreVertical, Trash2, Eye, MinusCircle, ChevronRight, Archive,
 } from 'lucide-react'
 import { getSiteHistory } from '../api/sites'
 import { getUsers } from '../api/users'
@@ -15,13 +15,14 @@ import ClientDocumentsTab from '../components/ClientDocumentsTab'
 import SiteModal from '../components/SiteModal'
 import DeaModal from '../components/DeaModal'
 import DeaItemsModal from '../components/DeaItemsModal'
+import ArmoireModal from '../components/ArmoireModal'
 import DeleteDeaConfirm from '../components/DeleteDeaConfirm'
 import ContextMenu from '../components/ContextMenu'
 import ContractModal from '../components/ContractModal'
 import FormationModal from '../components/FormationModal'
 import { FormationRow, FormationsSummary } from '../components/FormationRow'
 import { stageOf } from '../lib/formations'
-import { formatDate, daysUntil, ItemsButton } from '../components/siteHelpers'
+import { formatDate, daysUntil, ItemsButton, ArmoireChip } from '../components/siteHelpers'
 
 /* ── Libellés ─────────────────────────────────────────────────── */
 const CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat' }
@@ -195,6 +196,7 @@ function OverviewTab({ site, controls, interventions, act }) {
                       onClick={() => act.items(dea, 'batteries')} />
                     <ItemsButton full kind="electrodes" items={dea.electrodes}
                       onClick={() => act.items(dea, 'electrodes')} />
+                    <ArmoireChip full armoire={dea.armoire} onClick={() => act.armoire(dea)} />
                   </footer>
                 </article>
               )
@@ -562,6 +564,7 @@ export default function SiteDetailPage() {
   const [fmnModal,  setFmnModal]  = useState(null)   // { mode, entity? }
   const [deaModal,  setDeaModal]  = useState(null)   // { dea } — dea null = création
   const [itemsModal, setItemsModal] = useState(null) // { dea, kind }
+  const [armoireDea, setArmoireDea] = useState(null)
   const [deaDeleting, setDeaDeleting] = useState(null)
   const [menu,      setMenu]      = useState(null)   // { x, y, title, items }
   const [ctrModal,  setCtrModal]  = useState(false)  // création du contrat du site
@@ -600,6 +603,7 @@ export default function SiteDetailPage() {
     addDea:       () => setDeaModal({ dea: null }),
     editDea:      dea => setDeaModal({ dea }),
     items:        (dea, kind) => setItemsModal({ dea, kind }),
+    armoire:      dea => setArmoireDea(dea),
     deleteDea:    dea => setDeaDeleting(dea),
 
     deaMenu(e, dea) {
@@ -612,6 +616,7 @@ export default function SiteDetailPage() {
           { label: 'Modifier ce DEA',      icon: Pencil,        onClick: () => act.editDea(dea) },
           { label: 'Gérer les batteries',  icon: BatteryMedium, onClick: () => act.items(dea, 'batteries') },
           { label: 'Gérer les électrodes', icon: Zap,           onClick: () => act.items(dea, 'electrodes') },
+          { label: 'Armoire et piles',     icon: Archive,       onClick: () => act.armoire(dea) },
           { label: 'Voir la fiche du DAE', icon: Eye,           onClick: () => navigate(`/devices/${dea._id}`) },
           { separator: true },
           { label: 'Ajouter un DEA sur ce site', icon: Plus,     onClick: () => act.addDea() },
@@ -762,6 +767,15 @@ export default function SiteDetailPage() {
           kind={itemsModal.kind}
           onClose={() => setItemsModal(null)}
           onSaved={() => { setItemsModal(null); load() }}
+        />
+      )}
+
+      {armoireDea && (
+        <ArmoireModal
+          site={site}
+          dea={armoireDea}
+          onClose={() => setArmoireDea(null)}
+          onSaved={() => { setArmoireDea(null); load() }}
         />
       )}
 

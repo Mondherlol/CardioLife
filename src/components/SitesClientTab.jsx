@@ -3,7 +3,7 @@ import {
   Plus, Pencil, Trash2, X, AlertTriangle, ChevronRight,
   Zap, BatteryMedium, Building2, UserPlus, Settings2,
   Table2, LayoutGrid, ArrowUpRight, HeartPulse, FileText,
-  CalendarClock, Package,
+  CalendarClock, Package, Archive,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -13,6 +13,7 @@ import ContractModal from './ContractModal'
 import SiteModal from './SiteModal'
 import DeaModal from './DeaModal'
 import DeaItemsModal from './DeaItemsModal'
+import ArmoireModal from './ArmoireModal'
 import NextControlModal from './NextControlModal'
 import ContextMenu from './ContextMenu'
 import DeleteDeaConfirm from './DeleteDeaConfirm'
@@ -140,6 +141,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
   const [siteModal,  setSiteModal]  = useState(null)   // null | { site, focus, chainDea }
   const [deaModal,   setDeaModal]   = useState(null)   // null | { site, dea }
   const [itemsModal, setItemsModal] = useState(null)   // null | { site, dea, kind }
+  const [armoireModal, setArmoireModal] = useState(null) // null | { site, dea }
   const [ctrlModal,  setCtrlModal]  = useState(null)   // null | { site, dea }
   const [pickSite,   setPickSite]   = useState(null)   // null | 'dea' | 'contact'
   const [deleting,   setDeleting]   = useState(null)   // site à supprimer
@@ -230,6 +232,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
     editControl:  (site, dea) => setCtrlModal({ site, dea }),
     deleteDea:    (site, dea) => setDeaDeleting({ site, dea }),
     items:        (site, dea, kind) => setItemsModal({ site, dea, kind }),
+    armoire:      (site, dea) => setArmoireModal({ site, dea }),
     pickSite:     purpose => setPickSite(purpose),
     planInstall:  site => setPlanOpen({ site: site || null }),
 
@@ -283,6 +286,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           { label: 'Modifier le prochain contrôle', icon: CalendarClock, onClick: () => act.editControl(site, dea) },
           { label: 'Gérer les batteries',  icon: BatteryMedium, onClick: () => act.items(site, dea, 'batteries') },
           { label: 'Gérer les électrodes', icon: Zap,           onClick: () => act.items(site, dea, 'electrodes') },
+          { label: 'Armoire et piles',     icon: Archive,       onClick: () => act.armoire(site, dea) },
           { label: 'Retirer ce DEA', icon: Trash2, danger: true, onClick: () => act.deleteDea(site, dea) },
           { separator: true },
           ...act.siteItems(site),
@@ -313,7 +317,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           <h3 className="cd-tab-title">Sites ({sites.length}) · {deaTotal} DEA</h3>
           <p className="cd-tab-hint">
             Clic sur un site pour sa fiche · sur un DEA pour le modifier · sur une pastille
-            pour ses consommables ou pour corriger l'échéance · clic droit pour toutes les actions
+            pour ses consommables, son armoire ou pour corriger l'échéance · clic droit pour toutes les actions
           </p>
         </div>
 
@@ -492,6 +496,15 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           kind={itemsModal.kind}
           onClose={() => setItemsModal(null)}
           onSaved={updated => { replaceSite(updated); setItemsModal(null) }}
+        />
+      )}
+
+      {armoireModal && (
+        <ArmoireModal
+          site={armoireModal.site}
+          dea={armoireModal.dea}
+          onClose={() => setArmoireModal(null)}
+          onSaved={updated => { replaceSite(updated); setArmoireModal(null) }}
         />
       )}
 
