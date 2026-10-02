@@ -27,6 +27,7 @@ const CONTROL_TYPE_META = {
   semestriel:   { label: 'Semestriel',   cls: 'ct-type-badge ct-type-badge--semestriel' },
   annuel:       { label: 'Annuel',       cls: 'ct-type-badge ct-type-badge--annuel' },
   hors_contrat: { label: 'Hors contrat', cls: 'ct-type-badge ct-type-badge--hors' },
+  intervention: { label: 'Intervention', cls: 'ct-type-badge ct-type-badge--intervention' },
 }
 const CONTROL_TYPE_OPTS = [
   { value: 'hors_contrat', label: 'Hors contrat' },
@@ -128,6 +129,9 @@ function TechnicianCard({ intervention, onClick }) {
       </div>
 
       <div className="iv-card-body">
+        {intervention.objet && (
+          <div className="iv-card-row iv-card-objet">{intervention.objet}</div>
+        )}
         <div className="iv-card-row">
           <Zap size={13} strokeWidth={1.8} />
           <span>
@@ -271,6 +275,7 @@ function AdminRow({ intervention, onClick }) {
       <td>
         <div className="inst-site-cell">
           <div className="inst-site-client">{intervention.clientName || '—'}</div>
+          {intervention.objet && <div className="iv-row-objet">{intervention.objet}</div>}
           {(snap.address || snap.location) && (
             <div className="inst-site-loc">
               <MapPin size={11} strokeWidth={1.8} />
@@ -324,8 +329,13 @@ const STATUS_FILTERS = [
 const RENDER_STEP = 50
 
 /* `embedded` : monté comme onglet de la page Maintenance — le titre de la page
-   porte déjà le contexte, seul le sous-titre et les actions restent. */
-export default function InterventionsPage({ embedded = false }) {
+   porte déjà le contexte, seul le sous-titre et les actions restent.
+   `kind` : 'controle' liste les contrôles (contrat ou hors contrat),
+   'intervention' les interventions ponctuelles — même checklist, mais sans
+   effet sur le calendrier des contrôles. */
+export default function InterventionsPage({ embedded = false, kind = 'controle' }) {
+  const isIntv = kind === 'intervention'
+  const [noun, nouns] = isIntv ? ['intervention', 'interventions'] : ['contrôle', 'contrôles']
   const { user } = useAuth()
   const navigate  = useNavigate()
   const isTech   = user?.role === 'technicien'
@@ -347,23 +357,24 @@ export default function InterventionsPage({ embedded = false }) {
     setLoading(true)
     try {
       const data = await getInterventions()
-      setAll(Array.isArray(data) ? data : [])
+      const list = Array.isArray(data) ? data : []
+      setAll(list.filter(i => (i.controlType === 'intervention') === isIntv))
     } catch (err) {
       toast.error(err.message || 'Erreur de chargement.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [isIntv])
 
   const fetchPoses = useCallback(async () => {
-    if (!isTech) return
+    if (!isTech || isIntv) return
     try {
       const res = await getInstallations({ status: 'a_installer', limit: 100 })
       const list = Array.isArray(res) ? res : (res?.data || [])
       setPoses(list.sort((a, b) =>
         new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)))
     } catch { /* la page reste utilisable sans les poses */ }
-  }, [isTech])
+  }, [isTech, isIntv])
 
   useEffect(() => { fetchAll() }, [fetchAll])
   useEffect(() => { fetchPoses() }, [fetchPoses])
@@ -375,6 +386,7 @@ export default function InterventionsPage({ embedded = false }) {
       const q = search.toLowerCase()
       list = list.filter(i =>
         i.clientName?.toLowerCase().includes(q) ||
+        i.objet?.toLowerCase().includes(q) ||
         i.technicienName?.toLowerCase().includes(q) ||
         i.installationSnap?.deviceType?.toLowerCase().includes(q) ||
         i.installationSnap?.serialNumber?.toLowerCase().includes(q) ||
@@ -427,24 +439,27 @@ export default function InterventionsPage({ embedded = false }) {
         <div>
           {!embedded && (
             <h1 className="page-title">
-              <Wrench size={20} strokeWidth={1.8} /> Contrôles
+              <Wrench size={20} strokeWidth={1.8} /> {isIntv ? 'Interventions' : 'Contrôles'}
             </h1>
           )}
           {isTech ? (
             <p className="page-subtitle">
               Bonjour <strong>{user.fullName || user.username}</strong> —
               {pendingCount > 0
-                ? <> <span className="iv-pending-count">{pendingCount}</span> contrôle{pendingCount > 1 ? 's' : ''} en attente</>
-                : <> Tous vos contrôles sont à jour</>
+                ? <> <span className="iv-pending-count">{pendingCount}</span> {pendingCount > 1 ? nouns : noun} en attente</>
+                : <> {isIntv ? 'Toutes vos interventions sont à jour' : 'Tous vos contrôles sont à jour'}</>
               }
             </p>
           ) : (
-            <p className="page-subtitle">{all.length} contrôle{all.length !== 1 ? 's' : ''}</p>
+            <p className="page-subtitle">
+              {all.length} {all.length !== 1 ? nouns : noun}
+              {isIntv && <> — remplacements, dépannages : même checklist qu'un contrôle, sans effet sur l'échéance du prochain contrôle</>}
+            </p>
           )}
         </div>
         {canManage && (
           <button className="btn btn--primary" onClick={() => setShowCreate(true)}>
-            <Plus size={15} /> Nouveau contrôle
+            <Plus size={15} /> {isIntv ? 'Nouvelle intervention' : 'Nouveau contrôle'}
           </button>
         )}
       </div>
@@ -513,7 +528,7 @@ export default function InterventionsPage({ embedded = false }) {
             <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
               {search || statusFilter
                 ? 'Aucune intervention pour ces critères.'
-                : 'Aucun contrôle ne vous est assigné.'}
+                : (isIntv ? 'Aucune intervention ne vous est assignée.' : 'Aucun contrôle ne vous est assigné.')}
             </div>
           </div>
         ) : groupedSections.length === 0 ? (
@@ -549,7 +564,7 @@ export default function InterventionsPage({ embedded = false }) {
                   Planifié <span style={{ color: 'var(--orange-500)', fontSize: 10 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
                 </th>
                 <th>Réalisé</th>
-                <th>Type de contrôle</th>
+                <th>Type</th>
                 <th>Statut</th>
               </tr>
             </thead>
@@ -565,7 +580,7 @@ export default function InterventionsPage({ embedded = false }) {
                 <tr><td colSpan={7} className="table-empty">
                   {search || statusFilter
                     ? 'Aucun résultat pour ces critères.'
-                    : 'Aucun contrôle enregistré.'}
+                    : (isIntv ? 'Aucune intervention enregistrée.' : 'Aucun contrôle enregistré.')}
                 </td></tr>
               )}
             </tbody>
@@ -577,14 +592,14 @@ export default function InterventionsPage({ embedded = false }) {
               shown={progressive.shown}
               total={sortedFiltered.length}
               hasMore={progressive.hasMore}
-              noun={['contrôle', 'contrôles']}
+              noun={[noun, nouns]}
             />
           )}
         </div>
       )}
 
       {showCreate && (
-        <ControlCreateModal onClose={() => setShowCreate(false)} onCreated={onCreated} />
+        <ControlCreateModal kind={kind} onClose={() => setShowCreate(false)} onCreated={onCreated} />
       )}
 
       {posing && (

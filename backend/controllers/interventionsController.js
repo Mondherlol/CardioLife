@@ -465,11 +465,11 @@ async function create(req, res) {
       site, siteName,
       installation, installationSnap,
       technicien, technicienName,
-      scheduledDate, notes,
+      scheduledDate, notes, objet,
       controlType, contract,
     } = req.body
 
-    const CONTROL_TYPES = ['semestriel', 'annuel', 'hors_contrat']
+    const CONTROL_TYPES = ['semestriel', 'annuel', 'hors_contrat', 'intervention']
 
     /* Un identifiant d'appareil malformé remontait tel quel dans l'erreur de
        cast Mongoose (« Cast to ObjectId failed for value "Powerheart G5 · …" »),
@@ -489,7 +489,7 @@ async function create(req, res) {
       site: site || undefined, siteName,
       installation, installationSnap,
       technicien, technicienName,
-      scheduledDate, notes,
+      scheduledDate, notes, objet,
       controlType: CONTROL_TYPES.includes(controlType) ? controlType : 'hors_contrat',
       contract: contract || undefined,
       status: 'planifie',
@@ -542,7 +542,7 @@ async function update(req, res) {
     }
 
     const allowed = ['client','clientName','installation','installationSnap',
-                     'technicien','technicienName','scheduledDate','notes','status','controlType','contract']
+                     'technicien','technicienName','scheduledDate','notes','objet','status','controlType','contract']
     allowed.forEach(k => { if (req.body[k] !== undefined) intervention[k] = req.body[k] })
 
     intervention.history.push({
@@ -675,6 +675,39 @@ function ficheFor(intervention, deaId) {
   return entry
 }
 
+/**
+ * Complète une fiche avec ce que le parc connaît déjà de l'appareil : n° de
+ * série, emplacement, péremptions des consommables en place, modèle d'armoire.
+ *
+ * L'écran les affiche pré-remplis ; sans cette copie, une valeur jamais
+ * retouchée manquait au rapport. Seuls les champs vides sont complétés, et
+ * jamais celui que la requête est justement en train d'écrire — un champ
+ * vidé exprès doit rester vide.
+ */
+async function seedFicheFromParc(entry, body) {
+  if (!entry?.dea) return
+  const site = await Site.findOne({ 'deas._id': entry.dea }).select('deas').lean()
+  const dea  = site?.deas?.find(d => String(d._id) === String(entry.dea))
+  if (!dea) return
+
+  const adulte = dea.electrodes?.find(e => e.kind === 'adulte' || !e.kind)
+  const enfant = dea.electrodes?.find(e => e.kind === 'enfant')
+  const fromParc = {
+    serialNumber:                    dea.serialNumber,
+    emplacement:                     dea.location,
+    batteriePeremption:              dea.batteries?.[0]?.expiryDate,
+    electrodesPeremptionAdulte:      adulte?.expiryDate,
+    electrodesPeremptionPediatrique: enfant?.expiryDate,
+    armoireModele:                   dea.armoire?.model,
+  }
+  Object.entries(fromParc).forEach(([k, v]) => {
+    if (body[k] !== undefined) return
+    if (v === undefined || v === null || v === '') return
+    if (entry[k] !== undefined && entry[k] !== null && entry[k] !== '') return
+    entry[k] = v
+  })
+}
+
 /* Le miroir `fiche` garde les lectures historiques (impression, exports)
    valables tant qu'elles ne connaissent qu'une fiche. */
 function syncLegacyFiche(intervention) {
@@ -705,6 +738,7 @@ async function saveFiche(req, res) {
     const touchesFiche = FICHE_FIELDS.some(k => req.body[k] !== undefined)
     if (touchesFiche) {
       const entry = ficheFor(intervention, req.body.dea || null)
+      await seedFicheFromParc(entry, req.body)
       // Sur une visite multi-DAE, un « Niveau batterie » sans appareil ne dit rien.
       const prefix = intervention.fiches.length > 1
         ? `${entry.deaLabel || entry.serialNumber || 'DAE'} — `

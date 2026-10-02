@@ -13,7 +13,7 @@ import { getInterventions, closeIntervention } from '../api/interventions'
 import { getContracts } from '../api/contracts'
 
 /* Type de contrôle → libellé */
-const CD_CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat' }
+const CD_CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention' }
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ClientHeaderModal from '../components/ClientHeaderModal'
 import FormationsClientTab from '../components/FormationsClientTab'

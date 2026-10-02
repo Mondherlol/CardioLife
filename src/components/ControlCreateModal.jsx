@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Plus, X, Zap, ChevronDown, Building2, MapPin, User, Calendar,
-  StickyNote, AlertTriangle, Info, HeartPulse,
+  StickyNote, AlertTriangle, Info, HeartPulse, Wrench,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { createIntervention } from '../api/interventions'
@@ -24,12 +24,20 @@ import { localDateStr } from '../lib/appointmentConstants'
  * Le type est toujours « hors contrat » : les contrôles semestriels et annuels
  * naissent du contrat du site, jamais d'une saisie manuelle.
  *
+ * Avec `kind="intervention"`, la même fiche programme une intervention
+ * ponctuelle (remplacement, dépannage) : même checklist sur place, mais elle
+ * ne vaut pas contrôle et ne touche pas à l'échéance du site. Elle porte un
+ * objet, qui la nomme dans le planning.
+ *
  * Props :
+ *  kind       - 'controle' (défaut) | 'intervention'
  *  presetDate - date planifiée pré-remplie (créneau choisi dans le planning)
+ *  presetObjet - objet pré-rempli (titre saisi dans la modal de rendez-vous)
  *  onClose    - () => void
  *  onCreated  - (controle) => void
  */
-export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
+export default function ControlCreateModal({ kind = 'controle', presetDate, presetObjet, onClose, onCreated }) {
+  const isIntv = kind === 'intervention'
   const [techniciens, setTechniciens] = useState([])
   const [sites,       setSites]       = useState([])
   const [loadingSites, setLoadingSites] = useState(false)
@@ -44,6 +52,7 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
     technicien:     '',
     technicienName: '',
     scheduledDate:  presetDate ? localDateStr(presetDate) : '',
+    objet:          presetObjet || '',
     notes:          '',
   })
 
@@ -99,6 +108,7 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
 
   async function handleCreate() {
     setError('')
+    if (isIntv && !form.objet.trim()) return setError("Indiquez l'objet de l'intervention.")
     if (!form.clientId)      return setError('Choisissez le client concerné.')
     if (!form.siteId)        return setError('Choisissez le site à visiter.')
     if (!form.scheduledDate) return setError('Indiquez la date planifiée.')
@@ -122,10 +132,11 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
         technicien:     form.technicien || undefined,
         technicienName: form.technicienName,
         scheduledDate:  form.scheduledDate,
-        controlType:    'hors_contrat',
+        controlType:    isIntv ? 'intervention' : 'hors_contrat',
+        objet:          isIntv ? form.objet.trim() : undefined,
         notes:          form.notes,
       })
-      toast.success('Contrôle programmé.')
+      toast.success(isIntv ? 'Intervention programmée.' : 'Contrôle programmé.')
       onCreated(created)
       onClose()
     } catch (err) {
@@ -140,7 +151,7 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
       <div className="modal modal--md modal--dropdown">
         <div className="modal-header">
           <h2 className="modal-title">
-            <Plus size={16} /> Nouveau contrôle
+            <Plus size={16} /> {isIntv ? 'Nouvelle intervention' : 'Nouveau contrôle'}
           </h2>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
@@ -150,11 +161,32 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
               contrôles périodiques. */}
           <div className="ctrl-create-note">
             <Info size={13} />
-            <span>
-              Contrôle <strong>hors contrat</strong>. Les visites semestrielles et
-              annuelles sont générées automatiquement par le contrat du site.
-            </span>
+            {isIntv ? (
+              <span>
+                <strong>Intervention ponctuelle</strong> (remplacement, dépannage) :
+                même checklist qu'un contrôle, mais elle ne compte pas comme
+                contrôle et ne modifie pas la date du prochain contrôle.
+              </span>
+            ) : (
+              <span>
+                Contrôle <strong>hors contrat</strong>. Les visites semestrielles et
+                annuelles sont générées automatiquement par le contrat du site.
+              </span>
+            )}
           </div>
+
+          {isIntv && (
+            <div className="form-group">
+              <label className="form-label"><Wrench size={12} /> Objet *</label>
+              <input
+                className="form-input"
+                placeholder="ex. Changement batterie lithium + piles d'armoire"
+                value={form.objet}
+                onChange={e => setF('objet', e.target.value)}
+                autoFocus
+              />
+            </div>
+          )}
 
           {/* Étape 1 — le client */}
           <div className="form-group">
@@ -225,7 +257,7 @@ export default function ControlCreateModal({ presetDate, onClose, onCreated }) {
               </div>
               <p className="form-hint">
                 {form.installation
-                  ? 'Le contrôle ne portera que sur cet appareil.'
+                  ? `${isIntv ? "L'intervention" : 'Le contrôle'} ne portera que sur cet appareil.`
                   : `Le technicien contrôlera les ${deas.length} appareil${deas.length > 1 ? 's' : ''} du site.`}
               </p>
             </div>

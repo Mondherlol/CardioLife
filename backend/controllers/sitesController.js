@@ -371,7 +371,10 @@ async function updateDea(req, res) {
  * n'y en a aucune, on la crée — une échéance annoncée doit exister quelque part.
  */
 async function moveNextVisit(site, when, user) {
-  const pending = { site: site._id, status: { $ne: 'termine' }, scheduledDate: { $ne: null } }
+  const pending = {
+    site: site._id, status: { $ne: 'termine' }, scheduledDate: { $ne: null },
+    controlType: { $ne: 'intervention' },
+  }
 
   const visit =
     await Intervention.findOne({ ...pending, scheduledDate: { $gte: new Date() } }).sort({ scheduledDate: 1 }) ||

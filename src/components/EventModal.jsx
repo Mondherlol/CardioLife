@@ -141,11 +141,12 @@ export default function EventModal({
     let base = (isEdit && entityKind === 'appointment')
       ? MODAL_TYPE_OPTS.filter(t => t.value !== 'formation')
       : MODAL_TYPE_OPTS
-    // Un contrôle ne se crée pas comme un rendez-vous : il se rattache à un DAE
-    // et à un technicien. Le type reste proposé ici — c'est là qu'on le cherche
-    // en composant le planning — mais il ouvre la fiche de création dédiée.
-    if (!isEdit && onSwitchToControl) {
-      base = [...base, TYPE_MAP.controle]
+    // Un contrôle ou une intervention ne se crée pas comme un rendez-vous : il
+    // se rattache à un site et à un technicien. Les types restent proposés ici
+    // — c'est là qu'on les cherche en composant le planning — mais ouvrent la
+    // fiche de création dédiée.
+    if (isEdit || !onSwitchToControl) {
+      base = base.filter(t => !['controle_hors_contrat', 'intervention'].includes(t.value))
     }
     if (!base.some(t => t.value === form.type)) base = [...base, TYPE_MAP[form.type]].filter(Boolean)
     return base
@@ -330,8 +331,12 @@ export default function EventModal({
                       onSwitchToFormation(currentSlot())
                       return
                     }
-                    if (e.target.value === 'controle' && !isEdit && onSwitchToControl) {
-                      onSwitchToControl(currentSlot())
+                    if (['controle_hors_contrat', 'intervention'].includes(e.target.value)
+                        && !isEdit && onSwitchToControl) {
+                      onSwitchToControl(currentSlot(), {
+                        kind:  e.target.value === 'intervention' ? 'intervention' : 'controle',
+                        objet: form.title.trim(),
+                      })
                       return
                     }
                     set('type', e.target.value)

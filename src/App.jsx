@@ -25,6 +25,7 @@ import MaintenancePage          from './pages/MaintenancePage'
 import InterventionFichePage    from './pages/InterventionFichePage'
 import InterventionPrintPage    from './pages/InterventionPrintPage'
 import InterventionBonPage      from './pages/InterventionBonPage'
+import InterventionBonsWeekPage from './pages/InterventionBonsWeekPage'
 import ProfilePage              from './pages/ProfilePage'
 import TodoPage                 from './pages/TodoPage'
 import Sidebar        from './components/Sidebar'
@@ -159,6 +160,8 @@ export default function App() {
             </Route>
             <Route path="/interventions/:id/print" element={<InterventionPrintPage />} />
             <Route path="/interventions/:id/bon"   element={<InterventionBonPage />} />
+            {/* Bons de toute une semaine, imprimés d'un coup pour la tournée. */}
+            <Route path="/interventions/bons"      element={<InterventionBonsWeekPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </SidebarProvider>

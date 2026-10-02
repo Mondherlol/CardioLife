@@ -18,6 +18,7 @@ const CONTROL_TYPE_LABELS = {
   semestriel:   'Semestriel',
   annuel:       'Annuel',
   hors_contrat: 'Hors contrat',
+  intervention: 'Intervention',
 }
 const INTERVENTION_STATUS = {
   planifie: { label: 'Planifié', cls: 'iv-badge iv-badge--blue' },

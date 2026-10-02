@@ -159,10 +159,13 @@ async function syncContractControls(contract, userId) {
 async function syncSiteNextControl(siteId) {
   if (!siteId) return null
 
+  // Une intervention ponctuelle n'est pas un contrôle : elle ne fixe jamais
+  // l'échéance affichée sur les DAE.
   const pending = {
     site: siteId,
     status: { $ne: 'termine' },
     scheduledDate: { $ne: null },
+    controlType: { $ne: 'intervention' },
   }
 
   const upcoming = await Intervention.findOne({

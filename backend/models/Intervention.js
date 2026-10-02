@@ -127,9 +127,13 @@ const interventionSchema = new Schema({
   technicien:     { type: Schema.Types.ObjectId, ref: 'User' },
   technicienName: { type: String, trim: true },
 
-  // Type de contrôle : issu d'un contrat (semestriel/annuel) ou hors contrat
-  // (planifié manuellement depuis la fiche d'une installation).
-  controlType:   { type: String, enum: ['semestriel','annuel','hors_contrat'], default: 'hors_contrat' },
+  // Type de visite : contrôle issu d'un contrat (semestriel/annuel), contrôle
+  // hors contrat (planifié à la main), ou intervention ponctuelle — un
+  // remplacement, un dépannage. L'intervention suit la même checklist mais ne
+  // vaut pas contrôle : elle ne compte jamais comme échéance du site.
+  controlType:   { type: String, enum: ['semestriel','annuel','hors_contrat','intervention'], default: 'hors_contrat' },
+  // Objet d'une intervention (« Changement batterie + piles d'armoire »).
+  objet:         { type: String, trim: true },
   contract:      { type: Schema.Types.ObjectId, ref: 'Contract' },
 
   status:        { type: String, enum: ['planifie','en_cours','termine'], default: 'planifie' },

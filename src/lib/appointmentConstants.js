@@ -6,12 +6,14 @@ export const ROLE_LABELS = {
 }
 
 /* Les contrôles périodiques sont distingués dans le planning : deux visites par
-   an, la seconde valant contrôle annuel. Les visites hors contrat restent des
-   « interventions ». */
+   an, la seconde valant contrôle annuel. Un contrôle hors contrat compte comme
+   échéance du site ; une intervention (remplacement, dépannage) suit la même
+   checklist sans jamais en être une. */
 export const TYPE_OPTS = [
-  { value: 'controle_semestriel', label: 'Contrôle semestriel', color: '#f97316' },
-  { value: 'controle_annuel',     label: 'Contrôle annuel',     color: '#0ea5e9' },
-  { value: 'intervention',        label: 'Intervention',        color: '#ef4444' },
+  { value: 'controle_semestriel',   label: 'Contrôle semestriel',   color: '#f97316' },
+  { value: 'controle_annuel',       label: 'Contrôle annuel',       color: '#0ea5e9' },
+  { value: 'controle_hors_contrat', label: 'Contrôle hors contrat', color: '#f59e0b' },
+  { value: 'intervention',          label: 'Intervention',          color: '#ef4444' },
   { value: 'installation',        label: 'Installation',        color: '#22c55e' },
   { value: 'formation',           label: 'Formation',           color: '#a855f7' },
   { value: 'autre',               label: 'Autre',               color: '#6b7280' },
@@ -28,13 +30,17 @@ const LEGACY_TYPE_OPTS = [
 export function controlTypeToPlanning(controlType) {
   if (controlType === 'annuel')     return 'controle_annuel'
   if (controlType === 'semestriel') return 'controle_semestriel'
-  return 'intervention'   // hors contrat
+  if (controlType === 'intervention') return 'intervention'
+  return 'controle_hors_contrat'
 }
 
-/** Intitulé d'un contrôle dans le planning : « Contrôle annuel — Client ». */
+/** Intitulé d'un contrôle dans le planning : « Contrôle annuel — Client ».
+    Une intervention se nomme par son objet quand il est connu. */
 export function controlEventTitle(intervention) {
   const type  = controlTypeToPlanning(intervention.controlType)
-  const label = type === 'intervention' ? 'Intervention' : TYPE_MAP[type].label
+  const label = type === 'intervention' && intervention.objet
+    ? intervention.objet
+    : TYPE_MAP[type].label
   return `${label}${intervention.clientName ? ' — ' + intervention.clientName : ''}`
 }
 
@@ -48,16 +54,20 @@ export const STATUS_OPTS = [
 /* Types issus d'une collection dédiée : ils s'affichent dans le planning mais
    ne se créent pas comme un simple rendez-vous. */
 export const DEDICATED_TYPES = [
-  'controle_semestriel', 'controle_annuel', 'intervention', 'installation', 'formation',
+  'controle_semestriel', 'controle_annuel', 'controle_hors_contrat', 'intervention',
+  'installation', 'formation',
 ]
 
 /** Types du planning alimentés par la collection des contrôles. */
-export const CONTROL_TYPES = ['controle_semestriel', 'controle_annuel', 'intervention']
+export const CONTROL_TYPES = [
+  'controle_semestriel', 'controle_annuel', 'controle_hors_contrat', 'intervention',
+]
 
-// Types proposés dans la modal : contrôles/interventions/installations exclus
-// (créés depuis leurs pages dédiées, mais affichés dans le planning quand même).
+// Types proposés dans la modal : contrôles/installations exclus (créés depuis
+// leurs pages dédiées, mais affichés dans le planning quand même). Contrôle
+// hors contrat et intervention restent proposés : ils ouvrent leur fiche.
 export const MODAL_TYPE_OPTS = TYPE_OPTS.filter(
-  t => !['controle_semestriel', 'controle_annuel', 'intervention', 'installation'].includes(t.value)
+  t => !['controle_semestriel', 'controle_annuel', 'installation'].includes(t.value)
 )
 
 // Durées prédéfinies (en minutes). 1 h par défaut.

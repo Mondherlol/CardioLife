@@ -25,7 +25,7 @@ import { stageOf } from '../lib/formations'
 import { formatDate, daysUntil, ItemsButton, ArmoireChip } from '../components/siteHelpers'
 
 /* ── Libellés ─────────────────────────────────────────────────── */
-const CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat' }
+const CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention' }
 function fmtLong(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })

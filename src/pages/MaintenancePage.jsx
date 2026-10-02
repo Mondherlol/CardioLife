@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useParams, useNavigate, Navigate } from 'react-router-dom'
-import { Wrench, HeartPulse, GraduationCap, Replace } from 'lucide-react'
+import { Wrench, Hammer, HeartPulse, GraduationCap, Replace } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { isAdmin } from '../lib/access'
 import InterventionsPage from './InterventionsPage'
@@ -25,6 +25,10 @@ const has = (u, perm) => isAdmin(u) || !!u?.permissions?.[perm]
 const TABS = [
   {
     id: 'controles', label: 'Contrôles', icon: Wrench,
+    can: u => has(u, 'canManageInterventions'),
+  },
+  {
+    id: 'interventions', label: 'Interventions', icon: Hammer,
     can: u => has(u, 'canManageInterventions'),
   },
   {
@@ -76,7 +80,8 @@ export default function MaintenancePage() {
         })}
       </div>
 
-      {active.id === 'controles'     && <InterventionsPage embedded />}
+      {active.id === 'controles'     && <InterventionsPage embedded key="controles" />}
+      {active.id === 'interventions' && <InterventionsPage embedded key="interventions" kind="intervention" />}
       {active.id === 'installations' && <InstallationsTab  embedded />}
       {active.id === 'formations'    && <FormationsPage    embedded />}
       {active.id === 'remplacements' && <ReplacementsPage  embedded />}

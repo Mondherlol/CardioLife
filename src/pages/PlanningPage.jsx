@@ -6,7 +6,7 @@ import timeGridPlugin  from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin      from '@fullcalendar/list'
 import frLocale        from '@fullcalendar/core/locales/fr'
-import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap } from 'lucide-react'
+import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap, Hammer, Printer } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getAppointments, updateAppointment } from '../api/appointments'
 import { getFormations, updateFormation } from '../api/formations'
@@ -19,7 +19,7 @@ import ControlCreateModal from '../components/ControlCreateModal'
 import AppointmentViewModal from '../components/AppointmentViewModal'
 import { useAuth } from '../context/AuthContext'
 import {
-  TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime,
+  TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime, localDateStr,
   DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle,
 } from '../lib/appointmentConstants'
 
@@ -30,6 +30,7 @@ const CONTROL_LABELS = {
   semestriel:   'Contrôle semestriel',
   annuel:       'Contrôle annuel',
   hors_contrat: 'Contrôle hors contrat',
+  intervention: 'Intervention',
 }
 
 /** Délai lisible d'un coup d'œil : « dans 3 j », « dans 5 mois ». */
@@ -393,6 +394,18 @@ export default function PlanningPage() {
               onClick={() => setCtrlModal({ date: null })}>
               <Wrench size={14} /> Nouveau contrôle
             </button>
+            <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
+              onClick={() => setCtrlModal({ date: null, kind: 'intervention' })}>
+              <Hammer size={14} /> Nouvelle intervention
+            </button>
+            {/* La semaine affichée dans le calendrier (ou la semaine en cours). */}
+            <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
+              onClick={() => {
+                const d = calendarRef.current?.getApi().getDate() || new Date()
+                window.open(`/interventions/bons?semaine=${localDateStr(d)}`, '_blank')
+              }}>
+              <Printer size={14} /> Bons de la semaine
+            </button>
           </div>
         )}
 
@@ -511,14 +524,19 @@ export default function PlanningPage() {
             if (status === 'annule') cls.push('fc-event--annule')
             return cls
           }}
-          eventContent={info => (
-            <div className="plan-event-inner">
-              <span className="plan-event-title">{info.event.title}</span>
-              {info.event.extendedProps.clientName && (
-                <span className="plan-event-client">{info.event.extendedProps.clientName}</span>
-              )}
-            </div>
-          )}
+          eventContent={info => {
+            const { title } = info.event
+            const client = info.event.extendedProps.clientName
+            return (
+              <div className="plan-event-inner">
+                <span className="plan-event-title">{title}</span>
+                {/* Le titre d'un contrôle nomme déjà le client : pas de doublon. */}
+                {client && !title.includes(client) && (
+                  <span className="plan-event-client">{client}</span>
+                )}
+              </div>
+            )
+          }}
         />
       </div>
 
@@ -537,13 +555,18 @@ export default function PlanningPage() {
           // Le créneau retenu suit : choisir « Formation » dans la modal de RDV
           // ouvre la fiche formation sur la même case du calendrier.
           onSwitchToFormation={slot => { setModal(null); setFmnModal({ mode: 'create', slot }) }}
-          onSwitchToControl={slot => { setModal(null); setCtrlModal({ date: slot?.startStr || null }) }}
+          onSwitchToControl={(slot, opts = {}) => {
+            setModal(null)
+            setCtrlModal({ date: slot?.startStr || null, kind: opts.kind, objet: opts.objet })
+          }}
         />
       )}
 
       {ctrlModal && (
         <ControlCreateModal
+          kind={ctrlModal.kind}
           presetDate={ctrlModal.date}
+          presetObjet={ctrlModal.objet}
           onClose={() => setCtrlModal(null)}
           onCreated={() => { setCtrlModal(null); refetch() }}
         />

@@ -188,6 +188,7 @@ async function applyNextControl(intervention, date, user, changes, dry) {
   const next = await Intervention.findOne({
     site:   intervention.site,
     status: { $ne: 'termine' },
+    controlType: { $ne: 'intervention' },
     _id:    { $ne: intervention._id },
   }).sort({ scheduledDate: 1 })
 
@@ -219,7 +220,8 @@ async function applyNextControl(intervention, date, user, changes, dry) {
     installation:  intervention.installation,
     installationSnap: intervention.installationSnap,
     contract:      intervention.contract,
-    controlType:   intervention.controlType || 'hors_contrat',
+    controlType:   intervention.controlType === 'intervention'
+      ? 'hors_contrat' : (intervention.controlType || 'hors_contrat'),
     scheduledDate: shifted,
     manualDate:    true,
     status:        'planifie',
@@ -285,7 +287,9 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
       }
     }
 
-    const next = planning ? nextControlFromFiches(intervention.fiches) : null
+    // Une intervention ponctuelle ne touche pas au calendrier des contrôles.
+    const next = planning && intervention.controlType !== 'intervention'
+      ? nextControlFromFiches(intervention.fiches) : null
     const planned = next && intervention.site
       ? await applyNextControl(intervention, next, user, changes, dry)
       : null

@@ -483,7 +483,8 @@ function ReopenConfirm({ onClose, onConfirm, loading }) {
 const CTRL_CTX = {
   semestriel:   { label: 'Semestriel (contrat)', cls: 'ct-type-badge ct-type-badge--semestriel' },
   annuel:       { label: 'Annuel (contrat)',     cls: 'ct-type-badge ct-type-badge--annuel' },
-  hors_contrat: { label: 'Hors contrat',         cls: 'ct-type-badge ct-type-badge--hors' },
+  hors_contrat: { label: 'Contrôle hors contrat', cls: 'ct-type-badge ct-type-badge--hors' },
+  intervention: { label: 'Intervention ponctuelle', cls: 'ct-type-badge ct-type-badge--intervention' },
 }
 function ControlContextSection({ iv, navigate }) {
   const ct       = CTRL_CTX[iv.controlType] || CTRL_CTX.hors_contrat
@@ -499,11 +500,13 @@ function ControlContextSection({ iv, navigate }) {
 
   return (
     <div className="fiche-page-section">
-      <div className="fiche-page-section-title"><ClipboardList size={14} /> Contexte du contrôle</div>
+      <div className="fiche-page-section-title">
+        <ClipboardList size={14} /> {iv.controlType === 'intervention' ? "Contexte de l'intervention" : 'Contexte du contrôle'}
+      </div>
       <div className="fiche-page-body">
         <div className="ctx-grid">
           <div className="ctx-item">
-            <span className="ctx-label">Type de contrôle</span>
+            <span className="ctx-label">Type</span>
             <span className={ct.cls}>{ct.label}</span>
           </div>
           <div className="ctx-item">
@@ -640,15 +643,18 @@ export default function InterventionFichePage() {
         emplacement:  f.emplacement  || dea?.location     || '',
         signaletique: f.signaletique ?? '',
 
-        batteriePeremption:   f.batteriePeremption,
+        // Péremptions : celles du parc tant que la fiche n'en a pas relevé.
+        batteriePeremption:   f.batteriePeremption || dea?.batteries?.[0]?.expiryDate,
         batteriePct:          f.batteriePct ?? undefined,
         batterieEtat:         f.batterieEtat,
         batterieRemplacee:    f.batterieRemplacee,
         batterieRemplaceeRef: f.batterieRemplaceeRef ?? '',
         batterieNote:         f.batterieNote ?? '',
 
-        electrodesPeremptionAdulte:      f.electrodesPeremptionAdulte,
-        electrodesPeremptionPediatrique: f.electrodesPeremptionPediatrique,
+        electrodesPeremptionAdulte:      f.electrodesPeremptionAdulte
+          || dea?.electrodes?.find(e => e.kind === 'adulte' || !e.kind)?.expiryDate,
+        electrodesPeremptionPediatrique: f.electrodesPeremptionPediatrique
+          || dea?.electrodes?.find(e => e.kind === 'enfant')?.expiryDate,
         electrodesEmballage:     f.electrodesEmballage,
         electrodesAdaptees:      f.electrodesAdaptees,
         electrodesType:          f.electrodesType ?? '',
@@ -961,13 +967,20 @@ export default function InterventionFichePage() {
    */
   async function handleItemsSaved(kind, updated) {
     setItemsKind(null)
+    /* Parc d'avant la modification : une péremption de fiche qui n'en est que
+       la copie (pré-remplissage) suit la nouvelle pièce, sans quoi elle
+       repousserait l'ancienne date sur le parc au prochain enregistrement. */
+    const before = (iv?.siteDeas || []).find(d => String(d._id) === activeKey)
     mergeIv(updated, { parc: true })
 
     const dea = (updated.siteDeas || []).find(d => String(d._id) === activeKey)
+    const sameDay = (a, b) => !!a && !!b && isoDate(a) === isoDate(b)
+    const replaceable = (current, old) => !current || sameDay(current, old)
     const prefill = {}
     if (kind === 'batteries') {
       const batt = dea?.batteries?.[0]
-      if (batt?.expiryDate && !activeFiche?.batteriePeremption) {
+      if (batt?.expiryDate && !sameDay(batt.expiryDate, activeFiche?.batteriePeremption)
+          && replaceable(activeFiche?.batteriePeremption, before?.batteries?.[0]?.expiryDate)) {
         prefill.batteriePeremption = batt.expiryDate
       }
       /* Le niveau de charge saisi en identifiant la pièce est le même que celui
@@ -977,12 +990,16 @@ export default function InterventionFichePage() {
         prefill.batteriePct = batt.level
       }
     } else {
-      const adulte = dea?.electrodes?.find(e => e.kind === 'adulte' || !e.kind)
-      const enfant = dea?.electrodes?.find(e => e.kind === 'enfant')
-      if (adulte?.expiryDate && !activeFiche?.electrodesPeremptionAdulte) {
+      const adulteOf = d => d?.electrodes?.find(e => e.kind === 'adulte' || !e.kind)
+      const enfantOf = d => d?.electrodes?.find(e => e.kind === 'enfant')
+      const adulte = adulteOf(dea)
+      const enfant = enfantOf(dea)
+      if (adulte?.expiryDate && !sameDay(adulte.expiryDate, activeFiche?.electrodesPeremptionAdulte)
+          && replaceable(activeFiche?.electrodesPeremptionAdulte, adulteOf(before)?.expiryDate)) {
         prefill.electrodesPeremptionAdulte = adulte.expiryDate
       }
-      if (enfant?.expiryDate && !activeFiche?.electrodesPeremptionPediatrique) {
+      if (enfant?.expiryDate && !sameDay(enfant.expiryDate, activeFiche?.electrodesPeremptionPediatrique)
+          && replaceable(activeFiche?.electrodesPeremptionPediatrique, enfantOf(before)?.expiryDate)) {
         prefill.electrodesPeremptionPediatrique = enfant.expiryDate
       }
     }
@@ -1058,6 +1075,8 @@ export default function InterventionFichePage() {
   }
 
   const snap          = iv.installationSnap || {}
+  // Intervention ponctuelle : même checklist, sans effet sur le prochain contrôle.
+  const isIntervention = iv.controlType === 'intervention'
   const isTermine     = iv.status === 'termine'
   const fiche         = activeFiche
   // Les photos vivent côté serveur : c'est la fiche enregistrée qui fait foi.
@@ -1192,7 +1211,16 @@ export default function InterventionFichePage() {
               <span className={meta.cls}>
                 <StatusIcon size={11} strokeWidth={2.5} /> {meta.label}
               </span>
+              {isIntervention && (
+                <span className="ct-type-badge ct-type-badge--intervention">Intervention</span>
+              )}
             </h1>
+            {isIntervention && (
+              <p className="fiche-intv-objet">
+                <strong>{iv.objet || 'Intervention ponctuelle'}</strong>
+                <span> — ne compte pas comme contrôle : la date du prochain contrôle n'est pas modifiée.</span>
+              </p>
+            )}
             <div style={{ display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap', fontSize: 13, color: 'var(--text-muted)' }}>
               {snap.deviceType && (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -1839,7 +1867,9 @@ export default function InterventionFichePage() {
                 </AutoField>
 
                 {/* Suivi documentaire — la date du prochain contrôle évite le
-                    week-end, comme le calendrier des contrats. */}
+                    week-end, comme le calendrier des contrats. Une intervention
+                    ponctuelle n'y touche pas : le bloc n'a pas lieu d'être. */}
+                {!isIntervention && (
                 <AutoField label="Suivi documentaire" icon={ClipboardList}>
                   <div className="fiche-date-row">
                     <DateField
@@ -1868,6 +1898,7 @@ export default function InterventionFichePage() {
                     </p>
                   )}
                 </AutoField>
+                )}
 
                 <AutoField label="Observation" icon={StickyNote} saving={savingField === 'observation'}>
                   <textarea

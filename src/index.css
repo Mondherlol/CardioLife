@@ -13739,6 +13739,11 @@ button {
 .ct-type-badge--semestriel { background: var(--blue-100, #dbeafe); color: var(--blue-700, #1d4ed8); }
 .ct-type-badge--annuel     { background: #ede9fe; color: #6d28d9; }
 .ct-type-badge--hors       { background: var(--gray-100, #f1f5f9); color: var(--gray-500); }
+.ct-type-badge--intervention { background: #fee2e2; color: #b91c1c; }
+.iv-row-objet  { font-size: 12px; color: var(--text-secondary, #475569); margin-top: 2px; }
+.iv-card-objet { font-weight: 600; color: var(--text-primary, #0f172a); }
+.fiche-intv-objet { margin: 6px 0 0; font-size: 13px; color: var(--text-muted); }
+.fiche-intv-objet strong { color: var(--text-primary, #0f172a); }
 
 /* Pills sélecteur type de contrôle (modal) */
 .ct-type-pills { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -20887,7 +20892,9 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 }
 
 /* Le cartouche du client : la hauteur laisse la place au cachet. */
-.bi-table--visa { margin-top: auto; }
+/* Le cartouche suit la désignation ; c'est le pied de page qui descend en
+   bas de la feuille, comme sur le papier à en-tête. */
+.bi-table--visa { margin-top: 18px; margin-bottom: 18px; }
 .bi-table--visa th { text-align: center; }
 .bi-visa-cell { height: 96px; }
 .bi-visa-name { font-size: 12px; font-weight: 600; color: #6b7280; }
@@ -20895,7 +20902,7 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 /* ── Pied de page ── */
 
 .bi-footer {
-  margin-top: 18px;
+  margin-top: auto;
   padding-top: 10px;
   border-top: 1.5px solid #f97316;
   text-align: center;
@@ -20908,9 +20915,12 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 
 @media print {
   .bi-wrap { background: #fff; padding: 0; }
+  /* Hauteur d'une feuille A4 (marges d'impression nulles) : sans elle, le
+     pied de page remontait sous le cartouche. Un poil sous 297 mm pour ne
+     pas déborder sur une page blanche. */
   .bi-page {
     width: auto;
-    min-height: auto;
+    min-height: 296mm;
     margin: 0;
     padding: 12mm 13mm;
     box-shadow: none;
@@ -21483,3 +21493,43 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
   color: var(--text-primary);
 }
 .ci-part .ci-model-badge { margin-left: 0; }
+.ctrl-type-badge--intervention { background: #fee2e2; color: #b91c1c; }
+
+/* ── Planning : popover « +N » d'un jour chargé ──
+   Avec des dizaines de visites le même jour, la liste dépassait l'écran sans
+   pouvoir défiler. Elle tient désormais dans la fenêtre et défile. */
+.plan-cal-wrap .fc-popover {
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  z-index: 40;
+}
+.plan-cal-wrap .fc-popover-header { flex-shrink: 0; }
+.plan-cal-wrap .fc-popover-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-width: 260px;
+}
+.plan-cal-wrap .fc-popover-body .fc-daygrid-event-harness + .fc-daygrid-event-harness { margin-top: 2px; }
+
+/* ── Bons d'intervention de la semaine ── */
+.bi-week-nav { display: flex; align-items: center; gap: 8px; }
+.bi-week-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.bi-week-day { font-weight: 600; text-transform: capitalize; margin-right: 2px; }
+.bi-week-page + .bi-week-page { margin-top: 20px; }
+.bi-week-empty {
+  max-width: 210mm; margin: 40px auto; text-align: center;
+  color: var(--text-muted); display: flex; gap: 10px; justify-content: center; align-items: center;
+}
+@media print {
+  .bi-week-page + .bi-week-page { margin-top: 0; }
+  .bi-week-page { break-after: page; page-break-after: always; }
+  .bi-week-page:last-child { break-after: auto; page-break-after: auto; }
+}
+
+/* Bon : modèle et n° de série sous chaque désignation. */
+.bi-desi-sep { margin: 0 8px; color: #9ca3af; }
+.bi-desi-blank {
+  display: inline-block; width: 45mm; border-bottom: 1px dotted #6b7280;
+  vertical-align: baseline;
+}
