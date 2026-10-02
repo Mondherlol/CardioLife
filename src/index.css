@@ -21513,15 +21513,96 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 .plan-cal-wrap .fc-popover-body .fc-daygrid-event-harness + .fc-daygrid-event-harness { margin-top: 2px; }
 
 /* ── Bons d'intervention de la semaine ── */
-.bi-week-nav { display: flex; align-items: center; gap: 8px; }
-.bi-week-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.bi-week-day { font-weight: 600; text-transform: capitalize; margin-right: 2px; }
-.bi-week-page + .bi-week-page { margin-top: 20px; }
-.bi-week-empty {
-  max-width: 210mm; margin: 40px auto; text-align: center;
-  color: var(--text-muted); display: flex; gap: 10px; justify-content: center; align-items: center;
+.bw-wrap { min-height: 100vh; background: var(--gray-100); }
+.bw-top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 10px 20px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 6px rgba(15, 23, 42, .06);
 }
+.bw-week { display: flex; align-items: center; gap: 8px; }
+.bw-week-label { display: flex; flex-direction: column; line-height: 1.25; }
+.bw-week-title { font-weight: 700; font-size: 15px; }
+.bw-week-range { font-size: 12.5px; color: var(--text-muted); }
+.bw-top-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bw-tech { width: auto; min-width: 180px; }
+.bw-numbering {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 4px 3px 10px; border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text-muted);
+}
+.bw-numbering .form-input { width: 150px; border: none; background: transparent; padding: 6px 4px; }
+
+.bw-body {
+  display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px;
+  padding: 18px 20px 60px; align-items: start;
+}
+.bw-list {
+  position: sticky; top: 74px;
+  max-height: calc(100vh - 92px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.bw-list-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border: none; background: none; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+}
+.bw-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px; border-radius: 10px; cursor: pointer;
+  border: 1px solid transparent;
+}
+.bw-item:hover { background: var(--gray-100); }
+.bw-item--active { border-color: var(--orange-500, #f97316); background: var(--gray-100); }
+.bw-item--off { opacity: .5; }
+.bw-item input { margin-top: 3px; cursor: pointer; }
+.bw-item-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.bw-item-top { display: flex; align-items: center; gap: 6px; }
+.bw-item-day { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: capitalize; }
+.bw-item-client { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bw-item-sub { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bw-item-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 11.5px; }
+.bw-item-tech { color: var(--text-muted); }
+.bw-ref { font-family: ui-monospace, monospace; font-weight: 600; }
+.bw-ref--missing { font-family: inherit; font-weight: 500; color: var(--amber-600, #d97706); }
+.bw-dirty {
+  width: 7px; height: 7px; border-radius: 50%; margin-left: auto;
+  background: var(--orange-500, #f97316);
+}
+
+.bw-editor { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.bw-editor-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.bw-editor-title { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+.bw-editor-title span { font-size: 12px; color: var(--text-muted); }
+.bw-editor-actions { margin-left: auto; display: flex; gap: 6px; }
+.bw-fields { max-width: none; margin: 0; }
+/* L'aperçu garde la feuille A4 exacte, réduite pour tenir à côté de la liste. */
+.bw-preview { overflow-x: auto; zoom: .8; }
+.bw-preview .bi-page { margin: 0 auto; }
+
+.bw-empty {
+  margin: 60px auto; text-align: center; color: var(--text-muted);
+  display: flex; gap: 10px; justify-content: center; align-items: center;
+}
+.bw-print { display: none; }
+
+@media (max-width: 900px) {
+  .bw-body { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  .bw-list { position: static; max-height: 300px; }
+  .bw-preview { zoom: .5; }
+  .bw-top { padding: 10px 12px; }
+}
+
 @media print {
+  .bw-wrap { background: #fff; }
+  .bw-print { display: block; }
   .bi-week-page + .bi-week-page { margin-top: 0; }
   .bi-week-page { break-after: page; page-break-after: always; }
   .bi-week-page:last-child { break-after: auto; page-break-after: auto; }

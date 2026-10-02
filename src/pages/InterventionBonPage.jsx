@@ -139,26 +139,14 @@ export default function InterventionBonPage() {
   const [iv,      setIv]      = useState(null)
   const [company, setCompany] = useState(FALLBACK_COMPANY)
   const [error,   setError]   = useState(false)
-  const [ref,     setRef]     = useState('')
-  const [bc,      setBc]      = useState('')
-  const [natures, setNatures] = useState([])
-  const [signer,  setSigner]  = useState('')
-  // Désignations retouchées, par ligne (« <nature>|<appareil> »).
-  const [custom,  setCustom]  = useState({})
+  // Référence, BC, natures, signataire et désignations retouchées.
+  const [bon,     setBon]     = useState(null)
   const [saving,  setSaving]  = useState(false)
   const [dl,      setDl]      = useState(false)
 
   useEffect(() => {
     getIntervention(id)
-      .then(data => {
-        setIv(data)
-        setRef(data.bon?.reference || '')
-        setBc(data.bon?.bonCommande || '')
-        const saved = savedNatures(data.bon)
-        setNatures(saved.length ? saved : suggestNature(data))
-        setSigner(data.bon?.signataire || data.visite?.visa || '')
-        setCustom(data.bon?.designations || {})
-      })
+      .then(data => { setIv(data); setBon(initialBon(data)) })
       .catch(() => setError(true))
   }, [id])
 
@@ -175,14 +163,7 @@ export default function InterventionBonPage() {
   async function save() {
     setSaving(true)
     try {
-      // Seules les lignes réellement modifiées sont gardées : un texte identique
-      // au libellé par défaut suivra les évolutions de ce dernier.
-      const autoOf = Object.fromEntries(lines.map(l => [l.key, l.auto]))
-      const designations = Object.fromEntries(Object.entries(custom)
-        .filter(([k, v]) => autoOf[k] !== undefined && v.trim() && v.trim() !== autoOf[k]))
-      await saveBon(id, {
-        reference: ref, bonCommande: bc, nature: natures, signataire: signer, designations,
-      })
+      await saveBon(id, bonPayload(bon, lines))
       toast.success('Bon enregistré.')
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
@@ -218,75 +199,16 @@ export default function InterventionBonPage() {
     }
   }
 
-  function toggleNature(nid) {
-    setNatures(cur => cur.includes(nid) ? cur.filter(n => n !== nid) : [...cur, nid])
-  }
-
   if (error) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Intervention introuvable.</div>
-  if (!iv)   return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Chargement…</div>
+  if (!iv || !bon) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Chargement…</div>
 
-  const lines = bonLines(iv, natures, custom)
+  const lines = bonLines(iv, bon.natures, bon.custom)
 
   return (
     <div className="bi-wrap">
       {/* ── Barre d'écran : ce qui se règle avant d'imprimer ── */}
       <div className="bi-bar no-print">
-        <div className="bi-bar-group bi-bar-group--sm">
-          <label className="bi-bar-label">Référence</label>
-          <input className="form-input form-input--plain" value={ref}
-            onChange={e => setRef(e.target.value)} placeholder="352/2025" />
-        </div>
-
-        <div className="bi-bar-group bi-bar-group--sm">
-          <label className="bi-bar-label">BC</label>
-          <input className="form-input form-input--plain" value={bc}
-            onChange={e => setBc(e.target.value)} placeholder="N° bon de commande" />
-        </div>
-
-        <div className="bi-bar-group">
-          <label className="bi-bar-label">Nom du signataire</label>
-          <input className="form-input form-input--plain" value={signer}
-            onChange={e => setSigner(e.target.value)}
-            placeholder="Responsable du site" />
-        </div>
-
-        <div className="bi-bar-group bi-bar-group--full">
-          <span className="bi-bar-label">Nature de l'intervention</span>
-          <div className="bi-natures">
-            {NATURES.map(n => {
-              const on = natures.includes(n.id)
-              return (
-                <label key={n.id} className={`bi-nature${on ? ' bi-nature--on' : ''}`}>
-                  <input type="checkbox" checked={on} onChange={() => toggleNature(n.id)} />
-                  {n.label}
-                </label>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="bi-bar-group bi-bar-group--full">
-          <span className="bi-bar-label">Désignation</span>
-          <div className="bi-desi-edit">
-            {lines.map(l => {
-              const edited = l.text !== l.auto
-              return (
-                <div key={l.key} className="bi-desi-edit-row">
-                  <textarea className="form-input form-input--plain" rows={2}
-                    value={l.text}
-                    onChange={e => setCustom(c => ({ ...c, [l.key]: e.target.value }))} />
-                  {edited && (
-                    <button type="button" className="btn btn--ghost btn--sm"
-                      title="Revenir au texte par défaut"
-                      onClick={() => setCustom(c => { const n = { ...c }; delete n[l.key]; return n })}>
-                      <RotateCcw size={13} />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
+        <BonFields value={bon} onChange={setBon} lines={lines} />
 
         <div className="bi-bar-actions">
           <button className="btn btn--ghost" onClick={save} disabled={saving}>
@@ -301,9 +223,111 @@ export default function InterventionBonPage() {
         </div>
       </div>
 
-      <BonDocument iv={iv} company={company} reference={ref} bc={bc}
-        signer={signer} lines={lines} />
+      <BonDocument iv={iv} company={company} reference={bon.ref} bc={bon.bc}
+        signer={bon.signer} lines={lines} />
     </div>
+  )
+}
+
+/** Réglages du bon tels qu'enregistrés, ou proposés pour une visite neuve. */
+export function initialBon(iv) {
+  const saved = savedNatures(iv.bon)
+  return {
+    ref:     iv.bon?.reference || '',
+    bc:      iv.bon?.bonCommande || '',
+    natures: saved.length ? saved : suggestNature(iv),
+    signer:  iv.bon?.signataire || iv.visite?.visa || '',
+    // Désignations retouchées, par ligne (« <nature>|<appareil> »).
+    custom:  iv.bon?.designations || {},
+  }
+}
+
+/**
+ * Corps envoyé au serveur. Seules les lignes réellement modifiées sont
+ * gardées : un texte identique au libellé par défaut suivra les évolutions
+ * de ce dernier.
+ */
+export function bonPayload(bon, lines) {
+  const autoOf = Object.fromEntries(lines.map(l => [l.key, l.auto]))
+  const designations = Object.fromEntries(Object.entries(bon.custom || {})
+    .filter(([k, v]) => autoOf[k] !== undefined && v.trim() && v.trim() !== autoOf[k]))
+  return {
+    reference: bon.ref, bonCommande: bon.bc, nature: bon.natures,
+    signataire: bon.signer, designations,
+  }
+}
+
+/**
+ * Les champs réglables d'un bon : partagés par la page d'un bon et par
+ * l'édition groupée de la semaine, pour qu'un bon se règle partout pareil.
+ */
+export function BonFields({ value, onChange, lines }) {
+  const set = (k, v) => onChange(cur => ({ ...cur, [k]: v }))
+  const setCustom = fn => onChange(cur => ({ ...cur, custom: fn(cur.custom || {}) }))
+  const toggleNature = nid => onChange(cur => ({
+    ...cur,
+    natures: cur.natures.includes(nid) ? cur.natures.filter(n => n !== nid) : [...cur.natures, nid],
+  }))
+
+  return (
+    <>
+      <div className="bi-bar-group bi-bar-group--sm">
+        <label className="bi-bar-label">Référence</label>
+        <input className="form-input form-input--plain" value={value.ref}
+          onChange={e => set('ref', e.target.value)} placeholder="352/2025" />
+      </div>
+
+      <div className="bi-bar-group bi-bar-group--sm">
+        <label className="bi-bar-label">BC</label>
+        <input className="form-input form-input--plain" value={value.bc}
+          onChange={e => set('bc', e.target.value)} placeholder="N° bon de commande" />
+      </div>
+
+      <div className="bi-bar-group">
+        <label className="bi-bar-label">Nom du signataire</label>
+        <input className="form-input form-input--plain" value={value.signer}
+          onChange={e => set('signer', e.target.value)}
+          placeholder="Responsable du site" />
+      </div>
+
+      <div className="bi-bar-group bi-bar-group--full">
+        <span className="bi-bar-label">Nature de l'intervention</span>
+        <div className="bi-natures">
+          {NATURES.map(n => {
+            const on = value.natures.includes(n.id)
+            return (
+              <label key={n.id} className={`bi-nature${on ? ' bi-nature--on' : ''}`}>
+                <input type="checkbox" checked={on} onChange={() => toggleNature(n.id)} />
+                {n.label}
+              </label>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="bi-bar-group bi-bar-group--full">
+        <span className="bi-bar-label">Désignation</span>
+        <div className="bi-desi-edit">
+          {lines.map(l => {
+            const edited = l.text !== l.auto
+            return (
+              <div key={l.key} className="bi-desi-edit-row">
+                <textarea className="form-input form-input--plain" rows={2}
+                  value={l.text}
+                  onChange={e => setCustom(c => ({ ...c, [l.key]: e.target.value }))} />
+                {edited && (
+                  <button type="button" className="btn btn--ghost btn--sm"
+                    title="Revenir au texte par défaut"
+                    onClick={() => setCustom(c => { const n = { ...c }; delete n[l.key]; return n })}>
+                    <RotateCcw size={13} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </>
   )
 }
 
