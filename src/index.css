@@ -20892,9 +20892,9 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 }
 
 /* Le cartouche du client : la hauteur laisse la place au cachet. */
-/* Le cartouche suit la désignation ; c'est le pied de page qui descend en
-   bas de la feuille, comme sur le papier à en-tête. */
-.bi-table--visa { margin-top: 18px; margin-bottom: 18px; }
+/* Le cartouche et le pied de page descendent ensemble en bas de la feuille,
+   comme sur le papier à en-tête : le client signe au pied du bon. */
+.bi-table--visa { margin-top: auto; margin-bottom: 18px; }
 .bi-table--visa th { text-align: center; }
 .bi-visa-cell { height: 96px; }
 .bi-visa-name { font-size: 12px; font-weight: 600; color: #6b7280; }
@@ -20902,7 +20902,7 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 /* ── Pied de page ── */
 
 .bi-footer {
-  margin-top: auto;
+  margin-top: 0;
   padding-top: 10px;
   border-top: 1.5px solid #f97316;
   text-align: center;
