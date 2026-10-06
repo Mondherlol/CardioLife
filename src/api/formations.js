@@ -14,3 +14,7 @@ export const toggleAttestation      = (id)              => patch(`/formations/${
 export const addDocuments           = (id, formData)    => upload(`/formations/${id}/documents`, formData)
 export const removeDocument         = (id, docId)       => del(`/formations/${id}/documents/${docId}`)
 export const deleteFormation        = (id)              => del(`/formations/${id}`)
+
+/* Bon d'intervention de la séance — réglé sur le même écran que celui d'une intervention. */
+export const getFormationBon        = (id)              => get(`/formations/${id}/bon`)
+export const saveFormationBon       = (id, data)        => patch(`/formations/${id}/bon`, data)

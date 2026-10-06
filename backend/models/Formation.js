@@ -1,4 +1,5 @@
 const mongoose = require('mongoose')
+const { BON_NATURES } = require('./Intervention')
 
 const documentSchema = new mongoose.Schema({
   path:         { type: String, required: true },
@@ -58,6 +59,16 @@ const formationSchema = new mongoose.Schema({
   attestationDelivered:   { type: Boolean, default: false },
   attestationDeliveredAt: { type: Date },
   attestationDeliveredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  /* Bon d'intervention de la séance — mêmes champs que celui d'une
+     intervention, pour être réglé et imprimé par le même écran. */
+  bon: {
+    reference:    { type: String, trim: true },
+    bonCommande:  { type: String, trim: true },
+    nature:       { type: [{ type: String, enum: BON_NATURES }], default: undefined },
+    signataire:   { type: String, trim: true },
+    signedAt:     Date,
+    designations: { type: Map, of: String, default: undefined },
+  },
   history:                [historySchema],
   createdBy:              { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true })

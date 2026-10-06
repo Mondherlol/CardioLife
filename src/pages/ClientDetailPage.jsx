@@ -253,7 +253,8 @@ export default function ClientDetailPage() {
     try {
       const [clientData, installationsData, contractsData] = await Promise.all([
         getClient(id),
-        getInstallations({ client: id, limit: 500 }),
+        // Un droit manquant sur le parc ne doit pas fermer toute la fiche.
+        getInstallations({ client: id, limit: 500 }).catch(() => ({ data: [] })),
         // Contrats en cours, un par site couvert.
         getContracts({ client: id, status: 'actif', limit: 200 }).catch(() => ({ data: [] })),
       ])

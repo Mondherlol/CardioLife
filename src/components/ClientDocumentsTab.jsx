@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'react-toastify'
 import {
   Folder, FolderOpen, File, FileText, Image, Film, Music, Archive, Code,
-  FolderPlus, Upload, Download, Trash2, Pencil, Home, ChevronRight, X,
+  FolderPlus, Upload, Download, Trash2, Pencil, Home, ChevronRight, X, ClipboardList,
 } from 'lucide-react'
 import { ImageThumbnail, PdfThumbnail } from './FileThumbnail'
 import DocumentPreviewModal from './DocumentPreviewModal'
@@ -10,7 +10,7 @@ import UploadProgress from './UploadProgress'
 import { getClientDocumentsFolder } from '../api/clients'
 import { getSiteDocumentsFolder } from '../api/sites'
 import {
-  getContents, createFolder, renameDoc, moveDoc, deleteDoc, downloadDoc,
+  getContents, createFolder, renameDoc, moveDoc, deleteDoc, downloadDoc, getSiteRapports,
 } from '../api/documents'
 import { useUploads } from '../hooks/useUploads'
 
@@ -132,6 +132,8 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
   const [breadcrumb,   setBreadcrumb]   = useState([])   // [{id, name}] sous la racine du client
   const [items,        setItems]        = useState([])
   const [loading,      setLoading]      = useState(true)
+  // Fiche d'un site : ses rapports d'intervention, rangés côté client.
+  const [rapports,     setRapports]     = useState([])
 
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [renaming,      setRenaming]      = useState(null)
@@ -167,6 +169,11 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
   }, [currentFolder])
 
   useEffect(() => { fetchItems() }, [fetchItems])
+
+  useEffect(() => {
+    if (!siteId) return
+    getSiteRapports(siteId).then(setRapports).catch(() => setRapports([]))
+  }, [siteId])
 
   const { uploads, activeCount, startFiles, startDrop, clear: clearUploads } = useUploads(fetchItems)
 
@@ -269,6 +276,7 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
   }
 
   const previewableSiblings = items.filter(isPreviewable)
+  const showRapports = siteId && rapports.length > 0 && breadcrumb.length === 0
 
   return (
     <div className="cd-docs-tab">
@@ -312,6 +320,33 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
         ))}
       </div>
 
+      {/* Les rapports vivent dans « Clients/<client>/Rapports d'intervention » :
+          on les montre ici sans les déplacer, du plus récent au plus ancien. */}
+      {showRapports && (
+        <div className="cd-rapports">
+          <div className="cd-rapports-title">
+            <ClipboardList size={14} /> Rapports d'intervention ({rapports.length})
+          </div>
+          <div className="cd-rapports-list">
+            {rapports.map(r => (
+              <div key={r._id} className="cd-rapport-row" onClick={() => setPreviewItem({ ...r, _siblings: rapports })}>
+                <FileText size={16} className="doc-icon doc-icon--pdf" />
+                <span className="cd-rapport-name" title={r.name}>{r.name.replace(/\.pdf$/i, '')}</span>
+                <span className="cd-rapport-meta">{formatSize(r.size)}</span>
+                <button
+                  type="button"
+                  className="action-btn action-btn--edit"
+                  title="Télécharger"
+                  onClick={e => { e.stopPropagation(); downloadDoc(r._id, r.name).catch(err => toast.error(err.message)) }}
+                >
+                  <Download size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div
         className={`docs-drop-zone${dropOver === '__main__' ? ' docs-drop-zone--over' : ''}`}
         onDragOver={handleMainDragOver}
@@ -352,7 +387,10 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
               onClick={() => openItem(item)}
             >
               <div className="docs-card-visual">
-                {item.type === 'folder' ? (
+                {item.type === 'folder' && item.systemKind === 'rapports' ? (
+                  /* Rapports d'intervention, rangés automatiquement à la clôture. */
+                  <ClipboardList size={40} className="doc-icon doc-icon--folder" />
+                ) : item.type === 'folder' ? (
                   <Folder size={40} className="doc-icon doc-icon--folder" />
                 ) : item.mimeType?.startsWith('image/') ? (
                   <ImageThumbnail id={item._id} />
@@ -439,7 +477,7 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
       {previewItem && (
         <DocumentPreviewModal
           item={previewItem}
-          siblings={previewableSiblings}
+          siblings={previewItem._siblings || previewableSiblings}
           onClose={() => setPreviewItem(null)}
         />
       )}

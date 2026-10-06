@@ -142,7 +142,22 @@ function requireAnyToWrite(readPermissions, writePermissions) {
 /* Le stock : consultable avec l'un des deux droits, modifiable avec un seul. */
 const stockGuard = () => requireAnyToWrite(['canViewStock', 'canManageStock'], ['canManageStock'])
 
+/**
+ * `requireAny`, avec une lecture ouverte à d'autres droits. La fiche client
+ * affiche le parc et les contrôles du client : qui gère les clients doit
+ * pouvoir les lire, sans pour autant poser un DEA ni saisir une checklist.
+ */
+function requireAnyOrRead(permissions, readPermissions, roles = []) {
+  const write = requireAny(permissions, roles)
+  return (req, res, next) => {
+    if ((req.method === 'GET' || req.method === 'HEAD')
+        && readPermissions.some(p => req.user?.permissions?.[p])) return next()
+    return write(req, res, next)
+  }
+}
+
 module.exports = {
+  requireAnyOrRead,
   requireAnyToWrite, stockGuard,
   MODULES, PERMISSION_KEYS, resolvePermissions, ROLE_PERMISSION_PRESETS, defaultPermissionsForRole,
   isAdmin, canAccess,

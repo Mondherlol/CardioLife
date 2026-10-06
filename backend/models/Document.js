@@ -18,6 +18,13 @@ const documentSchema = new mongoose.Schema({
   createdBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   isDeleted:   { type: Boolean, default: false },
   isSystem:    { type: Boolean, default: false },
+  // Rôle d'un dossier système : 'rapports' pour « Rapports d'intervention »
+  // et ses sous-dossiers par année, lus du plus récent au plus ancien.
+  systemKind:  { type: String },
+  // Rapport PDF d'une intervention : le fichier sait de quelle visite il vient.
+  intervention: { type: mongoose.Schema.Types.ObjectId, ref: 'Intervention' },
+  // …et de quel site : la fiche du site affiche ses rapports sans les déplacer.
+  site:         { type: mongoose.Schema.Types.ObjectId, ref: 'Site' },
 }, { timestamps: true })
 
 documentSchema.index({ parent: 1, isDeleted: 1 })

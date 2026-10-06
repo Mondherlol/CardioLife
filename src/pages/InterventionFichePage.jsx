@@ -17,6 +17,7 @@ import {
   updateIntervention, saveDeaItems, saveFormationOutcome,
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
+import { archiveRapportPdf } from '../lib/rapportPdf'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
@@ -592,6 +593,7 @@ export default function InterventionFichePage() {
   const [savingFormation, setSavingFormation] = useState(false)
   const [formationEtat,  setFormationEtat]  = useState('')
   const [closing,        setClosing]        = useState(false)
+  const [archiving,      setArchiving]      = useState(false)
   const [showReopen,     setShowReopen]     = useState(false)
   const [reopening,      setReopening]      = useState(false)
   const [starting,       setStarting]       = useState(false)
@@ -1045,10 +1047,27 @@ export default function InterventionFichePage() {
       mergeIv(updated)
       setShowClose(false)
       toast.success('Intervention clôturée.')
+      archiveRapport()
     } catch (err) {
       toast.error(err.message)
     } finally {
       setClosing(false)
+    }
+  }
+
+  /* Le rapport PDF rejoint les documents du client à chaque clôture — et après
+     une correction, pour que le fichier rangé ne dise jamais autre chose que la
+     fiche. Un échec n'annule rien : le bouton de la barre permet de relancer. */
+  async function archiveRapport({ silent = false } = {}) {
+    setArchiving(true)
+    try {
+      const doc = await archiveRapportPdf(id)
+      setIv(prev => (prev ? { ...prev, rapportDocument: doc._id } : prev))
+      if (!silent) toast.success('Rapport PDF enregistré dans les documents du client.')
+    } catch (err) {
+      toast.warn(`Rapport non enregistré dans les documents : ${err.message || 'erreur inconnue'}. Utilisez « Enregistrer le rapport » pour réessayer.`)
+    } finally {
+      setArchiving(false)
     }
   }
 
@@ -1092,6 +1111,7 @@ export default function InterventionFichePage() {
      repartant du site se corrige mieux sur place qu'au bureau. La visite
      repasse « en cours », et l'aller-retour reste lisible dans l'historique. */
   const canReopen     = isTermine && canFill
+  const canArchive    = isTermine && (canFill || isAdmin)
   const correcting    = canCorrect && unlocked
   /* Visite pas encore démarrée : la checklist s'affiche — le technicien doit
      pouvoir préparer sa tournée et voir ce qui l'attend — mais ne se saisit
@@ -2043,7 +2063,11 @@ export default function InterventionFichePage() {
                   type="button"
                   className="btn btn--ghost btn--sm"
                   style={{ marginLeft: 'auto' }}
-                  onClick={() => setUnlocked(u => !u)}
+                  onClick={() => {
+                    // Fin de correction : le rapport rangé chez le client suit la fiche.
+                    if (correcting) archiveRapport({ silent: true })
+                    setUnlocked(u => !u)
+                  }}
                 >
                   {correcting
                     ? <><Lock size={14} /> Terminer les corrections</>
@@ -2058,6 +2082,22 @@ export default function InterventionFichePage() {
                   onClick={() => setShowReopen(true)}
                 >
                   <Unlock size={14} /> Rouvrir pour modifier
+                </button>
+              )}
+              {canArchive && !correcting && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={canCorrect || canReopen ? undefined : { marginLeft: 'auto' }}
+                  onClick={() => archiveRapport()}
+                  disabled={archiving}
+                  title={iv.rapportDocument
+                    ? 'Le rapport est déjà dans les documents du client — le régénérer remplace le fichier.'
+                    : "Ranger le rapport PDF dans les documents du client."}
+                >
+                  {archiving
+                    ? <span className="spinner spinner--sm" />
+                    : <><Archive size={14} /> {iv.rapportDocument ? 'Régénérer le rapport' : 'Enregistrer le rapport'}</>}
                 </button>
               )}
             </div>

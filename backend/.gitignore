@@ -1,2 +1,5 @@
 node_modules/
 .env
+
+# Documents des clients (dont les rapports PDF archivés) : données clients, jamais dans le dépôt.
+uploads/documents/

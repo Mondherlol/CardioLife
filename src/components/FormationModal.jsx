@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   GraduationCap, X, AlertTriangle, Trash2, Upload, FileText, Users,
   UserPlus, Check, Clock, History, User, Mail, Phone, Building2,
-  CalendarDays, Copy, Send, CircleDashed, CheckCircle2, Ban,
+  CalendarDays, Copy, Send, CircleDashed, CheckCircle2, Ban, ClipboardList,
 } from 'lucide-react'
 import {
   createFormation, updateFormation, deleteFormation,
@@ -569,12 +570,37 @@ export default function FormationModal({
               <h2 className="modal-title">{isEdit ? 'Fiche formation' : 'Nouvelle formation'}</h2>
               {isEdit && (
                 <p className="modal-subtitle">
-                  {raw.clientName}{(raw.site?.name || raw.siteName) ? ` · ${raw.site?.name || raw.siteName}` : ''}
+                  {/* Client et site mènent à leur fiche ; la modal se ferme, sinon
+                      elle resterait ouverte quand on est déjà sur cette fiche. */}
+                  {(raw.client?._id || raw.client)
+                    ? <Link className="fm-subtitle-link" to={`/clients/${raw.client?._id || raw.client}`} onClick={onClose}>
+                        {raw.clientName || raw.client?.name}
+                      </Link>
+                    : raw.clientName}
+                  {(raw.site?.name || raw.siteName) && (
+                    <>
+                      {' · '}
+                      {(raw.site?._id || raw.site)
+                        ? <Link className="fm-subtitle-link" to={`/sites/${raw.site?._id || raw.site}`} onClick={onClose}>
+                            {raw.site?.name || raw.siteName}
+                          </Link>
+                        : raw.siteName}
+                    </>
+                  )}
                 </p>
               )}
             </div>
           </div>
-          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Une formation n'a pas de page : son bon d'intervention s'ouvre d'ici. */}
+            {isEdit && raw._id && (
+              <button type="button" className="btn btn--ghost btn--sm"
+                onClick={() => window.open(`/formations/${raw._id}/bon`, '_blank')}>
+                <ClipboardList size={14} /> Bon d'intervention
+              </button>
+            )}
+            <button className="modal-close" onClick={onClose}><X size={18} /></button>
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} className="modal-body fm-body">

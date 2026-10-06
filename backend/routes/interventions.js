@@ -1,11 +1,20 @@
 const router  = require('express').Router()
 const ctrl    = require('../controllers/interventionsController')
 const { protect } = require('../middleware/auth')
-const { requireAny } = require('../middleware/access')
+const { requireAnyOrRead } = require('../middleware/access')
+const multer   = require('multer')
 const uploadIv = require('../middleware/uploadIntervention')
 
+// Rapport PDF généré par le navigateur : gardé en mémoire, le contrôleur le range.
+const uploadPdf = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 40 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, file.mimetype === 'application/pdf'),
+})
+
 router.use(protect)
-router.use(requireAny(['canManageInterventions']))
+// Lecture ouverte au droit Clients : la fiche client liste ses contrôles.
+router.use(requireAnyOrRead(['canManageInterventions'], ['canManageClients']))
 
 router.get('/search-installations', ctrl.searchInstallations)
 
@@ -31,6 +40,15 @@ router.put('/:id/dea-items/:kind', ctrl.saveDeaItems)
 router.patch('/:id/formation', ctrl.saveFormation)
 /* Bon d'intervention : nature du passage et signature du client. */
 router.patch('/:id/bon', ctrl.saveBon)
+
+/* Rapport PDF rangé dans « Documents » du client, après la clôture. */
+router.post('/:id/rapport-pdf', (req, res, next) => {
+  uploadPdf.single('file')(req, res, err => {
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'Rapport trop volumineux.' })
+    if (err) return res.status(400).json({ message: err.message })
+    next()
+  })
+}, ctrl.saveRapportPdf)
 
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
 router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)

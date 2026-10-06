@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Download, Printer, RotateCcw } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getIntervention, saveBon } from '../api/interventions'
+import { getFormationBon, saveFormationBon } from '../api/formations'
 import { getAppSettings, companyLogoUrl } from '../api/appSettings'
 
 /* Identité de repli : le document doit s'imprimer même si les paramètres ne
@@ -42,6 +43,7 @@ const NATURES = [
 /* Nature proposée d'après ce que la visite dit d'elle-même : un contrôle
    semestriel du contrat n'a pas à être requalifié à la main. */
 export function suggestNature(iv) {
+  if (iv?.kind === 'formation')         return ['formation']
   if (iv?.controlType === 'semestriel') return ['controle_semestriel']
   if (iv?.controlType === 'annuel')     return ['controle_annuel']
   // Une intervention ponctuelle est, presque toujours, un remplacement.
@@ -134,8 +136,37 @@ export function bonLines(iv, natures, custom = {}) {
  * Référence, nature et signataire sont enregistrés sur l'intervention : un bon
  * réimprimé six mois plus tard doit dire exactement la même chose.
  */
-export default function InterventionBonPage() {
+/**
+ * Une formation lue comme une visite : le bon n'a besoin que du client, du
+ * site, de la date, des formateurs et du parc du site.
+ */
+function formationAsVisit(f) {
+  return {
+    _id:            f._id,
+    kind:           'formation',
+    clientName:     f.clientName,
+    siteName:       f.site?.name || f.siteName,
+    scheduledDate:  f.date,
+    technicienName: (f.assignedTo || []).map(u => u.fullName || u.username).filter(Boolean).join(', '),
+    siteDeas:       f.siteDeas || [],
+    bon:            f.bon,
+  }
+}
+
+/* Source du bon : une intervention, ou une formation (qui n'a pas de page à
+   elle et emprunte donc celle-ci). */
+const SOURCES = {
+  intervention: { load: getIntervention, save: saveBon, notFound: 'Intervention introuvable.' },
+  formation:    {
+    load: id => getFormationBon(id).then(formationAsVisit),
+    save: saveFormationBon,
+    notFound: 'Formation introuvable.',
+  },
+}
+
+export default function InterventionBonPage({ source = 'intervention' }) {
   const { id } = useParams()
+  const src = SOURCES[source]
   const [iv,      setIv]      = useState(null)
   const [company, setCompany] = useState(FALLBACK_COMPANY)
   const [error,   setError]   = useState(false)
@@ -145,10 +176,10 @@ export default function InterventionBonPage() {
   const [dl,      setDl]      = useState(false)
 
   useEffect(() => {
-    getIntervention(id)
+    src.load(id)
       .then(data => { setIv(data); setBon(initialBon(data)) })
       .catch(() => setError(true))
-  }, [id])
+  }, [id, src])
 
   useEffect(() => {
     getAppSettings()
@@ -163,7 +194,7 @@ export default function InterventionBonPage() {
   async function save() {
     setSaving(true)
     try {
-      await saveBon(id, bonPayload(bon, lines))
+      await src.save(id, bonPayload(bon, lines))
       toast.success('Bon enregistré.')
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
@@ -199,7 +230,7 @@ export default function InterventionBonPage() {
     }
   }
 
-  if (error) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Intervention introuvable.</div>
+  if (error) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>{src.notFound}</div>
   if (!iv || !bon) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Chargement…</div>
 
   const lines = bonLines(iv, bon.natures, bon.custom)

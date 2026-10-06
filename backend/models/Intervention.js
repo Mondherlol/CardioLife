@@ -204,6 +204,10 @@ const interventionSchema = new Schema({
     designations: { type: Map, of: String, default: undefined },
   },
 
+  /* Rapport PDF rangé dans les documents du client à la clôture. Une
+     nouvelle clôture après correction remplace ce fichier, sans doublon. */
+  rapportDocument: { type: Schema.Types.ObjectId, ref: 'Document' },
+
   history:  { type: [historySchema], default: [] },
   notes:    { type: String, trim: true },
   createdBy:{ type: Schema.Types.ObjectId, ref: 'User' },

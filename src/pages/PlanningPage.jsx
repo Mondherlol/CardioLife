@@ -10,12 +10,14 @@ import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap, Hammer, Printer } f
 import { toast } from 'react-toastify'
 import { getAppointments, updateAppointment } from '../api/appointments'
 import { getFormations, updateFormation } from '../api/formations'
-import { getInterventions } from '../api/interventions'
+import { getInterventions, updateIntervention } from '../api/interventions'
 import { getInstallations } from '../api/installations'
 import { getUsers } from '../api/users'
 import EventModal from '../components/EventModal'
 import FormationModal from '../components/FormationModal'
 import ControlCreateModal from '../components/ControlCreateModal'
+import ScheduleControlModal from '../components/ScheduleControlModal'
+import { isToSchedule } from '../lib/scheduledControls'
 import AppointmentViewModal from '../components/AppointmentViewModal'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -124,20 +126,25 @@ function toFCEvent(a) {
 
 // Un contrôle (intervention, collection séparée) en lecture seule. Son type de
 // planning distingue semestriel, annuel et hors contrat.
-function toInterventionEvent(iv) {
+// Un contrôle à venir se déplace au glisser-déposer (date réelle) ; sa durée,
+// elle, n'a pas de sens dans le planning.
+function toInterventionEvent(iv, canMove) {
   const type  = controlTypeToPlanning(iv.controlType)
   const color = TYPE_MAP[type].color
   const start = new Date(iv.scheduledDate)
+  const toSchedule = isToSchedule(iv)
   return {
     id:              `intv-${iv._id}`,
     title:           controlEventTitle(iv),
     start,
     end:             new Date(start.getTime() + 60 * 60000),
-    backgroundColor: color,
+    // Échéance théorique : fond clair, texte et pointillé de la couleur du type.
+    backgroundColor: toSchedule ? '#fff' : color,
     borderColor:     color,
-    textColor:       '#fff',
-    editable:        false,
-    extendedProps:   { kind: 'intervention', type, status: iv.status, clientName: iv.clientName, _intv: iv },
+    textColor:       toSchedule ? color : '#fff',
+    startEditable:   canMove && iv.status !== 'termine',
+    durationEditable: false,
+    extendedProps:   { kind: 'intervention', type, status: iv.status, clientName: iv.clientName, toSchedule, _intv: iv },
   }
 }
 
@@ -194,6 +201,8 @@ export default function PlanningPage() {
   const [fmnModal,    setFmnModal]    = useState(null)
   // Un contrôle se crée avec la même fiche que depuis la page Contrôles.
   const [ctrlModal,   setCtrlModal]   = useState(null)
+  // Caler un contrôle déjà prévu par le contrat (date réelle, technicien).
+  const [schedModal,  setSchedModal]  = useState(null)
   const [viewing,     setViewing]     = useState(null)   // RDV consulté sans droit d'édition
   const [todayEvents, setTodayEvents] = useState([])
   const [upcoming,     setUpcoming]     = useState([])   // contrôles à venir, tous horizons
@@ -303,13 +312,13 @@ export default function PlanningPage() {
 
         success([
           ...(Array.isArray(appts) ? appts : []).map(toFCEvent),
-          ...(Array.isArray(intvs) ? intvs : []).filter(keepIntv).map(toInterventionEvent),
+          ...(Array.isArray(intvs) ? intvs : []).filter(keepIntv).map(i => toInterventionEvent(i, !readOnlyPlanning)),
           ...insts.filter(i => i.scheduledDate).map(toInstallationEvent),
           ...(Array.isArray(fmns) ? fmns : []).map(toFormationEvent),
         ])
       })
       .catch(fail)
-  }, [typeFilter])
+  }, [typeFilter, readOnlyPlanning])
 
   function handleSelect(info) {
     // Le technicien ne compose pas le planning : sélectionner un créneau ne
@@ -333,6 +342,14 @@ export default function PlanningPage() {
     const ep = info.event.extendedProps
     const id = ep._raw?._id || info.event.id
     try {
+      if (ep.kind === 'intervention') {
+        // Déplacer un contrôle, c'est lui donner sa date réelle.
+        await updateIntervention(ep._intv._id, { scheduledDate: info.event.start.toISOString() })
+        toast.success(`Contrôle déplacé au ${info.event.start.toLocaleDateString('fr-FR')}.`)
+        refetch()
+        fetchUpcoming()
+        return
+      }
       if (ep.kind === 'formation') {
         await updateFormation(id, { date: info.event.startStr, end: info.event.endStr || undefined })
       } else {
@@ -391,8 +408,8 @@ export default function PlanningPage() {
               <GraduationCap size={14} /> Nouvelle formation
             </button>
             <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
-              onClick={() => setCtrlModal({ date: null })}>
-              <Wrench size={14} /> Nouveau contrôle
+              onClick={() => setSchedModal({ date: null })}>
+              <Wrench size={14} /> Programmer un contrôle
             </button>
             <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
               onClick={() => setCtrlModal({ date: null, kind: 'intervention' })}>
@@ -480,6 +497,11 @@ export default function PlanningPage() {
                 {s.label}
               </div>
             ))}
+            {/* Contrôle du contrat pas encore calé : à glisser sur sa vraie date. */}
+            <div className="plan-status-item" title="Contrôle du contrat sans technicien assigné — glissez-le sur le bon jour, ou programmez-le">
+              <span className="plan-status-dot plan-status-dot--dashed" />
+              Sans technicien
+            </div>
           </div>
         </div>
 
@@ -522,6 +544,7 @@ export default function PlanningPage() {
             const cls = []
             if (status === 'fait' || status === 'termine') cls.push('fc-event--fait')
             if (status === 'annule') cls.push('fc-event--annule')
+            if (info.event.extendedProps.toSchedule) cls.push('fc-event--a-programmer')
             return cls
           }}
           eventContent={info => {
@@ -559,6 +582,20 @@ export default function PlanningPage() {
             setModal(null)
             setCtrlModal({ date: slot?.startStr || null, kind: opts.kind, objet: opts.objet })
           }}
+          onSwitchToScheduled={(slot, type) => {
+            setModal(null)
+            setSchedModal({ date: slot?.startStr || null, type })
+          }}
+        />
+      )}
+
+      {schedModal && (
+        <ScheduleControlModal
+          presetDate={schedModal.date}
+          presetType={schedModal.type}
+          onClose={() => setSchedModal(null)}
+          onDone={() => { setSchedModal(null); refetch(); fetchUpcoming() }}
+          onHorsContrat={date => { setSchedModal(null); setCtrlModal({ date }) }}
         />
       )}
 
@@ -568,7 +605,7 @@ export default function PlanningPage() {
           presetDate={ctrlModal.date}
           presetObjet={ctrlModal.objet}
           onClose={() => setCtrlModal(null)}
-          onCreated={() => { setCtrlModal(null); refetch() }}
+          onCreated={() => { setCtrlModal(null); refetch(); fetchUpcoming() }}
         />
       )}
 

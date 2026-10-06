@@ -8,6 +8,7 @@ router.use(requireModule('documents'))
 
 router.get('/tree',  ctrl.getTree)
 router.get('/stats', ctrl.getStats)
+router.get('/site-rapports/:siteId', ctrl.getSiteRapports)
 router.get('/',      ctrl.getContents)
 router.post('/folder', ctrl.createFolder)
 

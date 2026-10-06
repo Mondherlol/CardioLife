@@ -21614,3 +21614,152 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
   display: inline-block; width: 45mm; border-bottom: 1px dotted #6b7280;
   vertical-align: baseline;
 }
+
+/* Rapport monté hors écran pour l'archivage PDF (lib/rapportPdf) : même mise
+   en page que l'impression, sans ombre ni coins arrondis. */
+.pr-export-host {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 794px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  color: #1a1a2e;
+  background: #fff;
+}
+.pr-export-host .pr-document {
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 20px 32px;
+}
+
+/* Rapports d'intervention d'un site, sur sa fiche (ClientDocumentsTab). */
+.cd-rapports {
+  margin-bottom: 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.cd-rapports-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gray-700);
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+}
+.cd-rapports-list { max-height: 260px; overflow-y: auto; }
+.cd-rapport-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--gray-100);
+}
+.cd-rapport-row:last-child { border-bottom: none; }
+.cd-rapport-row:hover { background: var(--gray-50); }
+.cd-rapport-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cd-rapport-meta { font-size: 12px; color: var(--gray-400); flex-shrink: 0; }
+
+/* Rapport : interventions hors délai depuis le contrôle précédent. */
+.pr-hd-period { margin: 0 0 6px; font-size: 11.5px; color: #6b7280; }
+.pr-hd-empty  { margin: 0; font-size: 12px; font-style: italic; color: #6b7280; }
+.pr-hd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.pr-hd-table th {
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 6px 7px;
+  text-align: left;
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  border-bottom: 1px solid #fed7aa;
+}
+.pr-hd-table td {
+  padding: 6px 7px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: top;
+}
+.pr-hd-date   { white-space: nowrap; width: 80px; }
+.pr-hd-nature { font-weight: 600; white-space: nowrap; }
+@media print {
+  .pr-hd-table th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pr-hd-table tr { page-break-inside: avoid; }
+}
+
+/* Fiche formation : client et site cliquables dans le sous-titre. */
+.fm-subtitle-link { color: inherit; text-decoration: none; }
+.fm-subtitle-link:hover { color: var(--brand); text-decoration: underline; }
+
+/* ── Programmer un contrôle prévu (ScheduleControlModal) ── */
+.sc-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.sc-badge {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px dashed var(--orange-500);
+  color: #ea580c;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* ── Planning : contrôle du contrat sans technicien ──
+   Une échéance n'est pas un rendez-vous : contour pointillé, fond clair,
+   jusqu'à ce qu'on lui assigne un technicien. */
+.plan-cal-wrap .fc-event.fc-event--a-programmer {
+  border: 1.5px dashed currentColor !important;
+}
+.plan-cal-wrap .fc-event--a-programmer .plan-event-title,
+.plan-cal-wrap .fc-event--a-programmer .plan-event-client { color: inherit; }
+.plan-status-dot--dashed {
+  background: transparent !important;
+  border: 1.5px dashed var(--gray-500);
+}
+
+/* Garde-fou : contrôle du contrat déjà prévu sur ce site (ControlCreateModal). */
+.cc-dup-warn {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.cc-dup-warn > svg { flex-shrink: 0; margin-top: 2px; }
+.cc-dup-warn p { margin: 0 0 8px; }
+.cc-dup-warn--soft { background: var(--gray-50); border-color: var(--border); color: var(--text-muted); }
+.cc-dup-warn--soft p { margin: 0; }
+
+.sc-slot-btn {
+  margin-top: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--orange-500);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sc-slot-btn:hover { text-decoration: underline; }

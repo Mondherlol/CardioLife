@@ -60,3 +60,6 @@ export function uploadWithProgress(file, parentId, { onProgress, onSuccess, onEr
   xhr.send(form)
   return xhr
 }
+
+/* Rapports d'intervention d'un site (rangés dans le dossier du client). */
+export const getSiteRapports = (siteId) => get(`/documents/site-rapports/${siteId}`)

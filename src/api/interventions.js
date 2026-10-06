@@ -40,5 +40,11 @@ export const uploadFichePhoto = (id, file, deaId) => {
   if (deaId) form.append('dea', deaId)
   return upload(`/interventions/${id}/photo`, form)
 }
+/* Rapport PDF rangé dans « Documents » du client (dossier Rapports d'intervention). */
+export const uploadRapportPdf = (id, blob, filename) => {
+  const form = new FormData()
+  form.append('file', blob, filename)
+  return upload(`/interventions/${id}/rapport-pdf`, form)
+}
 export const deleteFichePhoto = (id, filename) => del(`/interventions/${id}/photo/${filename}`)
 export const fichePhotoUrl    = (filename) => `${STATIC_BASE}/uploads/interventions/${filename}`

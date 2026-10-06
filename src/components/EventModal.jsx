@@ -57,7 +57,7 @@ function fileIcon(name) {
 export default function EventModal({
   mode, entity, entityKind, slot, presetClient, presetSite, quota, presetType, lockType,
   users = [], onClose, onSaved, onDeleted, onChanged,
-  onSwitchToFormation, onSwitchToControl,
+  onSwitchToFormation, onSwitchToControl, onSwitchToScheduled,
 }) {
   const isEdit = mode === 'edit'
   const raw    = entity || {}
@@ -147,6 +147,11 @@ export default function EventModal({
     // fiche de création dédiée.
     if (isEdit || !onSwitchToControl) {
       base = base.filter(t => !['controle_hors_contrat', 'intervention'].includes(t.value))
+    }
+    /* Semestriel et annuel sont déjà prévus par le contrat : les choisir ici
+       ouvre la programmation du contrôle existant, pas une création. */
+    if (!isEdit && onSwitchToScheduled) {
+      base = [TYPE_MAP.controle_semestriel, TYPE_MAP.controle_annuel, ...base]
     }
     if (!base.some(t => t.value === form.type)) base = [...base, TYPE_MAP[form.type]].filter(Boolean)
     return base
@@ -329,6 +334,12 @@ export default function EventModal({
                     // bascule sans faire ressaisir le créneau.
                     if (e.target.value === 'formation' && !isEdit && onSwitchToFormation) {
                       onSwitchToFormation(currentSlot())
+                      return
+                    }
+                    if (['controle_semestriel', 'controle_annuel'].includes(e.target.value)
+                        && !isEdit && onSwitchToScheduled) {
+                      onSwitchToScheduled(currentSlot(),
+                        e.target.value === 'controle_annuel' ? 'annuel' : 'semestriel')
                       return
                     }
                     if (['controle_hors_contrat', 'intervention'].includes(e.target.value)

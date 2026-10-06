@@ -56,8 +56,30 @@ async function getContents(req, res) {
   const filter = { isDeleted: false, parent: parent || null }
   if (search) filter.name = { $regex: search, $options: 'i' }
 
+  /* Les rapports d'intervention commencent par leur date : dans leurs dossiers,
+     le plus récent passe en tête, années comme fichiers. */
+  const parentDoc = parent ? await Document.findById(parent).select('systemKind').lean() : null
+  const newestFirst = !search && parentDoc?.systemKind === 'rapports'
+
   const items = await Document.find(filter)
-    .sort({ type: -1, name: 1 })
+    .sort({ type: -1, name: newestFirst ? -1 : 1 })
+    .populate('createdBy', 'fullName')
+    .lean()
+
+  const visible = []
+  for (const item of items) {
+    if (await canAccess(req.user, item)) visible.push(item)
+  }
+  res.json(visible)
+}
+
+/* Rapports d'intervention d'un site : rangés dans le dossier du client, mais
+   affichés aussi sur la fiche du site — c'est là qu'on les cherche d'abord. */
+async function getSiteRapports(req, res) {
+  const items = await Document.find({
+    site: req.params.siteId, intervention: { $exists: true }, type: 'file', isDeleted: false,
+  })
+    .sort({ name: -1 })
     .populate('createdBy', 'fullName')
     .lean()
 
@@ -312,7 +334,7 @@ async function softDelete(doc) {
 
 module.exports = {
   getUploadMiddleware,
-  getContents, getTree, getStats,
+  getContents, getTree, getStats, getSiteRapports,
   createFolder, uploadFile, downloadFile,
   rename, move, copyItem, updatePermissions, deleteItem,
   assignToClient,

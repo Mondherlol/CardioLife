@@ -4,7 +4,10 @@ import {
   StickyNote, AlertTriangle, Info, HeartPulse, Wrench,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
-import { createIntervention } from '../api/interventions'
+import { createIntervention, updateIntervention } from '../api/interventions'
+import {
+  pendingControlsOf, nearestPeriodic, CONTROL_LABELS, joinDateTime, fmtDay,
+} from '../lib/scheduledControls'
 import { lookupSites } from '../api/sites'
 import { get } from '../api/http'
 import { ClientSearchInput } from './PlanningInputs'
@@ -76,6 +79,21 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
 
   function setF(k, v) { setForm(p => ({ ...p, [k]: v })) }
 
+  /* Garde-fou : un site sous contrat a déjà ses contrôles semestriels et
+     annuels. Une intervention nommée « contrôle annuel », ou un contrôle hors
+     contrat posé près d'une échéance, est presque toujours ce contrôle-là —
+     qu'il faut déplacer, pas doubler. */
+  const [pending, setPending] = useState([])
+  const [moving,  setMoving]  = useState(false)
+  useEffect(() => {
+    if (!form.clientId) { setPending([]); return }
+    let alive = true
+    pendingControlsOf(form.clientId)
+      .then(list => { if (alive) setPending(list) })
+      .catch(() => { if (alive) setPending([]) })
+    return () => { alive = false }
+  }, [form.clientId])
+
   const site = sites.find(s => String(s._id) === String(form.siteId)) || null
   const deas = site?.deas || []
   const dea  = deas.find(d => String(d._id) === String(form.installation)) || null
@@ -105,6 +123,33 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
   }
 
   const siteAddress = s => [s.address?.street, s.address?.city].filter(Boolean).join(', ')
+
+  const looksLikeControl = isIntv && /contr[oô]le|semestriel|annuel/i.test(form.objet)
+  const nearest = form.siteId
+    ? nearestPeriodic(pending, form.siteId, form.scheduledDate || new Date())
+    : null
+  const nearDays = nearest
+    ? Math.abs(new Date(nearest.scheduledDate) - new Date(form.scheduledDate || Date.now())) / 86400000
+    : Infinity
+  const duplicateRisk = nearest && (looksLikeControl || nearDays <= 60)
+
+  async function moveExisting() {
+    if (!form.scheduledDate) return setError('Indiquez la date à laquelle programmer le contrôle.')
+    setMoving(true)
+    try {
+      const updated = await updateIntervention(nearest._id, {
+        scheduledDate: joinDateTime(form.scheduledDate, '09:00'),
+        ...(form.technicien ? { technicien: form.technicien, technicienName: form.technicienName } : {}),
+      })
+      toast.success(`${CONTROL_LABELS[nearest.controlType]} déplacé au ${fmtDay(form.scheduledDate)}.`)
+      onCreated(updated)
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Déplacement impossible.')
+    } finally {
+      setMoving(false)
+    }
+  }
 
   async function handleCreate() {
     setError('')
@@ -298,6 +343,37 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
               onChange={e => setF('notes', e.target.value)}
             />
           </div>
+
+          {duplicateRisk && (
+            <div className="cc-dup-warn">
+              <AlertTriangle size={14} />
+              <div>
+                <p>
+                  Ce site a déjà un <strong>{CONTROL_LABELS[nearest.controlType].toLowerCase()}</strong> prévu
+                  le <strong>{fmtDay(nearest.scheduledDate)}</strong>.
+                  {looksLikeControl
+                    ? ' Une intervention ne remplace pas ce contrôle : il resterait dû, et le site compterait deux visites.'
+                    : " Si c'est la même visite, déplacez ce contrôle plutôt que d'en créer un autre."}
+                </p>
+                <button type="button" className="btn btn--primary btn--sm" onClick={moveExisting}
+                  disabled={moving || !form.scheduledDate}>
+                  {moving && <span className="spinner spinner--sm" />}
+                  {form.scheduledDate
+                    ? `Programmer ce contrôle au ${fmtDay(form.scheduledDate)} à la place`
+                    : 'Choisissez une date pour le déplacer'}
+                </button>
+              </div>
+            </div>
+          )}
+          {!duplicateRisk && looksLikeControl && form.siteId && (
+            <div className="cc-dup-warn cc-dup-warn--soft">
+              <Info size={14} />
+              <p>
+                Aucun contrôle semestriel ou annuel n'est prévu pour ce site (pas de contrat ?).
+                Pour une visite de contrôle, préférez « Nouveau contrôle » (hors contrat) à une intervention.
+              </p>
+            </div>
+          )}
 
           {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
         </div>

@@ -4,10 +4,13 @@ const fs             = require('fs')
 const Intervention   = require('../models/Intervention')
 const Site           = require('../models/Site')
 const Formation      = require('../models/Formation')
+const Replacement    = require('../models/Replacement')
 const { listInstallations } = require('../utils/deaParc')
 const { syncSiteNextControl } = require('../utils/controls')
 const { syncFicheToParc } = require('../utils/ficheSync')
 const { syncDeaWithItem, syncDeaConsumables } = require('../utils/productItems')
+const { archiveRapport } = require('../utils/rapportArchive')
+const { applyBon } = require('../utils/bon')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
 
@@ -358,6 +361,106 @@ async function formationsOf(intervention) {
     .lean()
 }
 
+/**
+ * Passages hors calendrier depuis le contrôle technique précédent.
+ *
+ * Le rapport d'un contrôle semestriel ou annuel doit retracer tout ce qui
+ * s'est fait sur le site entre deux contrôles — intervention ponctuelle,
+ * contrôle hors contrat, pose d'un DAE, remplacement, formation — pour que
+ * l'historique du parc se lise d'un seul document.
+ *
+ * Sans contrôle précédent, la période remonte à douze mois.
+ */
+const HORS_DELAI_TYPES = ['semestriel', 'annuel']
+async function horsDelaiOf(intervention) {
+  if (!HORS_DELAI_TYPES.includes(intervention.controlType) || !intervention.site) return null
+  const siteId = intervention.site._id || intervention.site
+  const until  = intervention.completedDate || new Date()
+
+  const previous = await Intervention.findOne({
+    _id: { $ne: intervention._id }, site: siteId, status: 'termine',
+    controlType: { $in: HORS_DELAI_TYPES }, completedDate: { $lt: until },
+  }).sort({ completedDate: -1 }).select('completedDate controlType').lean()
+
+  const since = previous?.completedDate
+    || new Date(new Date(until).setFullYear(new Date(until).getFullYear() - 1))
+  const inRange = { $gt: since, $lte: until }
+  const items = []
+
+  const [visits, site, replacements, formations] = await Promise.all([
+    Intervention.find({
+      _id: { $ne: intervention._id }, site: siteId, status: 'termine',
+      controlType: { $in: ['intervention', 'hors_contrat'] }, completedDate: inRange,
+    }).select('controlType objet completedDate technicienName installationSnap').lean(),
+    Site.findById(siteId).select('deas').lean(),
+    Replacement.find({
+      site: siteId, status: 'remplace', intervention: { $ne: intervention._id },
+      $or: [{ replacedAt: inRange }, { replacedAt: null, updatedAt: inRange }],
+    }).select('kind reason deaLabel serialNumber lotNumber replacementSerial replacedAt updatedAt requestedByName').lean(),
+    Formation.find({ site: siteId, status: 'fait', date: inRange })
+      .select('title date participants participantsCount').lean(),
+  ])
+
+  for (const v of visits) {
+    items.push({
+      date:   v.completedDate,
+      nature: v.controlType === 'hors_contrat' ? 'Contrôle hors contrat' : 'Intervention',
+      detail: v.objet || [v.installationSnap?.deviceType, v.installationSnap?.serialNumber].filter(Boolean).join(' · '),
+      by:     v.technicienName,
+    })
+  }
+  for (const d of site?.deas || []) {
+    const at = d.installationDate
+    if (d.status === 'a_installer' || !at || at <= since || at > until) continue
+    items.push({
+      date: at, nature: 'Installation',
+      detail: [d.deviceType || 'DAE', d.serialNumber && `n° ${d.serialNumber}`, d.location].filter(Boolean).join(' · '),
+      by: d.technicianName,
+    })
+  }
+  for (const r of replacements) {
+    const piece = Replacement.KIND_LABELS[r.kind] || r.kind
+    const reason = Replacement.REASON_LABELS[r.reason]
+    items.push({
+      date:   r.replacedAt || r.updatedAt,
+      nature: `Remplacement — ${piece}`,
+      detail: [r.deaLabel, reason && reason.toLowerCase(),
+        r.replacementSerial && `nouvelle pièce ${r.replacementSerial}`].filter(Boolean).join(' · '),
+      by: r.requestedByName,
+    })
+  }
+  for (const f of formations) {
+    const n = f.participants?.length
+      ? f.participants.filter(p => p.status === 'forme').length
+      : f.participantsCount
+    items.push({
+      date: f.date, nature: 'Formation',
+      detail: [f.title, n ? `${n} personne${n > 1 ? 's' : ''} formée${n > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · '),
+    })
+  }
+
+  items.sort((a, b) => new Date(a.date) - new Date(b.date))
+  return { since, until, previous: previous ? { date: previous.completedDate, controlType: previous.controlType } : null, items }
+}
+
+/**
+ * Prochain contrôle du site après cette visite — celui que le planning porte
+ * réellement (la date relevée sur la checklist l'y a déjà déplacé à la
+ * clôture). Les interventions ponctuelles n'en sont pas.
+ */
+async function nextControlOf(intervention) {
+  if (!intervention.site) return null
+  const after = intervention.completedDate || intervention.scheduledDate || new Date()
+  const next = await Intervention.findOne({
+    _id: { $ne: intervention._id },
+    site: intervention.site._id || intervention.site,
+    status: { $ne: 'termine' },
+    controlType: { $ne: 'intervention' },
+    scheduledDate: { $gt: after },
+  }).sort({ scheduledDate: 1 }).select('scheduledDate controlType').lean()
+  return next ? { date: next.scheduledDate, controlType: next.controlType } : null
+}
+
 /* ─── List ─────────────────────────────────────────────────── */
 async function getAll(req, res) {
   try {
@@ -434,6 +537,8 @@ async function getOne(req, res) {
     json.deviceProduct = deviceProduct
     json.siteDeas      = siteDeas
     json.formations    = await formationsOf(intervention)
+    json.horsDelai     = await horsDelaiOf(intervention)
+    json.nextControl   = await nextControlOf(intervention)
 
     // Fiches d'avant les visites multi-DAE : présentées comme une liste d'une
     // seule entrée, pour que l'écran n'ait qu'une forme à connaître.
@@ -544,6 +649,13 @@ async function update(req, res) {
     const allowed = ['client','clientName','installation','installationSnap',
                      'technicien','technicienName','scheduledDate','notes','objet','status','controlType','contract']
     allowed.forEach(k => { if (req.body[k] !== undefined) intervention[k] = req.body[k] })
+
+    /* Une date choisie (planning, glisser-déposer) n'est plus l'échéance
+       théorique du contrat : sans ce drapeau, la resynchronisation du contrat
+       verrait une visite « hors calendrier » et la supprimerait. */
+    if (req.body.scheduledDate !== undefined && intervention.isModified('scheduledDate')) {
+      intervention.manualDate = true
+    }
 
     intervention.history.push({
       action:   'modification',
@@ -925,6 +1037,39 @@ async function reopenIntervention(req, res) {
   }
 }
 
+/* ─── Rapport PDF dans les documents du client ──────────────── */
+/**
+ * Le PDF est produit par le navigateur, à partir de la même page que
+ * « Imprimer / Télécharger » : le client reçoit dans ses documents exactement
+ * le rapport qu'on lui aurait remis. Le serveur ne fait que le ranger.
+ */
+async function saveRapportPdf(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Aucun PDF reçu.' })
+
+    const intervention = await Intervention.findById(req.params.id).populate('site', 'name')
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    // Même cercle que la réouverture : le technicien de la visite et l'administration.
+    const owner = String(intervention.technicien || '') === String(req.user._id)
+    if (!isAdmin(req.user) && req.user.role !== 'superadmin' && !owner) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    if (intervention.status !== 'termine') {
+      return res.status(409).json({ message: "Le rapport s'archive une fois l'intervention clôturée." })
+    }
+
+    const doc = await archiveRapport(intervention, req.file.buffer, req.user._id)
+    if (String(intervention.rapportDocument || '') !== String(doc._id)) {
+      // `updateOne` : archiver ne doit pas toucher à la date de modification de la visite.
+      await Intervention.updateOne({ _id: intervention._id }, { rapportDocument: doc._id }, { timestamps: false })
+    }
+    res.json({ document: doc })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
 /* ─── Upload photo (fiche) ──────────────────────────────────── */
 async function uploadFichePhoto(req, res) {
   try {
@@ -1203,31 +1348,12 @@ async function saveBon(req, res) {
     }
     if (!ensureStarted(intervention, res)) return
 
-    const { nature, signataire, reference, bonCommande, designations } = req.body
-    // Une nature seule (ancien client) vaut une liste d'un élément.
-    const natures = nature === undefined ? undefined
-      : [...new Set((Array.isArray(nature) ? nature : [nature]).filter(Boolean))]
-    if (natures && !natures.every(n => Intervention.BON_NATURES.includes(n))) {
-      return res.status(400).json({ message: "Nature d'intervention inconnue." })
+    try {
+      applyBon(intervention, req.body)
+    } catch (err) {
+      if (err.status === 400) return res.status(400).json({ message: err.message })
+      throw err
     }
-
-    if (!intervention.bon) intervention.bon = {}
-    if (reference !== undefined) intervention.bon.reference = String(reference).trim()
-    if (bonCommande !== undefined) intervention.bon.bonCommande = String(bonCommande).trim()
-    if (natures) intervention.bon.nature = natures
-    if (designations !== undefined) {
-      // Texte vide = retour au libellé par défaut : on n'en garde pas la trace.
-      const clean = Object.entries(designations && typeof designations === 'object' ? designations : {})
-        .filter(([k, v]) => /^[\w-]+\|[\w-]+$/.test(k) && typeof v === 'string' && v.trim())
-        .map(([k, v]) => [k, v.trim().slice(0, 1000)])
-      intervention.bon.designations = clean.length ? new Map(clean) : undefined
-    }
-    if (signataire !== undefined) {
-      intervention.bon.signataire = signataire
-      // La signature vaut à la date où elle est recueillie, pas à l'impression.
-      intervention.bon.signedAt = signataire ? new Date() : undefined
-    }
-    intervention.markModified('bon')
     await intervention.save()
 
     res.json(intervention)
@@ -1268,4 +1394,5 @@ module.exports = {
   saveFiche, removeFiche, closeIntervention, reopenIntervention,
   uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
+  saveRapportPdf,
 }

@@ -5,6 +5,8 @@ const crypto = require('crypto')
 const multer = require('multer')
 
 const Formation = require('../models/Formation')
+const Site      = require('../models/Site')
+const { applyBon } = require('../utils/bon')
 
 const UPLOAD_DIR = path.join(__dirname, '../uploads/formations')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
@@ -349,7 +351,48 @@ async function remove(req, res) {
   } catch (err) { res.status(500).json({ message: err.message }) }
 }
 
+/* ─── Bon d'intervention de la formation ─────────────────────── */
+/**
+ * La formation n'a pas de page à elle : son bon se règle sur l'écran du bon
+ * d'intervention. On lui sert donc ce qu'il attend — la séance et le parc du
+ * site, dont les DAE donnent les lignes « Formation … <modèle> ».
+ */
+async function getBon(req, res) {
+  try {
+    const formation = await Formation.findById(req.params.id)
+      .populate('site', 'name')
+      .populate('assignedTo', 'fullName username')
+    if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+
+    const json = formation.toObject({ flattenMaps: true })
+    const site = formation.site?._id
+      ? await Site.findById(formation.site._id).select('deas').populate('deas.product', 'name')
+      : null
+    json.siteDeas = (site?.deas || []).map(d => ({
+      _id: d._id, deviceType: d.deviceType, serialNumber: d.serialNumber,
+      product: d.product ? { _id: d.product._id, name: d.product.name } : null,
+    }))
+    res.json(json)
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
+async function saveBon(req, res) {
+  try {
+    const formation = await Formation.findById(req.params.id)
+    if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+    try {
+      applyBon(formation, req.body)
+    } catch (err) {
+      if (err.status === 400) return res.status(400).json({ message: err.message })
+      throw err
+    }
+    await formation.save()
+    res.json(formation)
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
 module.exports = {
+  getBon, saveBon,
   getAll, getByClient, getBySite, create, update, toggleAttestation,
   addDocuments, removeDocument, remove,
 }

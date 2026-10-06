@@ -160,6 +160,8 @@ export default function App() {
             </Route>
             <Route path="/interventions/:id/print" element={<InterventionPrintPage />} />
             <Route path="/interventions/:id/bon"   element={<InterventionBonPage />} />
+            {/* Une formation n'a pas de page : son bon emprunte celle des interventions. */}
+            <Route path="/formations/:id/bon"      element={<InterventionBonPage source="formation" />} />
             {/* Bons de toute une semaine, imprimés d'un coup pour la tournée. */}
             <Route path="/interventions/bons"      element={<InterventionBonsWeekPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
