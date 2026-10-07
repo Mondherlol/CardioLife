@@ -23,6 +23,10 @@ const documentSchema = new mongoose.Schema({
   systemKind:  { type: String },
   // Rapport PDF d'une intervention : le fichier sait de quelle visite il vient.
   intervention: { type: mongoose.Schema.Types.ObjectId, ref: 'Intervention' },
+  // Bon d'intervention d'une formation.
+  formation:    { type: mongoose.Schema.Types.ObjectId, ref: 'Formation' },
+  // 'rapport' | 'bon' : documents rangés automatiquement pour une visite.
+  docKind:      { type: String },
   // …et de quel site : la fiche du site affiche ses rapports sans les déplacer.
   site:         { type: mongoose.Schema.Types.ObjectId, ref: 'Site' },
 }, { timestamps: true })

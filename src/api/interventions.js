@@ -44,6 +44,12 @@ export const uploadFichePhoto = (id, file, deaId) => {
   if (deaId) form.append('dea', deaId)
   return upload(`/interventions/${id}/photo`, form)
 }
+/* Bon d'intervention PDF rangé dans « Documents » du client (dossier Bons d'intervention). */
+export const uploadBonPdf = (id, blob) => {
+  const form = new FormData()
+  form.append('file', blob, 'bon.pdf')
+  return upload(`/interventions/${id}/bon-pdf`, form)
+}
 /* Rapport PDF rangé dans « Documents » du client (dossier Rapports d'intervention). */
 export const uploadRapportPdf = (id, blob, filename) => {
   const form = new FormData()

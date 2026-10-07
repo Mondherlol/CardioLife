@@ -69,6 +69,8 @@ const formationSchema = new mongoose.Schema({
     signedAt:     Date,
     designations: { type: Map, of: String, default: undefined },
   },
+  // Bon d'intervention rangé dans les documents du client (dernière version).
+  bonDocument:            { type: mongoose.Schema.Types.ObjectId, ref: 'Document' },
   history:                [historySchema],
   createdBy:              { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true })

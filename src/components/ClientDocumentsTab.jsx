@@ -325,7 +325,7 @@ export default function ClientDocumentsTab({ clientId, siteId, title = 'Document
       {showRapports && (
         <div className="cd-rapports">
           <div className="cd-rapports-title">
-            <ClipboardList size={14} /> Rapports d'intervention ({rapports.length})
+            <ClipboardList size={14} /> Rapports et bons d'intervention ({rapports.length})
           </div>
           <div className="cd-rapports-list">
             {rapports.map(r => (

@@ -43,14 +43,19 @@ router.patch('/:id/formation', ctrl.saveFormation)
 /* Bon d'intervention : nature du passage et signature du client. */
 router.patch('/:id/bon', ctrl.saveBon)
 
-/* Rapport PDF rangé dans « Documents » du client, après la clôture. */
-router.post('/:id/rapport-pdf', (req, res, next) => {
+/* PDF reçu du navigateur, gardé en mémoire le temps d'être rangé. */
+const receivePdf = (req, res, next) => {
   uploadPdf.single('file')(req, res, err => {
-    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'Rapport trop volumineux.' })
+    if (err?.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'PDF trop volumineux.' })
     if (err) return res.status(400).json({ message: err.message })
     next()
   })
-}, ctrl.saveRapportPdf)
+}
+
+/* Rapport PDF rangé dans « Documents » du client, après la clôture. */
+router.post('/:id/rapport-pdf', receivePdf, ctrl.saveRapportPdf)
+/* Bon d'intervention rangé dans « Documents » du client, à chaque version. */
+router.post('/:id/bon-pdf',     receivePdf, ctrl.saveBonPdf)
 
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
 router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)

@@ -10,7 +10,7 @@ const { listInstallations } = require('../utils/deaParc')
 const { syncSiteNextControl } = require('../utils/controls')
 const { syncFicheToParc } = require('../utils/ficheSync')
 const { syncDeaWithItem, syncDeaConsumables } = require('../utils/productItems')
-const { archiveRapport } = require('../utils/rapportArchive')
+const { archiveRapport, archiveBon } = require('../utils/rapportArchive')
 const { applyBon } = require('../utils/bon')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
@@ -1084,6 +1084,34 @@ async function saveRapportPdf(req, res) {
   }
 }
 
+/* ─── Bon d'intervention dans les documents du client ───────── */
+/**
+ * Le PDF vient du navigateur — le même que « Imprimer » et « Télécharger » —,
+ * le serveur le range. Un bon s'imprime parfois d'avance pour la tournée : on
+ * le range quand même, la version signée le remplacera.
+ */
+async function saveBonPdf(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Aucun PDF reçu.' })
+
+    const intervention = await Intervention.findById(req.params.id).populate('site', 'name')
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    const owner = String(intervention.technicien || '') === String(req.user._id)
+    if (!isAdmin(req.user) && req.user.role !== 'superadmin' && !owner) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+
+    const doc = await archiveBon(intervention, 'intervention', req.file.buffer, req.user._id)
+    if (String(intervention.bonDocument || '') !== String(doc._id)) {
+      await Intervention.updateOne({ _id: intervention._id }, { bonDocument: doc._id }, { timestamps: false })
+    }
+    res.json({ document: doc })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
 /* ─── Upload photo (fiche) ──────────────────────────────────── */
 async function uploadFichePhoto(req, res) {
   try {
@@ -1500,5 +1528,5 @@ module.exports = {
   saveFiche, removeFiche, closeIntervention, reopenIntervention,
   uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
-  saveRapportPdf, getDeleted, setAttente,
+  saveRapportPdf, saveBonPdf, getDeleted, setAttente,
 }

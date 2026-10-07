@@ -214,6 +214,8 @@ const interventionSchema = new Schema({
   /* Rapport PDF rangé dans les documents du client à la clôture. Une
      nouvelle clôture après correction remplace ce fichier, sans doublon. */
   rapportDocument: { type: Schema.Types.ObjectId, ref: 'Document' },
+  // Bon d'intervention rangé dans les documents du client (dernière version).
+  bonDocument:     { type: Schema.Types.ObjectId, ref: 'Document' },
 
   history:  { type: [historySchema], default: [] },
   notes:    { type: String, trim: true },

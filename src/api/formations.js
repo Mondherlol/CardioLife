@@ -18,3 +18,8 @@ export const deleteFormation        = (id)              => del(`/formations/${id
 /* Bon d'intervention de la séance — réglé sur le même écran que celui d'une intervention. */
 export const getFormationBon        = (id)              => get(`/formations/${id}/bon`)
 export const saveFormationBon       = (id, data)        => patch(`/formations/${id}/bon`, data)
+export const uploadFormationBonPdf = (id, blob) => {
+  const form = new FormData()
+  form.append('file', blob, 'bon.pdf')
+  return upload(`/formations/${id}/bon-pdf`, form)
+}

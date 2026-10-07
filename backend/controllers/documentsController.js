@@ -77,7 +77,8 @@ async function getContents(req, res) {
    affichés aussi sur la fiche du site — c'est là qu'on les cherche d'abord. */
 async function getSiteRapports(req, res) {
   const items = await Document.find({
-    site: req.params.siteId, intervention: { $exists: true }, type: 'file', isDeleted: false,
+    site: req.params.siteId, type: 'file', isDeleted: false,
+    $or: [{ intervention: { $exists: true } }, { formation: { $exists: true } }],
   })
     .sort({ name: -1 })
     .populate('createdBy', 'fullName')

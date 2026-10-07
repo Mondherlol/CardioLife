@@ -7,6 +7,7 @@ const multer = require('multer')
 const Formation = require('../models/Formation')
 const Site      = require('../models/Site')
 const { applyBon } = require('../utils/bon')
+const { archiveBon } = require('../utils/rapportArchive')
 
 const UPLOAD_DIR = path.join(__dirname, '../uploads/formations')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
@@ -391,8 +392,23 @@ async function saveBon(req, res) {
   } catch (err) { res.status(500).json({ message: err.message }) }
 }
 
+/* Bon de la formation rangé dans les documents du client (dernière version). */
+async function saveBonPdf(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'Aucun PDF reçu.' })
+    const formation = await Formation.findById(req.params.id).populate('site', 'name')
+    if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+
+    const doc = await archiveBon(formation, 'formation', req.file.buffer, req.user._id)
+    if (String(formation.bonDocument || '') !== String(doc._id)) {
+      await Formation.updateOne({ _id: formation._id }, { bonDocument: doc._id }, { timestamps: false })
+    }
+    res.json({ document: doc })
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
 module.exports = {
-  getBon, saveBon,
+  getBon, saveBon, saveBonPdf,
   getAll, getByClient, getBySite, create, update, toggleAttestation,
   addDocuments, removeDocument, remove,
 }

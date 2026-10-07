@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, Printer, Save, Hash, ExternalLink, CheckSquare, Square,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
-import { getInterventions, getIntervention, saveBon } from '../api/interventions'
+import { getInterventions, getIntervention, saveBon, uploadBonPdf } from '../api/interventions'
 import { getAppSettings } from '../api/appSettings'
 import { localDateStr } from '../lib/appointmentConstants'
 import { loadDraft, syncDraft } from '../lib/bonDraft'
@@ -233,6 +233,25 @@ export default function InterventionBonsWeekPage() {
     } finally {
       setSaving(false)
     }
+    archiveAll()
+  }
+
+  /* Chaque bon imprimé rejoint les documents de son client — un PDF par
+     visite, comme depuis la page d'un bon. En arrière-plan : l'impression est
+     déjà partie. */
+  async function archiveAll() {
+    const wraps = [...document.querySelectorAll('.bw-print .bi-week-page[data-id]')]
+    let failed = 0
+    for (const wrap of wraps) {
+      const page = wrap.querySelector('.bi-page')
+      try {
+        await uploadBonPdf(wrap.dataset.id, await bonPdfBlob(page))
+      } catch {
+        failed++
+      }
+    }
+    if (failed) toast.warn(`${failed} bon${failed > 1 ? 's' : ''} non rangé${failed > 1 ? 's' : ''} dans les documents des clients.`)
+    else toast.success(`${wraps.length} bon${wraps.length > 1 ? 's' : ''} rangé${wraps.length > 1 ? 's' : ''} dans les documents des clients.`)
   }
 
   const allOn = visible.length > 0 && visible.every(iv => !excluded.has(iv._id))
@@ -389,7 +408,7 @@ export default function InterventionBonsWeekPage() {
           const value = bons[iv._id]
           if (!value) return null
           return (
-            <div key={iv._id} className="bi-week-page">
+            <div key={iv._id} className="bi-week-page" data-id={iv._id}>
               <BonDocument iv={iv} company={company} reference={value.ref} bc={value.bc}
                 signer={value.signer} lines={bonLines(iv, value.natures, value.custom)} />
             </div>

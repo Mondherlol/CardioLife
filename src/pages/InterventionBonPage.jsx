@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Download, Printer, RotateCcw } from 'lucide-react'
 import { toast } from 'react-toastify'
-import { getIntervention, saveBon } from '../api/interventions'
-import { getFormationBon, saveFormationBon } from '../api/formations'
+import { getIntervention, saveBon, uploadBonPdf } from '../api/interventions'
+import { getFormationBon, saveFormationBon, uploadFormationBonPdf } from '../api/formations'
 import { loadDraft, syncDraft } from '../lib/bonDraft'
 import { bonPdfBlob, downloadBlob, printBlob } from '../lib/bonPdf'
 import { getAppSettings, companyLogoUrl } from '../api/appSettings'
@@ -158,10 +158,14 @@ function formationAsVisit(f) {
 /* Source du bon : une intervention, ou une formation (qui n'a pas de page à
    elle et emprunte donc celle-ci). */
 const SOURCES = {
-  intervention: { load: getIntervention, save: saveBon, notFound: 'Intervention introuvable.' },
+  intervention: {
+    load: getIntervention, save: saveBon, archive: uploadBonPdf,
+    notFound: 'Intervention introuvable.',
+  },
   formation:    {
     load: id => getFormationBon(id).then(formationAsVisit),
     save: saveFormationBon,
+    archive: uploadFormationBonPdf,
     notFound: 'Formation introuvable.',
   },
 }
@@ -232,6 +236,9 @@ export default function InterventionBonPage({ source = 'intervention' }) {
       setSavedBon(bon)
       setRestored(false)
       toast.success('Bon enregistré.')
+      // La version enregistrée rejoint les documents du client.
+      const page = document.querySelector('.bi-page')
+      if (page) bonPdfBlob(page).then(archive).catch(() => archiveFailed())
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
     } finally {
@@ -244,6 +251,20 @@ export default function InterventionBonPage({ source = 'intervention' }) {
      identiques. */
   const [printing, setPrinting] = useState(false)
 
+  /* Chaque bon produit (enregistré, téléchargé, imprimé) est rangé dans les
+     documents du client, comme le rapport : une seule version par visite, la
+     dernière. Un échec n'empêche ni l'impression ni le téléchargement. */
+  async function archive(blob) {
+    try {
+      await src.archive(id, blob)
+    } catch {
+      archiveFailed()
+    }
+  }
+  function archiveFailed() {
+    toast.warn("Le bon n'a pas pu être rangé dans les documents du client.")
+  }
+
   async function download() {
     const page = document.querySelector('.bi-page')
     if (!page) return
@@ -252,7 +273,9 @@ export default function InterventionBonPage({ source = 'intervention' }) {
       const who  = (iv.clientName || 'client').replace(/[\/:*?"<>|]/g, '-')
       const when = new Date(iv.completedDate || iv.scheduledDate || Date.now())
         .toLocaleDateString('fr-FR').replace(/\//g, '-')
-      downloadBlob(await bonPdfBlob(page), `Bon d'intervention - ${who} - ${when}.pdf`)
+      const blob = await bonPdfBlob(page)
+      downloadBlob(blob, `Bon d'intervention - ${who} - ${when}.pdf`)
+      archive(blob)
     } catch {
       toast.error('Téléchargement impossible.')
     } finally {
@@ -265,7 +288,9 @@ export default function InterventionBonPage({ source = 'intervention' }) {
     if (!page) return
     setPrinting(true)
     try {
-      printBlob(await bonPdfBlob(page))
+      const blob = await bonPdfBlob(page)
+      printBlob(blob)
+      archive(blob)
     } catch {
       // Dernier recours : l'impression du navigateur, même feuille A4.
       window.print()
