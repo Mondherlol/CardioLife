@@ -5,6 +5,7 @@ const Intervention   = require('../models/Intervention')
 const Site           = require('../models/Site')
 const Formation      = require('../models/Formation')
 const Replacement    = require('../models/Replacement')
+const DeletionLog    = require('../models/DeletionLog')
 const { listInstallations } = require('../utils/deaParc')
 const { syncSiteNextControl } = require('../utils/controls')
 const { syncFicheToParc } = require('../utils/ficheSync')
@@ -477,6 +478,11 @@ async function getAll(req, res) {
 
     if (status)       query.status       = status
     if (installation) query.installation = installation
+    /* Les contrôles en attente de RDV n'ont pas de date réelle : le planning,
+       le tableau de bord et les bons (requêtes par période) ne les montrent
+       pas. `enAttente=1` les liste à part. */
+    if (req.query.enAttente === '1') query.enAttente = true
+    else if (from || to)             query.enAttente = { $ne: true }
     if (controlType)  query.controlType  = controlType
     if (contract)     query.contract     = contract
 
@@ -655,6 +661,14 @@ async function update(req, res) {
        verrait une visite « hors calendrier » et la supprimerait. */
     if (req.body.scheduledDate !== undefined && intervention.isModified('scheduledDate')) {
       intervention.manualDate = true
+    }
+    /* Programmer un contrôle en attente (date ou technicien donnés), c'est le
+       remettre au planning. */
+    if (intervention.enAttente && (req.body.scheduledDate !== undefined || req.body.technicien)) {
+      intervention.enAttente = false
+      intervention.attenteMotif = undefined
+      intervention.attenteSince = undefined
+      changed.push("Sorti de l'attente : contrôle programmé")
     }
 
     intervention.history.push({
@@ -1363,13 +1377,105 @@ async function saveBon(req, res) {
 }
 
 /* ─── Delete ────────────────────────────────────────────────── */
+const DELETABLE_TYPES = ['intervention', 'hors_contrat']
+const TYPE_LABELS = {
+  semestriel: 'Contrôle semestriel', annuel: 'Contrôle annuel',
+  hors_contrat: 'Contrôle hors contrat', intervention: 'Intervention',
+}
+
+/**
+ * Suppression d'une intervention ponctuelle ou d'un contrôle hors contrat.
+ *
+ * Réservée aux rôles admin et superadmin — pas au simple droit Interventions —
+ * et toujours motivée. Une copie complète part au journal des suppressions.
+ * Les contrôles semestriels et annuels ne se suppriment pas : le contrat les
+ * rend dus, ils se mettent en attente de RDV.
+ */
 async function remove(req, res) {
   try {
-    if (!isAdmin(req.user)) return res.status(403).json({ message: 'Accès refusé.' })
-    const intervention = await Intervention.findByIdAndDelete(req.params.id)
+    if (!ADMIN_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Seuls les administrateurs peuvent supprimer.' })
+    }
+    const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    if (!DELETABLE_TYPES.includes(intervention.controlType)) {
+      return res.status(409).json({
+        message: 'Un contrôle semestriel ou annuel ne se supprime pas : mettez-le en attente de RDV.',
+      })
+    }
+    const reason = String(req.body?.motif || req.query.motif || '').trim()
+    if (!reason) return res.status(400).json({ message: 'Indiquez le motif de la suppression.' })
+
+    await DeletionLog.create({
+      kind:          'intervention',
+      refId:         intervention._id,
+      label:         [TYPE_LABELS[intervention.controlType], intervention.objet].filter(Boolean).join(' — '),
+      clientName:    intervention.clientName,
+      siteName:      intervention.siteName,
+      reason,
+      snapshot:      intervention.toObject({ flattenMaps: true }),
+      deletedBy:     req.user._id,
+      deletedByName: req.user.fullName || req.user.username,
+    })
+    await intervention.deleteOne()
     await refreshNextControl(intervention)
     res.json({ message: 'Supprimée.' })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Journal des suppressions ──────────────────────────────── */
+async function getDeleted(req, res) {
+  try {
+    if (!ADMIN_ROLES.includes(req.user.role)) return res.status(403).json({ message: 'Accès refusé.' })
+    // La copie complète reste en base ; la liste n'en a pas besoin.
+    const logs = await DeletionLog.find({ kind: 'intervention' })
+      .sort({ deletedAt: -1 })
+      .limit(500)
+      .select('-snapshot')
+      .lean()
+    res.json(logs)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Mise en attente de RDV ─────────────────────────────────── */
+/**
+ * Un contrôle prévu que le client ne veut pas caler maintenant. Il garde sa
+ * date théorique (pour mémoire) mais sort du calendrier, jusqu'à ce qu'on le
+ * programme ou qu'on le remette au planning.
+ */
+async function setAttente(req, res) {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ message: 'Accès refusé.' })
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (intervention.status !== 'planifie' || intervention.controlType === 'intervention') {
+      return res.status(409).json({ message: 'Seul un contrôle pas encore commencé peut être mis en attente.' })
+    }
+
+    const on    = Boolean(req.body?.enAttente)
+    const motif = String(req.body?.motif || '').trim()
+    if (on === Boolean(intervention.enAttente) && !(on && motif)) return res.json(intervention)
+
+    intervention.enAttente    = on
+    intervention.attenteSince = on ? (intervention.attenteSince || new Date()) : undefined
+    intervention.attenteMotif = on ? (motif || intervention.attenteMotif) : undefined
+    // La resynchronisation du contrat ne doit ni l'effacer ni le recréer ailleurs.
+    if (on) intervention.manualDate = true
+    intervention.history.push({
+      action:   on ? 'attente' : 'reprise',
+      user:     req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details:  on
+        ? `Mis en attente de RDV${motif ? ` — ${motif}` : ''}`
+        : "Remis au planning (sorti de l'attente)",
+    })
+    await intervention.save()
+    res.json(intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -1394,5 +1500,5 @@ module.exports = {
   saveFiche, removeFiche, closeIntervention, reopenIntervention,
   uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
-  saveRapportPdf,
+  saveRapportPdf, getDeleted, setAttente,
 }

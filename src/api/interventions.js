@@ -8,7 +8,11 @@ export const getIntervention    = (id)        => get(`/interventions/${id}`)
 export const createIntervention = (data)      => post('/interventions', data)
 export const updateIntervention = (id, data)  => put(`/interventions/${id}`, data)
 export const submitRapport      = (id, data)  => patch(`/interventions/${id}/rapport`, data)
-export const deleteIntervention = (id)        => del(`/interventions/${id}`)
+// Suppression motivée (admin / superadmin) : le motif part au journal des suppressions.
+export const deleteIntervention = (id, motif) => del(`/interventions/${id}?motif=${encodeURIComponent(motif || '')}`)
+export const getDeletedInterventions = ()     => get('/interventions/deleted')
+/* Contrôle du contrat mis en attente de RDV (ou remis au planning). */
+export const setInterventionAttente = (id, data) => patch(`/interventions/${id}/attente`, data)
 
 /* Une visite couvre plusieurs DAE : `dea` dit de quelle fiche il s'agit.
    Les champs de visite (visa, réception, observation générale) s'envoient sans. */

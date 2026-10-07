@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   Wrench, Plus, Search, X, CheckCircle2,
   Clock, AlertCircle, Calendar, MapPin, Zap, User,
-  ChevronDown, AlertTriangle, ArrowRight,
+  ChevronDown, AlertTriangle, ArrowRight, History,
 } from 'lucide-react'
+import { DeletionLogModal } from '../components/ControlAdminModals'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/AuthContext'
 import { getInterventions } from '../api/interventions'
@@ -347,6 +348,7 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
   const [search, setSearch]       = useState('')
   const [statusFilter, setStatus] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [showDeleted, setShowDeleted] = useState(false)
   const [sortDir, setSortDir]     = useState('desc')  // tri par date planifiée
   // Poses assignées au technicien : elles précèdent les contrôles, c'est du
   // matériel qui attend d'être mis en service.
@@ -457,11 +459,18 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
             </p>
           )}
         </div>
-        {canManage && (
-          <button className="btn btn--primary" onClick={() => setShowCreate(true)}>
-            <Plus size={15} /> {isIntv ? 'Nouvelle intervention' : 'Nouveau contrôle'}
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {['admin', 'superadmin'].includes(user?.role) && (
+            <button className="btn btn--ghost" onClick={() => setShowDeleted(true)}>
+              <History size={15} /> Suppressions
+            </button>
+          )}
+          {canManage && (
+            <button className="btn btn--primary" onClick={() => setShowCreate(true)}>
+              <Plus size={15} /> {isIntv ? 'Nouvelle intervention' : 'Nouveau contrôle'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats (admin only) */}
@@ -601,6 +610,7 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
       {showCreate && (
         <ControlCreateModal kind={kind} onClose={() => setShowCreate(false)} onCreated={onCreated} />
       )}
+      {showDeleted && <DeletionLogModal onClose={() => setShowDeleted(false)} />}
 
       {posing && (
         <InstallationCompleteModal

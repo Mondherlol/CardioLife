@@ -18,6 +18,8 @@ import {
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
 import { archiveRapportPdf } from '../lib/rapportPdf'
+import { DeleteInterventionModal, AttenteModal } from '../components/ControlAdminModals'
+import { setInterventionAttente } from '../api/interventions'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
@@ -595,6 +597,8 @@ export default function InterventionFichePage() {
   const [closing,        setClosing]        = useState(false)
   const [archiving,      setArchiving]      = useState(false)
   const [showReopen,     setShowReopen]     = useState(false)
+  const [showDelete,     setShowDelete]     = useState(false)
+  const [showAttente,    setShowAttente]    = useState(false)
   const [reopening,      setReopening]      = useState(false)
   const [starting,       setStarting]       = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
@@ -1298,8 +1302,44 @@ export default function InterventionFichePage() {
               <CheckCircle2 size={14} /> Clôturer l'intervention
             </button>
           )}
+          {/* Un contrôle du contrat ne se supprime pas : il reste dû. Il se
+              met en attente de RDV quand le client ne veut pas le caler. */}
+          {isAdmin && notStarted && iv.controlType !== 'intervention' && !iv.enAttente && (
+            <button className="btn btn--ghost" onClick={() => setShowAttente(true)}>
+              <Clock size={14} /> Mettre en attente
+            </button>
+          )}
+          {/* Supprimer : intervention ponctuelle ou contrôle hors contrat,
+              rôles admin et superadmin seulement. */}
+          {['admin', 'superadmin'].includes(user?.role)
+            && ['intervention', 'hors_contrat'].includes(iv.controlType) && (
+            <button className="btn btn--ghost fiche-delete-btn" onClick={() => setShowDelete(true)}>
+              <Trash2 size={14} /> Supprimer
+            </button>
+          )}
         </div>
       </div>
+
+      {iv.enAttente && (
+        <div className="fiche-attente-bar">
+          <Clock size={15} />
+          <span>
+            <strong>En attente de RDV</strong> depuis le {fmt(iv.attenteSince)}
+            {iv.attenteMotif ? ` — ${iv.attenteMotif}` : ''}. Ce contrôle n'apparaît plus dans le calendrier.
+          </span>
+          {isAdmin && (
+            <button type="button" className="btn btn--ghost btn--sm" style={{ marginLeft: 'auto' }}
+              onClick={async () => {
+                try {
+                  mergeIv(await setInterventionAttente(id, { enAttente: false }))
+                  toast.success('Contrôle remis au planning.')
+                } catch (err) { toast.error(err.message) }
+              }}>
+              Remettre au planning
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Tabs ── */}
       <div className="pd-tabs" style={{ marginBottom: 8 }}>
@@ -2106,6 +2146,15 @@ export default function InterventionFichePage() {
       )}
 
       {/* ── Modals ── */}
+      {showDelete && (
+        <DeleteInterventionModal iv={iv} onClose={() => setShowDelete(false)}
+          onDeleted={() => { setShowDelete(false); goBack() }} />
+      )}
+      {showAttente && (
+        <AttenteModal iv={iv} onClose={() => setShowAttente(false)}
+          onDone={updated => { setShowAttente(false); mergeIv(updated) }} />
+      )}
+
       {showClose && (
         <CloseConfirm
           onClose={() => setShowClose(false)}

@@ -29,8 +29,12 @@ import {
  *  onClose, onDone
  *  onHorsContrat - (date) => void : ouvre la création d'un contrôle hors contrat
  */
-export default function ScheduleControlModal({ presetDate, presetType, onClose, onDone, onHorsContrat }) {
-  const [client,   setClient]   = useState({ id: null, name: '' })
+export default function ScheduleControlModal({ presetDate, presetType, presetControl, onClose, onDone, onHorsContrat }) {
+  // Ouvert depuis un contrôle précis (liste des contrôles en attente) : client
+  // et contrôle sont déjà choisis.
+  const [client,   setClient]   = useState(presetControl
+    ? { id: presetControl.client?._id || presetControl.client, name: presetControl.clientName || presetControl.client?.name || '' }
+    : { id: null, name: '' })
   const [controls, setControls] = useState([])
   const [loading,  setLoading]  = useState(false)
   const [picked,   setPicked]   = useState(null)
@@ -61,7 +65,12 @@ export default function ScheduleControlModal({ presetDate, presetType, onClose, 
     let alive = true
     setLoading(true)
     pendingControlsOf(client.id)
-      .then(list => { if (alive) setControls(list) })
+      .then(list => {
+        if (!alive) return
+        setControls(list)
+        const preset = presetControl && list.find(c => c._id === presetControl._id)
+        if (preset) pick(preset)
+      })
       .catch(() => { if (alive) setControls([]) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -169,7 +178,9 @@ export default function ScheduleControlModal({ presetDate, presetType, onClose, 
                             {c.technicienName ? ` · ${c.technicienName}` : ''}
                           </span>
                         </span>
-                        {isToSchedule(c) && <span className="sc-badge">Sans technicien</span>}
+                        {c.enAttente
+                          ? <span className="sc-badge sc-badge--wait">En attente de RDV</span>
+                          : isToSchedule(c) && <span className="sc-badge">Sans technicien</span>}
                       </button>
                     )
                   })}

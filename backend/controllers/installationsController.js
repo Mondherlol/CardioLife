@@ -61,6 +61,11 @@ async function applySerialTracking(deviceProductId, serial, clientName, userId) 
 function isDeviceManager(user) {
   return user.role === 'superadmin' || user.role === 'admin' || user.permissions?.canManageDevices
 }
+/* Lecture du parc : la fiche client l'affiche, qui gère les clients le lit
+   (sans pouvoir poser ni modifier un DEA — la route garde les écritures). */
+function canReadParc(user) {
+  return isDeviceManager(user) || Boolean(user.permissions?.canManageClients)
+}
 function isAssignedTech(user, dea) {
   return dea.technician && String(dea.technician?._id || dea.technician) === String(user._id)
 }
@@ -118,7 +123,7 @@ async function getAll(req, res) {
   // Les techniciens ne voient que les poses qui leur sont assignées.
   if (req.user.role === 'technicien') {
     filter.technician = req.user._id
-  } else if (!isDeviceManager(req.user)) {
+  } else if (!canReadParc(req.user)) {
     return res.status(403).json({ message: 'Accès refusé.' })
   }
 
@@ -167,7 +172,7 @@ async function getById(req, res) {
   if (!found) return res.status(404).json({ message: 'Installation introuvable.' })
   const { site, dea } = found
 
-  if (!isDeviceManager(req.user) && !isAssignedTech(req.user, dea)) {
+  if (!canReadParc(req.user) && !isAssignedTech(req.user, dea)) {
     return res.status(403).json({ message: 'Accès refusé.' })
   }
 

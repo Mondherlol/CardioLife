@@ -7,6 +7,8 @@ import { toast } from 'react-toastify'
 import { getInterventions, getIntervention, saveBon } from '../api/interventions'
 import { getAppSettings } from '../api/appSettings'
 import { localDateStr } from '../lib/appointmentConstants'
+import { loadDraft, syncDraft } from '../lib/bonDraft'
+import { bonPdfBlob, printBlob } from '../lib/bonPdf'
 import {
   BonDocument, BonFields, FALLBACK_COMPANY, bonLines, bonPayload, initialBon,
 } from './InterventionBonPage'
@@ -92,9 +94,15 @@ export default function InterventionBonsWeekPage() {
           new Date(a.scheduledDate) - new Date(b.scheduledDate)
           || String(a.clientName || '').localeCompare(String(b.clientName || '')))
         const init = Object.fromEntries(sorted.map(iv => [iv._id, initialBon(iv)]))
+        /* Onglet déchargé puis rechargé : chaque bon reprend sa saisie en cours. */
+        const drafts = Object.fromEntries(sorted.map(iv => [iv._id, loadDraft('intervention', iv._id) || init[iv._id]]))
+        const restored = sorted.filter(iv => drafts[iv._id] !== init[iv._id]).length
         setItems(sorted)
-        setBons(init)
+        setBons(drafts)
         setSavedBons(init)
+        if (restored) {
+          toast.info(`${restored} bon${restored > 1 ? 's' : ''} : modifications non enregistrées restaurées.`)
+        }
         setSelected(sorted[0]?._id || null)
       })
       .catch(err => { if (alive) setError(err.message || 'Chargement impossible.') })
@@ -118,6 +126,11 @@ export default function InterventionBonsWeekPage() {
     id => JSON.stringify(bons[id]) !== JSON.stringify(savedBons[id]),
     [bons, savedBons])
   const dirtyIds = (items || []).map(iv => iv._id).filter(isDirty)
+
+  // Brouillon local de chaque bon, effacé dès qu'il est enregistré.
+  useEffect(() => {
+    Object.keys(bons).forEach(id => syncDraft('intervention', id, bons[id], savedBons[id]))
+  }, [bons, savedBons])
 
   // Modifications non enregistrées : on prévient avant de quitter la page.
   useEffect(() => {
@@ -208,7 +221,18 @@ export default function InterventionBonsWeekPage() {
     if (pending.length && !(await saveIds(pending))) {
       if (!window.confirm("Certains bons n'ont pas pu être enregistrés. Imprimer quand même ?")) return
     }
-    window.print()
+    /* Même PDF que le bouton « Télécharger » d'un bon : un bon imprimé d'ici
+       est identique à celui imprimé depuis sa page ou depuis le fichier. */
+    const pages = [...document.querySelectorAll('.bw-print .bi-page')]
+    if (!pages.length) return
+    setSaving(true)
+    try {
+      printBlob(await bonPdfBlob(pages))
+    } catch {
+      window.print()
+    } finally {
+      setSaving(false)
+    }
   }
 
   const allOn = visible.length > 0 && visible.every(iv => !excluded.has(iv._id))

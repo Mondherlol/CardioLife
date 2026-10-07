@@ -6,7 +6,7 @@ import {
   AlertTriangle, CalendarClock, Clock, User, MapPin,
   ArrowRight, ChevronRight,
   ChevronLeft, Plus, Activity, BatteryWarning, Zap,
-  CircleDot, TrendingUp, X, Check, Archive,
+  CircleDot, TrendingUp, X, Check, Archive, PauseCircle,
 } from 'lucide-react'
 import ArmoirePilesModal from '../components/ArmoirePilesModal'
 import { useAuth } from '../context/AuthContext'
@@ -15,6 +15,7 @@ import { getAnnualIncreases, applyAnnualIncrease, formatPrice } from '../api/con
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { getDashboard } from '../api/dashboard'
 import { getInstallations } from '../api/installations'
+import { getInterventions } from '../api/interventions'
 import { getUsers } from '../api/users'
 import { getReplacements, replacementKind, replacementReason } from '../api/replacements'
 import EventModal from '../components/EventModal'
@@ -632,6 +633,13 @@ export default function DashboardPage() {
   const [increases, setIncreases] = useState(null)
   const [showIncreases, setShowIncreases] = useState(false)
   const [showArmoires, setShowArmoires] = useState(false)
+  // Contrôles dus que le client n'a pas encore voulu caler.
+  const [attenteCount, setAttenteCount] = useState(0)
+  useEffect(() => {
+    getInterventions({ enAttente: '1' })
+      .then(list => setAttenteCount((Array.isArray(list) ? list : []).filter(i => i.status !== 'termine').length))
+      .catch(() => {})
+  }, [])
   const canContracts = canAccess(user, 'contracts')
 
   useLoadingBar(loading)
@@ -760,13 +768,16 @@ export default function DashboardPage() {
     const armoires = installations.filter(i => i.armoire?.pilesStatus === 'a_remplacer').length
     return [
       { key: 'ctrl', count: late,       label: 'contrôles en retard',   icon: AlertTriangle,  tone: 'red',    to: '/planning' },
+      { key: 'att',  count: attenteCount,
+        label: attenteCount > 1 ? 'contrôles en attente de planification' : 'contrôle en attente de planification',
+        icon: PauseCircle, tone: 'orange', to: '/planning?attente=1' },
       { key: 'batt', count: batteries,  label: 'batteries à remplacer', icon: BatteryWarning, tone: 'amber',  to: '/stock?tab=parc&type=batterie' },
       { key: 'elec', count: electrodes, label: 'électrodes expirées',   icon: Zap,            tone: 'orange', to: '/stock?tab=parc&type=electrode' },
       { key: 'arm',  count: armoires,
         label: armoires > 1 ? 'armoires nécessitent un remplacement de piles' : 'armoire nécessite un remplacement de piles',
         icon: Archive, tone: 'amber', onClick: () => setShowArmoires(true) },
     ].filter(a => a.count > 0)
-  }, [installations])
+  }, [installations, attenteCount])
 
   /* Contrôles à venir : uniquement les contrôles (fiches de contrôle et
      rendez-vous de type contrôle), pas les rendez-vous en général. */

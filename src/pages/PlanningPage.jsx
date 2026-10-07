@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin   from '@fullcalendar/daygrid'
 import timeGridPlugin  from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
 import listPlugin      from '@fullcalendar/list'
 import frLocale        from '@fullcalendar/core/locales/fr'
-import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap, Hammer, Printer } from 'lucide-react'
+import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap, Hammer, Printer, PauseCircle } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getAppointments, updateAppointment } from '../api/appointments'
 import { getFormations, updateFormation } from '../api/formations'
@@ -18,6 +18,7 @@ import FormationModal from '../components/FormationModal'
 import ControlCreateModal from '../components/ControlCreateModal'
 import ScheduleControlModal from '../components/ScheduleControlModal'
 import { isToSchedule } from '../lib/scheduledControls'
+import { AttenteListModal } from '../components/ControlAdminModals'
 import AppointmentViewModal from '../components/AppointmentViewModal'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -203,6 +204,12 @@ export default function PlanningPage() {
   const [ctrlModal,   setCtrlModal]   = useState(null)
   // Caler un contrôle déjà prévu par le contrat (date réelle, technicien).
   const [schedModal,  setSchedModal]  = useState(null)
+  /* Contrôles en attente de RDV : hors calendrier, listés à part. `?attente=1`
+     (alerte du tableau de bord) ouvre directement la liste. */
+  const [params, setParams] = useSearchParams()
+  const [attenteOpen,  setAttenteOpen]  = useState(params.get('attente') === '1')
+  const [attenteCount, setAttenteCount] = useState(0)
+  const [attenteKey,   setAttenteKey]   = useState(0)
   const [viewing,     setViewing]     = useState(null)   // RDV consulté sans droit d'édition
   const [todayEvents, setTodayEvents] = useState([])
   const [upcoming,     setUpcoming]     = useState([])   // contrôles à venir, tous horizons
@@ -261,9 +268,11 @@ export default function PlanningPage() {
     getInterventions()
       .then(data => {
         const now = new Date(); now.setHours(0, 0, 0, 0)
+        const list = Array.isArray(data) ? data : []
+        setAttenteCount(list.filter(i => i.enAttente && i.status !== 'termine').length)
         setUpcoming(
-          (Array.isArray(data) ? data : [])
-            .filter(i => i.status !== 'termine' && i.scheduledDate
+          list
+            .filter(i => i.status !== 'termine' && i.scheduledDate && !i.enAttente
               && new Date(i.scheduledDate) >= now)
             .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
         )
@@ -464,6 +473,12 @@ export default function PlanningPage() {
             <CalendarClock size={14} /> Prochains contrôles
             <span className="plan-ctrl-count">{upcoming.length}</span>
           </button>
+          {/* Contrôles dus que le client n'a pas encore voulu caler. */}
+          <button type="button" className="btn btn--ghost plan-ctrl-btn" style={{ marginTop: 6 }}
+            onClick={() => setAttenteOpen(true)}>
+            <PauseCircle size={14} /> En attente de planification
+            <span className={`plan-ctrl-count${attenteCount ? ' plan-ctrl-count--wait' : ''}`}>{attenteCount}</span>
+          </button>
         </div>
 
         <div className="plan-side-section">
@@ -589,12 +604,25 @@ export default function PlanningPage() {
         />
       )}
 
+      {attenteOpen && (
+        <AttenteListModal
+          refreshKey={attenteKey}
+          onClose={() => {
+            setAttenteOpen(false)
+            if (params.get('attente')) { params.delete('attente'); setParams(params, { replace: true }) }
+          }}
+          onOpen={id => navigate(`/interventions/${id}`)}
+          onSchedule={readOnlyPlanning ? null : iv => setSchedModal({ date: null, control: iv })}
+        />
+      )}
+
       {schedModal && (
         <ScheduleControlModal
           presetDate={schedModal.date}
           presetType={schedModal.type}
+          presetControl={schedModal.control}
           onClose={() => setSchedModal(null)}
-          onDone={() => { setSchedModal(null); refetch(); fetchUpcoming() }}
+          onDone={() => { setSchedModal(null); refetch(); fetchUpcoming(); setAttenteKey(k => k + 1) }}
           onHorsContrat={date => { setSchedModal(null); setCtrlModal({ date }) }}
         />
       )}

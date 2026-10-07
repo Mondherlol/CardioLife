@@ -236,9 +236,10 @@ function ControlsTab({ installation, users }) {
   function handleCreated() { setModal(null); load() }
   async function handleDelete(id, e) {
     e.stopPropagation()
-    if (!window.confirm('Supprimer ce contrôle ?')) return
+    const motif = window.prompt('Motif de la suppression (gardé dans l\'historique) :')
+    if (!motif?.trim()) return
     try {
-      await deleteIntervention(id)
+      await deleteIntervention(id, motif.trim())
       setControls(prev => prev.filter(c => c._id !== id))
       toast.success('Contrôle supprimé.')
     } catch (err) { toast.error(err.message || 'Erreur.') }

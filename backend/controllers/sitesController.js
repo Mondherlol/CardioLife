@@ -384,6 +384,8 @@ async function moveNextVisit(site, when, user) {
     const from = visit.scheduledDate
     visit.scheduledDate = when
     visit.manualDate    = true
+    // Une date donnée, c'est un contrôle programmé : il sort de l'attente.
+    visit.enAttente     = false
     visit.history.push({
       action: 'replanification', user: user._id, userName: user.fullName || user.username,
       details: `Contrôle reporté du ${from ? new Date(from).toLocaleDateString('fr-FR') : '—'} `

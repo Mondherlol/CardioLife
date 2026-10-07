@@ -198,6 +198,8 @@ async function applyNextControl(intervention, date, user, changes, dry) {
     if (dry) { changes.push(`Prochaine visite à déplacer au ${fmtDate(shifted)}`); return shifted }
     next.scheduledDate = shifted
     next.manualDate    = true
+    // Date relevée sur place : le contrôle est programmé, il sort de l'attente.
+    next.enAttente     = false
     next.history.push({
       action:   'modification',
       user:     user?._id,

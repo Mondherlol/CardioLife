@@ -4,6 +4,8 @@ import { Download, Printer, RotateCcw } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getIntervention, saveBon } from '../api/interventions'
 import { getFormationBon, saveFormationBon } from '../api/formations'
+import { loadDraft, syncDraft } from '../lib/bonDraft'
+import { bonPdfBlob, downloadBlob, printBlob } from '../lib/bonPdf'
 import { getAppSettings, companyLogoUrl } from '../api/appSettings'
 
 /* Identité de repli : le document doit s'imprimer même si les paramètres ne
@@ -172,14 +174,46 @@ export default function InterventionBonPage({ source = 'intervention' }) {
   const [error,   setError]   = useState(false)
   // Référence, BC, natures, signataire et désignations retouchées.
   const [bon,     setBon]     = useState(null)
+  // Version enregistrée : ce qui s'en écarte est gardé en brouillon local.
+  const [savedBon, setSavedBon] = useState(null)
+  const [restored, setRestored] = useState(false)
   const [saving,  setSaving]  = useState(false)
   const [dl,      setDl]      = useState(false)
 
   useEffect(() => {
     src.load(id)
-      .then(data => { setIv(data); setBon(initialBon(data)) })
+      .then(data => {
+        const saved = initialBon(data)
+        /* L'onglet a pu être déchargé pendant qu'on allait vérifier une
+           information ailleurs : la saisie en cours repart du brouillon. */
+        const draft = loadDraft(source, id)
+        setIv(data)
+        setSavedBon(saved)
+        setBon(draft || saved)
+        setRestored(Boolean(draft))
+      })
       .catch(() => setError(true))
-  }, [id, src])
+  }, [id, src, source])
+
+  const dirty = Boolean(bon && savedBon) && JSON.stringify(bon) !== JSON.stringify(savedBon)
+
+  // Chaque frappe part dans le brouillon ; il s'efface une fois enregistré.
+  useEffect(() => {
+    if (bon && savedBon) syncDraft(source, id, bon, savedBon)
+  }, [bon, savedBon, source, id])
+
+  // Fermer l'onglet avec une saisie non enregistrée : le navigateur demande confirmation.
+  useEffect(() => {
+    if (!dirty) return
+    const warn = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
+
+  function discardDraft() {
+    setBon(savedBon)
+    setRestored(false)
+  }
 
   useEffect(() => {
     getAppSettings()
@@ -195,6 +229,8 @@ export default function InterventionBonPage({ source = 'intervention' }) {
     setSaving(true)
     try {
       await src.save(id, bonPayload(bon, lines))
+      setSavedBon(bon)
+      setRestored(false)
       toast.success('Bon enregistré.')
     } catch (err) {
       toast.error(err.message || 'Enregistrement impossible.')
@@ -203,30 +239,38 @@ export default function InterventionBonPage({ source = 'intervention' }) {
     }
   }
 
-  /* Téléchargement direct : le client attend son bon, pas une boîte de dialogue
-     d'impression où il faut encore choisir « Enregistrer au format PDF ». */
+  /* « Imprimer » et « Télécharger » sortent le même PDF (lib/bonPdf) : le bon
+     imprimé depuis le logiciel et celui imprimé depuis le fichier sont
+     identiques. */
+  const [printing, setPrinting] = useState(false)
+
   async function download() {
     const page = document.querySelector('.bi-page')
     if (!page) return
     setDl(true)
     try {
-      /* Chargée à la demande : la bibliothèque pèse plus lourd que la page
-         elle-même, et neuf visites sur dix s'impriment sans jamais l'appeler. */
-      const { default: html2pdf } = await import('html2pdf.js')
       const who  = (iv.clientName || 'client').replace(/[\/:*?"<>|]/g, '-')
       const when = new Date(iv.completedDate || iv.scheduledDate || Date.now())
         .toLocaleDateString('fr-FR').replace(/\//g, '-')
-      await html2pdf().set({
-        filename: `Bon d'intervention - ${who} - ${when}.pdf`,
-        margin:   0,
-        image:    { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF:    { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      }).from(page).save()
+      downloadBlob(await bonPdfBlob(page), `Bon d'intervention - ${who} - ${when}.pdf`)
     } catch {
-      toast.error('Téléchargement impossible — utilisez « Imprimer ».')
+      toast.error('Téléchargement impossible.')
     } finally {
       setDl(false)
+    }
+  }
+
+  async function print() {
+    const page = document.querySelector('.bi-page')
+    if (!page) return
+    setPrinting(true)
+    try {
+      printBlob(await bonPdfBlob(page))
+    } catch {
+      // Dernier recours : l'impression du navigateur, même feuille A4.
+      window.print()
+    } finally {
+      setPrinting(false)
     }
   }
 
@@ -239,14 +283,23 @@ export default function InterventionBonPage({ source = 'intervention' }) {
     <div className="bi-wrap">
       {/* ── Barre d'écran : ce qui se règle avant d'imprimer ── */}
       <div className="bi-bar no-print">
+        {restored && dirty && (
+          <div className="bi-draft-note">
+            Vos modifications non enregistrées ont été restaurées.
+            <button type="button" className="bi-draft-discard" onClick={discardDraft}>
+              Revenir à la version enregistrée
+            </button>
+          </div>
+        )}
         <BonFields value={bon} onChange={setBon} lines={lines} />
 
         <div className="bi-bar-actions">
-          <button className="btn btn--ghost" onClick={save} disabled={saving}>
-            {saving ? <span className="login-btn-spinner" /> : 'Enregistrer'}
+          <button className={`btn ${dirty ? 'btn--primary' : 'btn--ghost'}`} onClick={save} disabled={saving}
+            title={dirty ? 'Modifications non enregistrées' : undefined}>
+            {saving ? <span className="login-btn-spinner" /> : (dirty ? 'Enregistrer •' : 'Enregistrer')}
           </button>
-          <button className="btn btn--ghost" onClick={() => window.print()}>
-            <Printer size={14} /> Imprimer
+          <button className="btn btn--ghost" onClick={print} disabled={printing}>
+            {printing ? <span className="login-btn-spinner" /> : <><Printer size={14} /> Imprimer</>}
           </button>
           <button className="btn btn--primary" onClick={download} disabled={dl}>
             {dl ? <span className="login-btn-spinner" /> : <><Download size={14} /> Télécharger le PDF</>}

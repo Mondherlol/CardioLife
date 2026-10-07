@@ -18,6 +18,8 @@ router.use(requireAnyOrRead(['canManageInterventions'], ['canManageClients']))
 
 router.get('/search-installations', ctrl.searchInstallations)
 
+// Journal des suppressions (admin et superadmin).
+router.get('/deleted', ctrl.getDeleted)
 router.get('/',    ctrl.getAll)
 router.post('/',   ctrl.create)
 router.get('/:id', ctrl.getOne)
@@ -53,6 +55,8 @@ router.post('/:id/rapport-pdf', (req, res, next) => {
 router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
 router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)
 
+/* Contrôle du contrat que le client ne veut pas encore caler. */
+router.patch('/:id/attente', ctrl.setAttente)
 router.delete('/:id', ctrl.remove)
 
 module.exports = router

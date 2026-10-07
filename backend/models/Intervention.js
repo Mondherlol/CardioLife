@@ -145,6 +145,13 @@ const interventionSchema = new Schema({
   /* Date déplacée à la main (fiche client). Le calendrier du contrat ne la
      réaligne plus : une reprise de parc ancien vaut mieux que la règle. */
   manualDate:    { type: Boolean, default: false },
+  /* Contrôle du contrat que le client ne veut pas encore caler (« rappelez-
+     moi », site fermé…). Il ne se supprime pas — il reste dû — mais quitte le
+     calendrier pour la liste « En attente de planification ». Le programmer
+     l'en fait sortir. */
+  enAttente:     { type: Boolean, default: false, index: true },
+  attenteSince:  Date,
+  attenteMotif:  { type: String, trim: true },
   completedDate: Date,
 
   rapport:  { type: rapportSchema, default: () => ({}) },
