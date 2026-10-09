@@ -146,6 +146,7 @@ function formationAsVisit(f) {
   return {
     _id:            f._id,
     kind:           'formation',
+    objet:          f.title,
     clientName:     f.clientName,
     siteName:       f.site?.name || f.siteName,
     scheduledDate:  f.date,
@@ -316,6 +317,7 @@ export default function InterventionBonPage({ source = 'intervention' }) {
             </button>
           </div>
         )}
+        <BonTitleReminder iv={iv} />
         <BonFields value={bon} onChange={setBon} lines={lines} />
 
         <div className="bi-bar-actions">
@@ -364,6 +366,21 @@ export function bonPayload(bon, lines) {
     reference: bon.ref, bonCommande: bon.bc, nature: bon.natures,
     signataire: bon.signer, designations,
   }
+}
+
+/**
+ * Rappel du titre de la visite, à l'écran seulement : il dit à qui prépare le
+ * bon de quoi il s'agit, pour cocher la bonne nature. Il n'est pas imprimé —
+ * le bon papier ne le porte pas.
+ */
+export function BonTitleReminder({ iv }) {
+  if (!iv?.objet) return null
+  return (
+    <div className="bi-title-reminder">
+      <span className="bi-title-reminder-label">Titre de la visite</span>
+      <span className="bi-title-reminder-value">{iv.objet}</span>
+    </div>
+  )
 }
 
 /**

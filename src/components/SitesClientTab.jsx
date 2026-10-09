@@ -3,13 +3,14 @@ import {
   Plus, Pencil, Trash2, X, AlertTriangle, ChevronRight,
   Zap, BatteryMedium, Building2, UserPlus, Settings2,
   Table2, LayoutGrid, ArrowUpRight, HeartPulse, FileText,
-  CalendarClock, Package, Archive,
+  CalendarClock, Package, Archive, FileX,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { getSites, deleteSite } from '../api/sites'
 import { getContracts } from '../api/contracts'
 import ContractModal from './ContractModal'
+import TerminateContractConfirm from './TerminateContractConfirm'
 import SiteModal from './SiteModal'
 import DeaModal from './DeaModal'
 import DeaItemsModal from './DeaItemsModal'
@@ -150,6 +151,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
   // Contrat en cours par site : un contrat couvre un site, pas le client.
   const [contracts,  setContracts]  = useState({})     // siteId → contrat
   const [ctrModal,   setCtrModal]   = useState(null)   // null | { site }
+  const [ctrEnding,  setCtrEnding]  = useState(null)   // null | { site, contract }
   // Matériel réservé pour ce client : il attend une pose.
   const [reserved,   setReserved]   = useState([])
   const [planOpen,   setPlanOpen]   = useState(null)   // null | { site }
@@ -264,7 +266,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
       return [
         { label: 'Ouvrir la fiche du site',   icon: ArrowUpRight, onClick: () => act.openSite(site) },
         contract
-          ? { label: `Voir le contrat ${contract.contractNumber || ''}`.trim(), icon: FileText, onClick: () => act.openContract(site) }
+          ? { label: 'Retirer le contrat', icon: FileX, danger: true, onClick: () => setCtrEnding({ site, contract }) }
           : { label: 'Créer un contrat', icon: FileText, disabled: !site.deas?.length, onClick: () => act.openContract(site) },
         { separator: true },
         { label: 'Ajouter un DEA',            icon: Plus,      onClick: () => act.addDea(site) },
@@ -422,6 +424,15 @@ export default function SitesClientTab({ clientId, onCountChange }) {
         <ContextMenu
           x={menu.x} y={menu.y} title={menu.title} items={menu.items}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {ctrEnding && (
+        <TerminateContractConfirm
+          contract={ctrEnding.contract}
+          siteName={ctrEnding.site.name}
+          onClose={() => setCtrEnding(null)}
+          onDone={() => { setCtrEnding(null); load() }}
         />
       )}
 

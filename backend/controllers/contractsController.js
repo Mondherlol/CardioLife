@@ -330,6 +330,34 @@ async function applyAnnualIncrease(req, res) {
   res.json({ price: to, from })
 }
 
+/* ── Retrait du contrat ────────────────────────────────── */
+/**
+ * Le site sort du contrat : le contrat passe « résilié » et les visites
+ * encore à faire qu'il avait planifiées disparaissent du planning. Les
+ * visites réalisées ou en cours restent, elles font partie de l'historique ;
+ * les interventions ponctuelles aussi, elles ne viennent pas du calendrier.
+ */
+async function terminate(req, res) {
+  const contract = await Contract.findById(req.params.id)
+  if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
+  if (contract.status === 'resilie') {
+    return res.status(409).json({ message: 'Ce contrat est déjà résilié.' })
+  }
+
+  contract.status = 'resilie'
+  await contract.save()
+
+  const { deletedCount } = await Intervention.deleteMany({
+    contract:    contract._id,
+    status:      'planifie',
+    controlType: { $ne: 'intervention' },
+  })
+
+  await syncClientContractFlag(contract.client)
+  await syncSiteNextControl(contract.site)
+  res.json({ message: 'Contrat retiré.', removedControls: deletedCount })
+}
+
 /* ── Archivage / restauration / suppression ───────────── */
 async function archive(req, res) {
   const contract = await Contract.findById(req.params.id)
@@ -365,6 +393,6 @@ async function permanentDelete(req, res) {
 
 module.exports = {
   generateNumber, getStats, getAll, getById,
-  create, update, archive, restore, permanentDelete,
+  create, update, terminate, archive, restore, permanentDelete,
   getAnnualIncreases, applyAnnualIncrease,
 }

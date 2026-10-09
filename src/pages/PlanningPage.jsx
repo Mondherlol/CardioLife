@@ -597,9 +597,9 @@ export default function PlanningPage() {
             setModal(null)
             setCtrlModal({ date: slot?.startStr || null, kind: opts.kind, objet: opts.objet })
           }}
-          onSwitchToScheduled={(slot, type) => {
+          onSwitchToScheduled={(slot, type, title) => {
             setModal(null)
-            setSchedModal({ date: slot?.startStr || null, type })
+            setSchedModal({ date: slot?.startStr || null, type, title })
           }}
         />
       )}
@@ -621,6 +621,7 @@ export default function PlanningPage() {
           presetDate={schedModal.date}
           presetType={schedModal.type}
           presetControl={schedModal.control}
+          presetTitle={schedModal.title}
           onClose={() => setSchedModal(null)}
           onDone={() => { setSchedModal(null); refetch(); fetchUpcoming(); setAttenteKey(k => k + 1) }}
           onHorsContrat={date => { setSchedModal(null); setCtrlModal({ date }) }}

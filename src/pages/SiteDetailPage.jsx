@@ -6,7 +6,7 @@ import {
   HeartPulse, GraduationCap, ClipboardList, FileText, History,
   Package, User, Clock, CheckCircle2, CalendarDays, Hash,
   BatteryMedium, Zap, AlertTriangle, Users, UserPlus,
-  MoreVertical, Trash2, Eye, MinusCircle, ChevronRight, Archive,
+  MoreVertical, Trash2, Eye, MinusCircle, ChevronRight, Archive, FileX,
 } from 'lucide-react'
 import { getSiteHistory } from '../api/sites'
 import { getUsers } from '../api/users'
@@ -19,6 +19,7 @@ import ArmoireModal from '../components/ArmoireModal'
 import DeleteDeaConfirm from '../components/DeleteDeaConfirm'
 import ContextMenu from '../components/ContextMenu'
 import ContractModal from '../components/ContractModal'
+import TerminateContractConfirm from '../components/TerminateContractConfirm'
 import FormationModal from '../components/FormationModal'
 import { FormationRow, FormationsSummary } from '../components/FormationRow'
 import { stageOf } from '../lib/formations'
@@ -568,6 +569,7 @@ export default function SiteDetailPage() {
   const [deaDeleting, setDeaDeleting] = useState(null)
   const [menu,      setMenu]      = useState(null)   // { x, y, title, items }
   const [ctrModal,  setCtrModal]  = useState(false)  // création du contrat du site
+  const [ctrEnding, setCtrEnding] = useState(false)  // retrait du contrat du site
 
   useLoadingBar(loading)
 
@@ -688,6 +690,11 @@ export default function SiteDetailPage() {
           </div>
         </div>
 
+        {data.contract && (
+          <button className="cd-edit-btn cd-edit-btn--danger" onClick={() => setCtrEnding(true)}>
+            <FileX size={14} /> Retirer le contrat
+          </button>
+        )}
         <button className="cd-edit-btn" onClick={() => setEditOpen(true)}>
           <Pencil size={14} /> Modifier
         </button>
@@ -792,6 +799,15 @@ export default function SiteDetailPage() {
         <ContextMenu
           x={menu.x} y={menu.y} title={menu.title} items={menu.items}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {ctrEnding && data.contract && (
+        <TerminateContractConfirm
+          contract={data.contract}
+          siteName={site.name}
+          onClose={() => setCtrEnding(false)}
+          onDone={() => { setCtrEnding(false); load() }}
         />
       )}
 

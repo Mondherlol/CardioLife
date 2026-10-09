@@ -339,7 +339,8 @@ export default function EventModal({
                     if (['controle_semestriel', 'controle_annuel'].includes(e.target.value)
                         && !isEdit && onSwitchToScheduled) {
                       onSwitchToScheduled(currentSlot(),
-                        e.target.value === 'controle_annuel' ? 'annuel' : 'semestriel')
+                        e.target.value === 'controle_annuel' ? 'annuel' : 'semestriel',
+                        form.title.trim())
                       return
                     }
                     if (['controle_hors_contrat', 'intervention'].includes(e.target.value)

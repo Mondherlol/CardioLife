@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
 import {
-  X, CalendarCheck, Building2, Calendar, Clock, User, ChevronDown, AlertTriangle, Info, Plus,
+  X, CalendarCheck, Building2, Calendar, Clock, User, ChevronDown, AlertTriangle, Info, Plus, Type,
 } from 'lucide-react'
 import { updateIntervention } from '../api/interventions'
 import { get } from '../api/http'
@@ -29,7 +29,7 @@ import {
  *  onClose, onDone
  *  onHorsContrat - (date) => void : ouvre la création d'un contrôle hors contrat
  */
-export default function ScheduleControlModal({ presetDate, presetType, presetControl, onClose, onDone, onHorsContrat }) {
+export default function ScheduleControlModal({ presetDate, presetType, presetControl, presetTitle, onClose, onDone, onHorsContrat }) {
   // Ouvert depuis un contrôle précis (liste des contrôles en attente) : client
   // et contrôle sont déjà choisis.
   const [client,   setClient]   = useState(presetControl
@@ -52,6 +52,10 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
   const [date, setDate] = useState(slot?.day || '')
   const [time, setTime] = useState(slot?.time || '09:00')
   const [tech, setTech] = useState('')
+  /* Titre du contrôle (« Contrôle + formation des nouveaux agents ») : saisi
+     dans la fenêtre du planning, il suit jusqu'ici, puis sur la fiche du
+     contrôle et sur son bon. */
+  const [title, setTitle] = useState(presetTitle || '')
 
   useEffect(() => {
     get('/users?role=technicien&limit=100')
@@ -90,6 +94,8 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
     // proposé en un clic, sous le champ date.
     setDate(localDateStr(c.scheduledDate))
     setTime(localTimeStr(c.scheduledDate))
+    // Un titre déjà donné au contrôle est repris, sauf si on vient d'en saisir un.
+    if (!presetTitle) setTitle(c.objet || '')
   }
 
   const slotDiffers = picked && slot && slot.day !== localDateStr(picked.scheduledDate)
@@ -106,6 +112,7 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
         scheduledDate:  when,
         technicien:     t?._id || null,
         technicienName: t ? (t.fullName || t.username) : '',
+        objet:          title.trim(),
       })
       toast.success(`${CONTROL_LABELS[picked.controlType] || 'Contrôle'} programmé le ${fmtDay(when)}.`)
       onDone()
@@ -188,6 +195,12 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
               )}
             </div>
           )}
+
+          <div className="form-group">
+            <label className="form-label"><Type size={12} /> Titre <span className="form-label-opt">(facultatif)</span></label>
+            <input className="form-input" value={title} onChange={e => setTitle(e.target.value)}
+              placeholder="ex. Contrôle + formation des nouveaux agents" />
+          </div>
 
           <div className="form-row">
             <div className="form-group">

@@ -7365,6 +7365,17 @@ button {
   background: var(--orange-600);
 }
 
+/* Action destructive du bandeau : blanche, elle ne rivalise pas avec « Modifier ». */
+.cd-edit-btn--danger {
+  background: transparent;
+  border: 1px solid var(--red-500);
+  color: var(--red-600);
+}
+
+.cd-edit-btn--danger:hover {
+  background: var(--red-50);
+}
+
 .cd-banner-info {
   flex: 1;
   min-width: 0;
@@ -21857,3 +21868,28 @@ div.att-main { cursor: default; }
   border: 0;
   visibility: hidden;
 }
+
+/* Fiche contrôle : titre en tête du contexte, sur toute la largeur. */
+.ctx-item--wide { grid-column: 1 / -1; }
+.ctx-value--title { font-size: 14px; font-weight: 650; color: var(--text-primary); }
+
+/* Bon : rappel du titre de la visite, à l'écran seulement (barre no-print). */
+.bi-title-reminder {
+  flex-basis: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--gray-50);
+  border: 1px solid var(--border);
+}
+.bi-title-reminder-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.bi-title-reminder-value { font-size: 13.5px; font-weight: 650; color: var(--text-primary); }

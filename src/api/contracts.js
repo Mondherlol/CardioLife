@@ -9,6 +9,8 @@ export const getContractStats   = ()         => get('/contracts/stats')
 export const getNextNumber      = ()         => get('/contracts/next-number')
 export const createContract     = (data)     => post('/contracts', data)
 export const updateContract     = (id, data) => put(`/contracts/${id}`, data)
+// Le site sort du contrat : résiliation et retrait des visites encore à faire.
+export const terminateContract  = (id)       => post(`/contracts/${id}/terminate`)
 export const archiveContract    = (id)       => del(`/contracts/${id}`)
 export const restoreContract    = (id)       => put(`/contracts/${id}/restore`)
 export const destroyContract    = (id)       => del(`/contracts/${id}/permanent`)

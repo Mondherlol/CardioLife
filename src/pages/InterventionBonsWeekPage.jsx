@@ -10,7 +10,7 @@ import { localDateStr } from '../lib/appointmentConstants'
 import { loadDraft, syncDraft } from '../lib/bonDraft'
 import { bonPdfBlob, printBlob } from '../lib/bonPdf'
 import {
-  BonDocument, BonFields, FALLBACK_COMPANY, bonLines, bonPayload, initialBon,
+  BonDocument, BonFields, BonTitleReminder, FALLBACK_COMPANY, bonLines, bonPayload, initialBon,
 } from './InterventionBonPage'
 
 /** Lundi de la semaine de `d`, à minuit. */
@@ -389,6 +389,7 @@ export default function InterventionBonsWeekPage() {
                 </div>
 
                 <div className="bi-bar bw-fields">
+                  <BonTitleReminder iv={current} />
                   <BonFields value={value} onChange={setBon(current._id)} lines={lines} />
                 </div>
 

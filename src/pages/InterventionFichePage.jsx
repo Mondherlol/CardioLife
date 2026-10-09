@@ -508,6 +508,13 @@ function ControlContextSection({ iv, navigate }) {
       </div>
       <div className="fiche-page-body">
         <div className="ctx-grid">
+          {/* Le titre d'une intervention ponctuelle est déjà son objet, en tête de page. */}
+          {iv.objet && iv.controlType !== 'intervention' && (
+            <div className="ctx-item ctx-item--wide">
+              <span className="ctx-label">Titre</span>
+              <span className="ctx-value ctx-value--title">{iv.objet}</span>
+            </div>
+          )}
           <div className="ctx-item">
             <span className="ctx-label">Type</span>
             <span className={ct.cls}>{ct.label}</span>

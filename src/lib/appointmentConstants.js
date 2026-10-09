@@ -41,7 +41,9 @@ export function controlEventTitle(intervention) {
   const label = type === 'intervention' && intervention.objet
     ? intervention.objet
     : TYPE_MAP[type].label
-  return `${label}${intervention.clientName ? ' — ' + intervention.clientName : ''}`
+  // Un contrôle titré garde son type en tête : le titre le précise, il ne le remplace pas.
+  const titre = type !== 'intervention' && intervention.objet ? ` · ${intervention.objet}` : ''
+  return `${label}${titre}${intervention.clientName ? ' — ' + intervention.clientName : ''}`
 }
 
 export const STATUS_OPTS = [

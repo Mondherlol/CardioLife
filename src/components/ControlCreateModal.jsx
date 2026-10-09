@@ -178,7 +178,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
         technicienName: form.technicienName,
         scheduledDate:  form.scheduledDate,
         controlType:    isIntv ? 'intervention' : 'hors_contrat',
-        objet:          isIntv ? form.objet.trim() : undefined,
+        objet:          form.objet.trim() || undefined,
         notes:          form.notes,
       })
       toast.success(isIntv ? 'Intervention programmée.' : 'Contrôle programmé.')
@@ -220,7 +220,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
             )}
           </div>
 
-          {isIntv && (
+          {isIntv ? (
             <div className="form-group">
               <label className="form-label"><Wrench size={12} /> Objet *</label>
               <input
@@ -229,6 +229,17 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
                 value={form.objet}
                 onChange={e => setF('objet', e.target.value)}
                 autoFocus
+              />
+            </div>
+          ) : (
+            /* Titre facultatif d'un contrôle : repris sur sa fiche et son bon. */
+            <div className="form-group">
+              <label className="form-label"><Wrench size={12} /> Titre <span className="form-label-opt">(facultatif)</span></label>
+              <input
+                className="form-input"
+                placeholder="ex. Contrôle après déménagement de l'accueil"
+                value={form.objet}
+                onChange={e => setF('objet', e.target.value)}
               />
             </div>
           )}
