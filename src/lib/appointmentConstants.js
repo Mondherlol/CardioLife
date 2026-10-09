@@ -34,16 +34,30 @@ export function controlTypeToPlanning(controlType) {
   return 'controle_hors_contrat'
 }
 
-/** Intitulé d'un contrôle dans le planning : « Contrôle annuel — Client ».
-    Une intervention se nomme par son objet quand il est connu. */
+/**
+ * Où a lieu un événement : « Client — Site ». Le site est omis quand il porte
+ * le nom du client (site unique) : le répéter n'apprend rien.
+ */
+export function placeTitle(clientName, siteName) {
+  const client = String(clientName || '').trim()
+  const site   = String(siteName || '').trim()
+  return [client, site && site.toLowerCase() !== client.toLowerCase() ? site : '']
+    .filter(Boolean).join(' — ')
+}
+
+/**
+ * Intitulé d'un contrôle dans le planning : le client et le site. Le type se
+ * lit à la couleur ; il reste dans l'infobulle (`eventTooltip`).
+ */
 export function controlEventTitle(intervention) {
-  const type  = controlTypeToPlanning(intervention.controlType)
-  const label = type === 'intervention' && intervention.objet
-    ? intervention.objet
-    : TYPE_MAP[type].label
-  // Un contrôle titré garde son type en tête : le titre le précise, il ne le remplace pas.
-  const titre = type !== 'intervention' && intervention.objet ? ` · ${intervention.objet}` : ''
-  return `${label}${titre}${intervention.clientName ? ' — ' + intervention.clientName : ''}`
+  return placeTitle(intervention.clientName, intervention.siteName || intervention.site?.name)
+    || TYPE_MAP[controlTypeToPlanning(intervention.controlType)].label
+}
+
+/** Infobulle d'un événement : son type, puis son titre ou son objet s'il en a un. */
+export function eventTooltip(type, detail) {
+  const label = (TYPE_MAP[type] || TYPE_MAP.autre).label
+  return detail && detail !== label ? `${label} — ${detail}` : label
 }
 
 export const STATUS_OPTS = [

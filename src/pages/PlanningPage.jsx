@@ -24,6 +24,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime, localDateStr,
   DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle,
+  placeTitle, eventTooltip,
 } from '../lib/appointmentConstants'
 
 // Ré-export pour compatibilité (anciens imports depuis cette page).
@@ -114,14 +115,19 @@ function toFCEvent(a) {
   const tc = TYPE_MAP[a.type] || TYPE_MAP.autre
   return {
     id:              a._id,
-    title:           a.title,
+    title:           placeTitle(a.clientName) || a.title,
     start:           a.start,
     end:             a.end || undefined,
     allDay:          a.allDay,
     backgroundColor: tc.color,
     borderColor:     tc.color,
     textColor:       '#fff',
-    extendedProps:   { kind: 'appointment', type: a.type, status: a.status, clientName: a.clientName, description: a.description, _raw: a },
+    extendedProps:   {
+      kind: 'appointment', type: a.type, status: a.status,
+      place: { client: a.clientName || a.title },
+      tooltip: eventTooltip(a.type, a.title),
+      description: a.description, _raw: a,
+    },
   }
 }
 
@@ -145,7 +151,11 @@ function toInterventionEvent(iv, canMove) {
     textColor:       toSchedule ? color : '#fff',
     startEditable:   canMove && iv.status !== 'termine',
     durationEditable: false,
-    extendedProps:   { kind: 'intervention', type, status: iv.status, clientName: iv.clientName, toSchedule, _intv: iv },
+    extendedProps:   {
+      kind: 'intervention', type, status: iv.status, toSchedule, _intv: iv,
+      place:   { client: iv.clientName, site: iv.siteName || iv.site?.name },
+      tooltip: eventTooltip(type, iv.objet),
+    },
   }
 }
 
@@ -155,14 +165,18 @@ function toInstallationEvent(inst) {
   const start = new Date(inst.scheduledDate)
   return {
     id:              `inst-${inst._id}`,
-    title:           `Installation${inst.clientName ? ' — ' + inst.clientName : ''}`,
+    title:           placeTitle(inst.clientName, inst.site?.name) || 'Installation',
     start,
     end:             new Date(start.getTime() + 60 * 60000),
     backgroundColor: color,
     borderColor:     color,
     textColor:       '#fff',
     editable:        false,
-    extendedProps:   { kind: 'installation', type: 'installation', status: inst.status, clientName: inst.clientName, _inst: inst },
+    extendedProps:   {
+      kind: 'installation', type: 'installation', status: inst.status, _inst: inst,
+      place:   { client: inst.clientName, site: inst.site?.name },
+      tooltip: eventTooltip('installation', [inst.deviceType, inst.serialNumber].filter(Boolean).join(' · ')),
+    },
   }
 }
 
@@ -173,14 +187,18 @@ function toFormationEvent(f) {
   const end   = f.end ? new Date(f.end) : new Date(start.getTime() + 60 * 60000)
   return {
     id:              f._id,
-    title:           f.title,
+    title:           placeTitle(f.clientName, f.site?.name || f.siteName) || f.title,
     start,
     end,
     backgroundColor: color,
     borderColor:     color,
     textColor:       '#fff',
     editable:        true,
-    extendedProps:   { kind: 'formation', type: 'formation', status: f.status, clientName: f.clientName, _raw: f },
+    extendedProps:   {
+      kind: 'formation', type: 'formation', status: f.status, _raw: f,
+      place:   { client: f.clientName || f.title, site: f.site?.name || f.siteName },
+      tooltip: eventTooltip('formation', f.title),
+    },
   }
 }
 
@@ -236,7 +254,9 @@ export default function PlanningPage() {
     ]).then(([appts, intvs, instRes, fmns]) => {
       const insts = Array.isArray(instRes) ? instRes : (instRes?.data || [])
       const items = [
-        ...(Array.isArray(appts) ? appts : []).map(a => ({ ...a, _kind: 'appointment', _raw: a })),
+        ...(Array.isArray(appts) ? appts : []).map(a => ({
+          ...a, _kind: 'appointment', _raw: a, title: placeTitle(a.clientName) || a.title,
+        })),
         ...(Array.isArray(intvs) ? intvs : []).filter(i => i.scheduledDate).map(i => ({
           _id: i._id, _kind: 'intervention',
           title: controlEventTitle(i),
@@ -245,13 +265,14 @@ export default function PlanningPage() {
         })),
         ...insts.filter(i => i.scheduledDate).map(i => ({
           _id: i._id, _kind: 'installation',
-          title: `Installation${i.clientName ? ' — ' + i.clientName : ''}`,
+          title: placeTitle(i.clientName, i.site?.name) || 'Installation',
           start: i.scheduledDate, type: 'installation',
           clientName: i.clientName, status: i.status,
         })),
         ...(Array.isArray(fmns) ? fmns : []).map(f => ({
           _id: f._id, _kind: 'formation',
-          title: f.title, start: f.date, end: f.end, type: 'formation',
+          title: placeTitle(f.clientName, f.site?.name || f.siteName) || f.title,
+          start: f.date, end: f.end, type: 'formation',
           clientName: f.clientName, status: f.status, _raw: f,
         })),
       ].sort((a, b) => new Date(a.start) - new Date(b.start))
@@ -563,17 +584,21 @@ export default function PlanningPage() {
             return cls
           }}
           eventContent={info => {
-            const { title } = info.event
-            const client = info.event.extendedProps.clientName
+            /* Le client, puis le site : la couleur dit déjà de quoi il s'agit
+               (contrôle, intervention, formation…), l'infobulle le précise. */
+            const { place = {} } = info.event.extendedProps
+            const client = place.client || info.event.title
+            const site   = place.site && place.site.toLowerCase() !== String(client).toLowerCase() ? place.site : ''
             return (
               <div className="plan-event-inner">
-                <span className="plan-event-title">{title}</span>
-                {/* Le titre d'un contrôle nomme déjà le client : pas de doublon. */}
-                {client && !title.includes(client) && (
-                  <span className="plan-event-client">{client}</span>
-                )}
+                <span className="plan-event-title">{client}</span>
+                {site && <span className="plan-event-client">{site}</span>}
               </div>
             )
+          }}
+          eventDidMount={info => {
+            const tip = info.event.extendedProps.tooltip
+            if (tip) info.el.title = `${tip}\n${info.event.title}`
           }}
         />
       </div>

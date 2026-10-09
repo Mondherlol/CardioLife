@@ -2,7 +2,7 @@ import { getAppointments } from '../api/appointments'
 import { getFormations } from '../api/formations'
 import { getInterventions } from '../api/interventions'
 import { getInstallations } from '../api/installations'
-import { DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle } from './appointmentConstants'
+import { DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle, placeTitle } from './appointmentConstants'
 
 /**
  * Récupère et normalise tous les événements du planning sur une plage de dates.
@@ -39,7 +39,7 @@ export async function fetchPlanningItems({ from, to, typeFilter = null }) {
 
   for (const a of (Array.isArray(appts) ? appts : [])) {
     items.push({
-      id: a._id, kind: 'appointment', type: a.type, title: a.title,
+      id: a._id, kind: 'appointment', type: a.type, title: placeTitle(a.clientName) || a.title,
       start: a.start, end: a.end, allDay: a.allDay,
       clientName: a.clientName, status: a.status, raw: a,
     })
@@ -56,13 +56,14 @@ export async function fetchPlanningItems({ from, to, typeFilter = null }) {
     if (!i.scheduledDate) continue
     items.push({
       id: i._id, kind: 'installation', type: 'installation',
-      title: `Installation${i.clientName ? ' — ' + i.clientName : ''}`,
+      title: placeTitle(i.clientName, i.site?.name) || 'Installation',
       start: i.scheduledDate, clientName: i.clientName, status: i.status, raw: i,
     })
   }
   for (const f of (Array.isArray(fmns) ? fmns : [])) {
     items.push({
-      id: f._id, kind: 'formation', type: 'formation', title: f.title,
+      id: f._id, kind: 'formation', type: 'formation',
+      title: placeTitle(f.clientName, f.site?.name || f.siteName) || f.title,
       start: f.date, end: f.end, clientName: f.clientName, status: f.status, raw: f,
     })
   }
