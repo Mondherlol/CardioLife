@@ -80,11 +80,26 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
     return () => { alive = false }
   }, [client.id])
 
-  // Les périodiques d'abord : ce sont eux qu'on vient caler.
-  const shown = controls
-    .filter(c => !presetType || c.controlType === presetType || !PERIODIC_TYPES.includes(c.controlType))
+  /* Tous les contrôles restant dus, du plus ancien au plus lointain. On ne
+     filtre plus sur le type choisi dans le planning : choisir « annuel »
+     masquait le semestriel en retard du même site, et on calait l'annuel
+     d'avril à sa place — deux visites dues au lieu d'une. Le type d'une visite
+     découle du contrat (alternance), pas de ce qu'on coche. */
+  const shown = [...controls]
     .sort((a, b) => PERIODIC_TYPES.includes(b.controlType) - PERIODIC_TYPES.includes(a.controlType)
       || new Date(a.scheduledDate) - new Date(b.scheduledDate))
+
+  // Le contrôle dû en premier sur chaque site : c'est lui qu'on programme.
+  const siteKey = c => String(c.site?._id || c.site || '')
+  const firstDue = {}
+  for (const c of shown) {
+    if (PERIODIC_TYPES.includes(c.controlType) && !firstDue[siteKey(c)]) firstDue[siteKey(c)] = c
+  }
+  const isFirstDue = c => firstDue[siteKey(c)]?._id === c._id
+  // Contrôle choisi alors qu'un autre, plus ancien, reste dû sur le même site.
+  const earlier = picked && PERIODIC_TYPES.includes(picked.controlType) && !isFirstDue(picked)
+    ? firstDue[siteKey(picked)]
+    : null
 
   function pick(c) {
     setPicked(c)
@@ -159,8 +174,7 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
               ) : shown.length === 0 ? (
                 <div className="sc-empty">
                   <p className="form-hint">
-                    <AlertTriangle size={11} /> Aucun contrôle prévu pour ce client
-                    {presetType ? ` (${CONTROL_LABELS[presetType].toLowerCase()})` : ''} — pas de contrat actif ?
+                    <AlertTriangle size={11} /> Aucun contrôle prévu pour ce client — pas de contrat actif ?
                   </p>
                   {onHorsContrat && (
                     <button type="button" className="btn btn--ghost btn--sm" onClick={horsContrat}>
@@ -187,12 +201,36 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
                         </span>
                         {c.enAttente
                           ? <span className="sc-badge sc-badge--wait">En attente de RDV</span>
-                          : isToSchedule(c) && <span className="sc-badge">Sans technicien</span>}
+                          : isFirstDue(c)
+                            ? <span className="sc-badge sc-badge--due">Prochain dû</span>
+                            : isToSchedule(c) && <span className="sc-badge">Sans technicien</span>}
                       </button>
                     )
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {earlier && (
+            <div className="cc-dup-warn">
+              <AlertTriangle size={14} />
+              <div>
+                <p>
+                  Ce site a encore un <strong>{CONTROL_LABELS[earlier.controlType].toLowerCase()}</strong> dû
+                  le <strong>{fmtDay(earlier.scheduledDate)}</strong>, avant celui-ci. Programmer ce
+                  {' '}{CONTROL_LABELS[picked.controlType].toLowerCase()} laisserait l'autre en retard :
+                  le site aurait deux visites à faire au lieu d'une.
+                </p>
+                <button type="button" className="btn btn--primary btn--sm" onClick={() => {
+                  // On garde la date et le technicien déjà choisis : seul le contrôle change.
+                  const keep = { date, time, tech }
+                  pick(earlier)
+                  setDate(keep.date); setTime(keep.time); setTech(keep.tech)
+                }}>
+                  Programmer plutôt le {CONTROL_LABELS[earlier.controlType].toLowerCase()} du {fmtDay(earlier.scheduledDate)}
+                </button>
+              </div>
             </div>
           )}
 

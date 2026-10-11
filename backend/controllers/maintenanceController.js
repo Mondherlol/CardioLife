@@ -20,6 +20,8 @@ function list(req, res) {
     description: t.description,
     detail:      t.detail,
     options:     t.options || [],
+    // La tâche s'applique à une sélection (sites cochés dans la simulation).
+    selectable:  Boolean(t.selectable),
   })))
 }
 
@@ -38,7 +40,11 @@ async function run(req, res) {
 
   try {
     const started = Date.now()
-    const report  = await task.run({ ...options, dry, userId: req.user._id })
+    // Sélection cochée dans la simulation (identifiants), pour les tâches qui s'y prêtent.
+    const selection = task.selectable && Array.isArray(req.body?.selection)
+      ? req.body.selection.map(String)
+      : undefined
+    const report  = await task.run({ ...options, dry, selection, userId: req.user._id })
     res.json({ ...report, label: task.label, durationMs: Date.now() - started })
   } catch (err) {
     res.status(500).json({ message: err.message })

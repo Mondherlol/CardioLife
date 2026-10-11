@@ -284,7 +284,22 @@ async function splitStockLots({ dry = false, userId = null } = {}) {
 
 /* Catalogue des reprises exposées à l'application. L'identifiant est ce que
    l'API reçoit : le reste décrit l'opération pour l'écran qui la propose. */
+const { recalerControles } = require('./recalage')
+
 const TASKS = {
+  'recaler-controles': {
+    label: 'Recaler le calendrier des contrôles (semestriel / annuel)',
+    description:
+      "Remet les contrôles périodiques de chaque site dans l'ordre : à partir du dernier contrôle "
+      + "réalisé, une visite tous les six mois, en alternance — après un semestriel vient l'annuel.",
+    detail:
+      "Les contrôles déjà calés par l'équipe (technicien assigné, date déplacée à la main) gardent "
+      + "leur date et prennent le bon type ; les échéances théoriques se rangent sur les créneaux "
+      + "restants ; une visite manquante entre deux autres est recréée. Simulez, cochez les sites "
+      + "à corriger, puis appliquez.",
+    selectable: true,
+    run: recalerControles,
+  },
   'resync-controls': {
     label: 'Recalculer les échéances de contrôle',
     description:

@@ -126,6 +126,108 @@ function ResyncReport({ report }) {
   )
 }
 
+const TYPE_SHORT = { semestriel: 'Semestriel', annuel: 'Annuel' }
+
+/**
+ * Simulation du recalage des contrôles : un bloc par site, une ligne par
+ * changement, une case à cocher par site. Seuls les sites cochés sont modifiés.
+ */
+function RecalageReport({ report, task, onApplied }) {
+  const actionable = report.sites.filter(s => s.changes.some(c => c.action !== 'unmatched'))
+  const [checked, setChecked] = useState(() => new Set(actionable.map(s => s.siteId)))
+  const [busy,    setBusy]    = useState(false)
+
+  const toggle = id => setChecked(cur => {
+    const next = new Set(cur)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+  const allOn = actionable.length > 0 && actionable.every(s => checked.has(s.siteId))
+
+  async function apply() {
+    if (!checked.size) return
+    if (!window.confirm(`Recaler le calendrier de ${checked.size} site${checked.size > 1 ? 's' : ''} ?`)) return
+    setBusy(true)
+    try {
+      const res = await runMaintenanceTask(task.id, { dry: false, selection: [...checked] })
+      toast.success(`${res.totals.applied} site${res.totals.applied > 1 ? 's' : ''} recalé${res.totals.applied > 1 ? 's' : ''}.`)
+      onApplied(res)
+    } catch (err) {
+      toast.error(err.message || 'Le recalage a échoué.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const line = c => {
+    if (c.action === 'create') {
+      return <>
+        <strong>Créer</strong> un contrôle {TYPE_SHORT[c.toType].toLowerCase()} au {fmtDate(c.toDate)}
+        {c.late && <span className="rc-late"> — en retard{c.skipped ? ` (${c.skipped} visite${c.skipped > 1 ? 's' : ''} plus ancienne${c.skipped > 1 ? 's' : ''} non recréée${c.skipped > 1 ? 's' : ''})` : ''}</span>}
+      </>
+    }
+    if (c.action === 'unmatched') {
+      return <span className="rc-muted">{c.label} : aucune échéance proche, laissé tel quel</span>
+    }
+    return <>
+      {c.label}{c.firm && <span className="rc-firm"> (déjà calé)</span>} →{' '}
+      <strong>{TYPE_SHORT[c.toType]}</strong>
+      {c.action === 'move' && <> au <strong>{fmtDate(c.toDate)}</strong></>}
+    </>
+  }
+
+  if (!report.sites.length) {
+    return <p className="ci-legend"><CheckCircle2 size={12} /> Tous les calendriers sont déjà dans l'ordre.</p>
+  }
+
+  return (
+    <div className="devfix-report">
+      <p className="ci-legend">
+        <Info size={12} /> {report.sites.length} site{report.sites.length > 1 ? 's' : ''} concerné{report.sites.length > 1 ? 's' : ''} :
+        {' '}{report.totals.retype} type{report.totals.retype > 1 ? 's' : ''} corrigé{report.totals.retype > 1 ? 's' : ''},
+        {' '}{report.totals.move} déplacement{report.totals.move > 1 ? 's' : ''},
+        {' '}{report.totals.create} visite{report.totals.create > 1 ? 's' : ''} à créer.
+      </p>
+
+      {report.dry && actionable.length > 0 && (
+        <div className="rc-toolbar">
+          <label className="sp-reset-opt">
+            <input type="checkbox" checked={allOn}
+              onChange={() => setChecked(allOn ? new Set() : new Set(actionable.map(s => s.siteId)))} />
+            <span>Tout cocher</span>
+          </label>
+          <button className="btn btn--primary" onClick={apply} disabled={busy || !checked.size}>
+            {busy
+              ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Application…</>
+              : <><Play size={14} /> Appliquer aux {checked.size} site{checked.size > 1 ? 's' : ''} coché{checked.size > 1 ? 's' : ''}</>}
+          </button>
+        </div>
+      )}
+
+      <div className="rc-sites">
+        {report.sites.map(s => {
+          const canApply = report.dry && actionable.includes(s)
+          return (
+            <div key={s.siteId} className={`rc-site${canApply && !checked.has(s.siteId) ? ' rc-site--off' : ''}`}>
+              <label className="rc-site-head">
+                {canApply && <input type="checkbox" checked={checked.has(s.siteId)} onChange={() => toggle(s.siteId)} />}
+                <span className="rc-site-name">{s.client}{s.site && s.site !== s.client ? ` — ${s.site}` : ''}</span>
+                <span className="rc-site-last">
+                  dernier : {TYPE_SHORT[s.last.type].toLowerCase()} du {fmtDate(s.last.date)}
+                </span>
+                {!report.dry && s.applied && <span className="rc-done"><CheckCircle2 size={12} /> recalé</span>}
+              </label>
+              <ul className="rc-changes">
+                {s.changes.map((c, i) => <li key={i}>{line(c)}</li>)}
+              </ul>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function TaskCard({ task }) {
   const [opts,    setOpts]    = useState({})
   const [busy,    setBusy]    = useState(null)   // null | 'dry' | 'run'
@@ -182,23 +284,33 @@ function TaskCard({ task }) {
             ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Simulation…</>
             : <><Eye size={14} /> Simuler</>}
         </button>
-        <button className="btn btn--primary" onClick={() => launch(false)} disabled={!!busy}>
-          {busy === 'run'
-            ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Exécution…</>
-            : <><Play size={14} /> Exécuter</>}
-        </button>
+        {/* Une reprise par sélection ne s'exécute qu'après la simulation,
+            sur les lignes cochées. */}
+        {!task.selectable && (
+          <button className="btn btn--primary" onClick={() => launch(false)} disabled={!!busy}>
+            {busy === 'run'
+              ? <><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Exécution…</>
+              : <><Play size={14} /> Exécuter</>}
+          </button>
+        )}
       </div>
 
       {report && (
         <>
           <div className={`devfix-banner${report.dry ? '' : ' devfix-banner--done'}`}>
             {report.dry
-              ? <><Eye size={14} /> Simulation — rien n'a été écrit. Relancez avec <strong>Exécuter</strong> pour appliquer.</>
+              ? <><Eye size={14} /> Simulation — rien n'a été écrit.
+                  {task.selectable
+                    ? <> Cochez les sites à corriger, puis <strong>Appliquer</strong>.</>
+                    : <> Relancez avec <strong>Exécuter</strong> pour appliquer.</>}</>
               : <><CheckCircle2 size={14} /> Appliqué en {(report.durationMs / 1000).toFixed(1)} s.</>}
           </div>
           {report.task === 'resync-controls' && <ResyncReport report={report} />}
           {report.task === 'resync-fiches'   && <FicheSyncReport report={report} />}
           {report.task === 'split-stock-lots' && <SplitLotsReport report={report} />}
+          {report.task === 'recaler-controles' && (
+            <RecalageReport key={`${report.dry}-${report.durationMs}`} report={report} task={task} onApplied={setReport} />
+          )}
         </>
       )}
     </div>
