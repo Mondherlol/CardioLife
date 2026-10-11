@@ -3,7 +3,8 @@ import { toast } from 'react-toastify'
 import {
   X, CalendarCheck, Building2, Calendar, Clock, User, ChevronDown, AlertTriangle, Info, Plus, Type,
 } from 'lucide-react'
-import { updateIntervention } from '../api/interventions'
+import { updateIntervention, setControlType } from '../api/interventions'
+import { useFollowingControls, RealignPreview } from './ControlAdminModals'
 import { get } from '../api/http'
 import { ClientSearchInput } from './PlanningInputs'
 import { localDateStr, localTimeStr } from '../lib/appointmentConstants'
@@ -56,6 +57,11 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
      dans la fenêtre du planning, il suit jusqu'ici, puis sur la fiche du
      contrôle et sur son bon. */
   const [title, setTitle] = useState(presetTitle || '')
+  /* Type de la visite : celui du contrôle choisi, corrigeable — « là c'est
+     l'annuel, il y a eu un semestriel entre-temps ». La suite du site peut
+     reprendre l'alternance à partir de lui. */
+  const [visitType, setVisitType] = useState(null)
+  const [realign,   setRealign]   = useState(true)
 
   useEffect(() => {
     get('/users?role=technicien&limit=100')
@@ -111,7 +117,12 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
     setTime(localTimeStr(c.scheduledDate))
     // Un titre déjà donné au contrôle est repris, sauf si on vient d'en saisir un.
     if (!presetTitle) setTitle(c.objet || '')
+    setVisitType(c.controlType)
   }
+
+  const typeChanged = picked && PERIODIC_TYPES.includes(picked.controlType)
+    && visitType && visitType !== picked.controlType
+  const following = useFollowingControls(typeChanged ? picked : null)
 
   const slotDiffers = picked && slot && slot.day !== localDateStr(picked.scheduledDate)
 
@@ -123,13 +134,14 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
     const when = joinDateTime(date, time)
     setSaving(true)
     try {
+      if (typeChanged) await setControlType(picked._id, visitType, realign)
       await updateIntervention(picked._id, {
         scheduledDate:  when,
         technicien:     t?._id || null,
         technicienName: t ? (t.fullName || t.username) : '',
         objet:          title.trim(),
       })
-      toast.success(`${CONTROL_LABELS[picked.controlType] || 'Contrôle'} programmé le ${fmtDay(when)}.`)
+      toast.success(`${CONTROL_LABELS[typeChanged ? visitType : picked.controlType] || 'Contrôle'} programmé le ${fmtDay(when)}.`)
       onDone()
     } catch (err) {
       setError(err.message || 'Programmation impossible.')
@@ -231,6 +243,29 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
                   Programmer plutôt le {CONTROL_LABELS[earlier.controlType].toLowerCase()} du {fmtDay(earlier.scheduledDate)}
                 </button>
               </div>
+            </div>
+          )}
+
+          {picked && PERIODIC_TYPES.includes(picked.controlType) && (
+            <div className="form-group">
+              <label className="form-label">Type de la visite</label>
+              <div className="ct-type-choice">
+                {PERIODIC_TYPES.map(t => (
+                  <label key={t} className={`bi-nature${visitType === t ? ' bi-nature--on' : ''}`}>
+                    <input type="radio" name="sc-type" checked={visitType === t} onChange={() => setVisitType(t)} />
+                    {CONTROL_LABELS[t]}
+                  </label>
+                ))}
+              </div>
+              {typeChanged && (
+                <>
+                  <label className="sp-reset-opt" style={{ marginTop: 8 }}>
+                    <input type="checkbox" checked={realign} onChange={e => setRealign(e.target.checked)} />
+                    <span>Réaligner les contrôles suivants du site</span>
+                  </label>
+                  {realign && <RealignPreview following={following} newType={visitType} />}
+                </>
+              )}
             </div>
           )}
 

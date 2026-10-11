@@ -62,6 +62,8 @@ router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)
 
 /* Contrôle du contrat que le client ne veut pas encore caler. */
 router.patch('/:id/attente', ctrl.setAttente)
+/* Type corrigé à la main (semestriel / annuel), avec réalignement de la suite. */
+router.patch('/:id/type', ctrl.setControlType)
 router.delete('/:id', ctrl.remove)
 
 module.exports = router

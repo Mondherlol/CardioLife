@@ -1,10 +1,122 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
-import { X, Trash2, PauseCircle, CalendarCheck, History, AlertTriangle } from 'lucide-react'
+import { X, Trash2, PauseCircle, CalendarCheck, History, AlertTriangle, Repeat } from 'lucide-react'
 import {
-  deleteIntervention, setInterventionAttente, getInterventions, getDeletedInterventions,
+  deleteIntervention, setInterventionAttente, getInterventions, getDeletedInterventions, setControlType,
 } from '../api/interventions'
 import { CONTROL_LABELS, fmtDay } from '../lib/scheduledControls'
+
+const PERIODIC = ['semestriel', 'annuel']
+const otherType = t => (t === 'annuel' ? 'semestriel' : 'annuel')
+
+/**
+ * Contrôles à venir du même site, après `iv` : ceux que le réalignement
+ * touchera. Avec le type qu'ils prendraient si `newType` est retenu.
+ */
+export function useFollowingControls(iv) {
+  const [following, setFollowing] = useState([])
+  const clientId = iv?.client?._id || iv?.client
+  const siteId   = String(iv?.site?._id || iv?.site || '')
+  useEffect(() => {
+    if (!clientId || !siteId) { setFollowing([]); return }
+    const ref = new Date(iv.completedDate || iv.scheduledDate)
+    getInterventions({ client: clientId })
+      .then(list => setFollowing((Array.isArray(list) ? list : [])
+        .filter(c => c._id !== iv._id && String(c.site?._id || c.site) === siteId
+          && c.status !== 'termine' && PERIODIC.includes(c.controlType)
+          && new Date(c.scheduledDate) > ref)
+        .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))))
+      .catch(() => setFollowing([]))
+  }, [clientId, siteId, iv?._id]) // eslint-disable-line react-hooks/exhaustive-deps
+  return following
+}
+
+/** Aperçu du réalignement : le type que chaque contrôle suivant prendrait. */
+export function RealignPreview({ following, newType }) {
+  if (!following.length) return <p className="form-hint">Aucun contrôle à venir après celui-ci sur ce site.</p>
+  let expected = otherType(newType)
+  return (
+    <ul className="ct-realign-list">
+      {following.map(c => {
+        const to = expected
+        expected = otherType(expected)
+        const changes = c.controlType !== to
+        return (
+          <li key={c._id} className={changes ? 'ct-realign--change' : ''}>
+            {fmtDay(c.scheduledDate)} : {CONTROL_LABELS[c.controlType]}
+            {changes ? <> → <strong>{CONTROL_LABELS[to]}</strong></> : ' (inchangé)'}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/**
+ * Corriger le type d'un contrôle périodique — réalisé ou à venir. Un annuel
+ * fait à la place d'un semestriel, un fichier repris de travers : l'équipe le
+ * dit, et la suite du site peut reprendre l'alternance à partir de là.
+ */
+export function ControlTypeModal({ iv, onClose, onDone }) {
+  const [type,    setType]    = useState(iv.controlType)
+  const [realign, setRealign] = useState(true)
+  const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState('')
+  const following = useFollowingControls(iv)
+
+  async function submit() {
+    setSaving(true)
+    setError('')
+    try {
+      const { intervention, realigned } = await setControlType(iv._id, type, realign)
+      toast.success(`Type corrigé${realigned ? ` — ${realigned} contrôle${realigned > 1 ? 's' : ''} suivant${realigned > 1 ? 's' : ''} réaligné${realigned > 1 ? 's' : ''}` : ''}.`)
+      onDone(intervention)
+    } catch (err) {
+      setError(err.message || 'Correction impossible.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal modal--sm">
+        <div className="modal-header">
+          <h2 className="modal-title"><Repeat size={16} /> Corriger le type du contrôle</h2>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          <p style={{ marginTop: 0 }}>
+            Contrôle du {fmtDay(iv.completedDate || iv.scheduledDate)}
+            {iv.status === 'termine' ? ' (réalisé)' : ''}.
+          </p>
+          <div className="ct-type-choice">
+            {PERIODIC.map(t => (
+              <label key={t} className={`bi-nature${type === t ? ' bi-nature--on' : ''}`}>
+                <input type="radio" name="ct-type" checked={type === t} onChange={() => setType(t)} />
+                {CONTROL_LABELS[t]}
+              </label>
+            ))}
+          </div>
+
+          <label className="sp-reset-opt" style={{ marginTop: 12 }}>
+            <input type="checkbox" checked={realign} onChange={e => setRealign(e.target.checked)} />
+            <span>Réaligner les contrôles suivants du site (alternance semestriel / annuel)</span>
+          </label>
+          {realign && <RealignPreview following={following} newType={type} />}
+
+          {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
+          <div className="modal-footer">
+            <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
+            <button type="button" className="btn btn--primary" onClick={submit}
+              disabled={saving || (type === iv.controlType && !realign)}>
+              {saving ? <span className="spinner spinner--sm" /> : 'Enregistrer'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 /* Saisie d'un motif, commune à la suppression et à la mise en attente. */
 function MotifModal({ title, icon: Icon, intro, placeholder, required, confirmLabel, danger, onClose, onConfirm }) {

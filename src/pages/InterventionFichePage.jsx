@@ -18,7 +18,7 @@ import {
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
 import { archiveRapportPdf } from '../lib/rapportPdf'
-import { DeleteInterventionModal, AttenteModal } from '../components/ControlAdminModals'
+import { DeleteInterventionModal, AttenteModal, ControlTypeModal } from '../components/ControlAdminModals'
 import { setInterventionAttente } from '../api/interventions'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { useGoBack } from '../hooks/useGoBack'
@@ -489,7 +489,7 @@ const CTRL_CTX = {
   hors_contrat: { label: 'Contrôle hors contrat', cls: 'ct-type-badge ct-type-badge--hors' },
   intervention: { label: 'Intervention ponctuelle', cls: 'ct-type-badge ct-type-badge--intervention' },
 }
-function ControlContextSection({ iv, navigate }) {
+function ControlContextSection({ iv, navigate, onEditType }) {
   const ct       = CTRL_CTX[iv.controlType] || CTRL_CTX.hors_contrat
   const contract = iv.contract
   const site     = iv.site
@@ -517,7 +517,15 @@ function ControlContextSection({ iv, navigate }) {
           )}
           <div className="ctx-item">
             <span className="ctx-label">Type</span>
-            <span className={ct.cls}>{ct.label}</span>
+            <span className="ctx-type-row">
+              <span className={ct.cls}>{ct.label}</span>
+              {/* Semestriel ou annuel : l'équipe peut corriger, la suite suit. */}
+              {onEditType && ['semestriel', 'annuel'].includes(iv.controlType) && (
+                <button type="button" className="ctx-edit-btn" onClick={onEditType} title="Corriger le type">
+                  <Pencil size={11} /> Corriger
+                </button>
+              )}
+            </span>
           </div>
           <div className="ctx-item">
             <span className="ctx-label">Site</span>
@@ -606,6 +614,7 @@ export default function InterventionFichePage() {
   const [showReopen,     setShowReopen]     = useState(false)
   const [showDelete,     setShowDelete]     = useState(false)
   const [showAttente,    setShowAttente]    = useState(false)
+  const [showType,       setShowType]       = useState(false)
   const [reopening,      setReopening]      = useState(false)
   const [starting,       setStarting]       = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
@@ -1419,7 +1428,10 @@ export default function InterventionFichePage() {
       {tab === 'fiche' && (
         <>
           {/* Contexte (installation / contrat / type) — vue non-technicien */}
-          {!isTech && <ControlContextSection iv={iv} navigate={navigate} />}
+          {!isTech && (
+            <ControlContextSection iv={iv} navigate={navigate}
+              onEditType={isAdmin ? () => setShowType(true) : null} />
+          )}
 
           {/* Notes pour le technicien */}
           {!isAdmin && iv.notes && (
@@ -2156,6 +2168,10 @@ export default function InterventionFichePage() {
       {showDelete && (
         <DeleteInterventionModal iv={iv} onClose={() => setShowDelete(false)}
           onDeleted={() => { setShowDelete(false); goBack() }} />
+      )}
+      {showType && (
+        <ControlTypeModal iv={iv} onClose={() => setShowType(false)}
+          onDone={updated => { setShowType(false); mergeIv(updated) }} />
       )}
       {showAttente && (
         <AttenteModal iv={iv} onClose={() => setShowAttente(false)}

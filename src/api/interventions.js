@@ -13,6 +13,9 @@ export const deleteIntervention = (id, motif) => del(`/interventions/${id}?motif
 export const getDeletedInterventions = ()     => get('/interventions/deleted')
 /* Contrôle du contrat mis en attente de RDV (ou remis au planning). */
 export const setInterventionAttente = (id, data) => patch(`/interventions/${id}/attente`, data)
+/* Type corrigé à la main (semestriel / annuel) ; `realign` reprend l'alternance des contrôles suivants. */
+export const setControlType = (id, controlType, realign) =>
+  patch(`/interventions/${id}/type`, { controlType, realign })
 
 /* Une visite couvre plusieurs DAE : `dea` dit de quelle fiche il s'agit.
    Les champs de visite (visa, réception, observation générale) s'envoient sans. */

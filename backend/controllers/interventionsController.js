@@ -1470,6 +1470,73 @@ async function getDeleted(req, res) {
   }
 }
 
+/* ─── Correction du type (semestriel / annuel) ───────────────── */
+/**
+ * Le type d'une visite n'est pas une règle gravée : un fichier repris sans
+ * date de pose, un annuel fait à la place d'un semestriel… L'équipe corrige le
+ * type d'un contrôle — réalisé ou à venir — et peut réaligner la suite du site :
+ * après lui, les contrôles à venir reprennent l'alternance.
+ */
+const PERIODIC_TYPES = ['semestriel', 'annuel']
+const PERIODIC_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel' }
+
+async function setControlType(req, res) {
+  try {
+    if (!isAdmin(req.user)) return res.status(403).json({ message: 'Accès refusé.' })
+    const { controlType, realign } = req.body || {}
+    if (!PERIODIC_TYPES.includes(controlType)) {
+      return res.status(400).json({ message: 'Type attendu : semestriel ou annuel.' })
+    }
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!PERIODIC_TYPES.includes(intervention.controlType)) {
+      return res.status(409).json({ message: 'Seuls les contrôles semestriels et annuels changent de type.' })
+    }
+
+    const who = { user: req.user._id, userName: req.user.fullName || req.user.username }
+    const from = intervention.controlType
+    if (from !== controlType) {
+      intervention.controlType = controlType
+      intervention.history.push({
+        ...who, action: 'type',
+        details: `Type corrigé : ${PERIODIC_LABELS[from]} → ${PERIODIC_LABELS[controlType]}`,
+      })
+      await intervention.save()
+    }
+
+    // La suite du site reprend l'alternance à partir de ce contrôle.
+    let realigned = 0
+    if (realign && intervention.site) {
+      const ref  = intervention.completedDate || intervention.scheduledDate
+      const next = await Intervention.find({
+        _id: { $ne: intervention._id }, site: intervention.site,
+        status: { $ne: 'termine' }, controlType: { $in: PERIODIC_TYPES },
+        scheduledDate: { $gt: ref },
+      }).sort({ scheduledDate: 1 })
+      let expected = controlType === 'annuel' ? 'semestriel' : 'annuel'
+      const day = new Date(ref).toLocaleDateString('fr-FR', { timeZone: 'Africa/Tunis' })
+      for (const n of next) {
+        if (n.controlType !== expected) {
+          n.history.push({
+            ...who, action: 'type',
+            details: `Type réaligné après la correction du contrôle du ${day} : `
+              + `${PERIODIC_LABELS[n.controlType]} → ${PERIODIC_LABELS[expected]}`,
+          })
+          n.controlType = expected
+          await n.save()
+          realigned++
+        }
+        expected = expected === 'annuel' ? 'semestriel' : 'annuel'
+      }
+    }
+
+    await refreshNextControl(intervention)
+    res.json({ intervention: await withParc(intervention), realigned })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
 /* ─── Mise en attente de RDV ─────────────────────────────────── */
 /**
  * Un contrôle prévu que le client ne veut pas caler maintenant. Il garde sa
@@ -1528,5 +1595,5 @@ module.exports = {
   saveFiche, removeFiche, closeIntervention, reopenIntervention,
   uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
-  saveRapportPdf, saveBonPdf, getDeleted, setAttente,
+  saveRapportPdf, saveBonPdf, getDeleted, setAttente, setControlType,
 }
