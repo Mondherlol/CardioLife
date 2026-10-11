@@ -24,6 +24,8 @@ export const removeFiche        = (id, deaId) => del(`/interventions/${id}/fiche
 // Marque l'arrivée sur site : c'est ce clic qui déverrouille la checklist.
 export const startIntervention  = (id)        => patch(`/interventions/${id}/start`, {})
 export const closeIntervention  = (id)        => patch(`/interventions/${id}/close`, {})
+/* Visite passée jamais démarrée : clôturée à sa date prévue, sans checklist. */
+export const closePastIntervention = (id)     => patch(`/interventions/${id}/close-past`, {})
 /* Rouvre une visite clôturée : la checklist redevient saisissable et la
    réouverture est tracée dans l'historique. */
 export const reopenIntervention = (id, motif) => patch(`/interventions/${id}/reopen`, { motif })

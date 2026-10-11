@@ -29,7 +29,7 @@ export async function fetchPlanningItems({ from, to, typeFilter = null }) {
           ...(typeFilter && !isDedicated(typeFilter) ? { type: typeFilter } : {}),
         }).catch(() => [])
       : Promise.resolve([]),
-    wantIntv ? getInterventions({ from, to }).catch(() => []) : Promise.resolve([]),
+    wantIntv ? getInterventions({ from, to, light: '1' }).catch(() => []) : Promise.resolve([]),
     wantInst ? getInstallations({ status: 'a_installer', from, to }).catch(() => ({ data: [] })) : Promise.resolve({ data: [] }),
     wantFmn  ? getFormations({ from, to }).catch(() => []) : Promise.resolve([]),
   ])

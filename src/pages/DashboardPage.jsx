@@ -636,7 +636,7 @@ export default function DashboardPage() {
   // Contrôles dus que le client n'a pas encore voulu caler.
   const [attenteCount, setAttenteCount] = useState(0)
   useEffect(() => {
-    getInterventions({ enAttente: '1' })
+    getInterventions({ enAttente: '1', light: '1' })
       .then(list => setAttenteCount((Array.isArray(list) ? list : []).filter(i => i.status !== 'termine').length))
       .catch(() => {})
   }, [])

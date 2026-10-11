@@ -19,7 +19,7 @@ import {
 import { get, STATIC_BASE } from '../api/http'
 import { archiveRapportPdf } from '../lib/rapportPdf'
 import { DeleteInterventionModal, AttenteModal, ControlTypeModal } from '../components/ControlAdminModals'
-import { setInterventionAttente } from '../api/interventions'
+import { setInterventionAttente, closePastIntervention } from '../api/interventions'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
@@ -615,6 +615,7 @@ export default function InterventionFichePage() {
   const [showDelete,     setShowDelete]     = useState(false)
   const [showAttente,    setShowAttente]    = useState(false)
   const [showType,       setShowType]       = useState(false)
+  const [closingPast,    setClosingPast]    = useState(false)
   const [reopening,      setReopening]      = useState(false)
   const [starting,       setStarting]       = useState(false)
   const [lightbox,       setLightbox]       = useState(null)
@@ -1320,6 +1321,26 @@ export default function InterventionFichePage() {
           )}
           {/* Un contrôle du contrat ne se supprime pas : il reste dû. Il se
               met en attente de RDV quand le client ne veut pas le caler. */}
+          {/* Visite passée jamais démarrée (faite sur papier…) : clôturée à sa
+              date prévue, sans checklist. Admin et superadmin. */}
+          {['admin', 'superadmin'].includes(user?.role) && notStarted
+            && iv.scheduledDate && new Date(iv.scheduledDate) < new Date() && (
+            <button className="btn btn--ghost" disabled={closingPast} onClick={async () => {
+              if (!window.confirm(`Clôturer cette visite au ${fmt(iv.scheduledDate)}, sa date prévue, sans saisir de checklist ?`)) return
+              setClosingPast(true)
+              try {
+                mergeIv(await closePastIntervention(id))
+                toast.success(`Visite clôturée au ${fmt(iv.scheduledDate)}.`)
+              } catch (err) {
+                toast.error(err.message)
+              } finally {
+                setClosingPast(false)
+              }
+            }}>
+              {closingPast ? <span className="spinner spinner--sm" /> : <CheckCircle2 size={14} />}
+              Clôturer (visite passée)
+            </button>
+          )}
           {isAdmin && notStarted && iv.controlType !== 'intervention' && !iv.enAttente && (
             <button className="btn btn--ghost" onClick={() => setShowAttente(true)}>
               <Clock size={14} /> Mettre en attente

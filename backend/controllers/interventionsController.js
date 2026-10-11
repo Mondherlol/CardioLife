@@ -504,7 +504,13 @@ async function getAll(req, res) {
       ]
     }
 
-    const interventions = await Intervention.find(query)
+    /* `light=1` (planning, tableau de bord) : ce qu'il faut pour placer et
+       nommer une visite, sans les checklists, l'historique ni le bon — le gros
+       du poids d'une intervention. */
+    const projection = req.query.light === '1'
+      ? '-fiches -fiche -history -rapport -bon -visite -formation'
+      : undefined
+    const interventions = await Intervention.find(query, projection)
       .sort({ scheduledDate: -1 })
       .populate('technicien', 'fullName username')
       .populate('client', 'name')
@@ -992,6 +998,49 @@ async function closeIntervention(req, res) {
     await pushFicheToParc(intervention, req.user)
     await refreshNextControl(intervention)
     res.json(intervention)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Clôture express d'une visite passée ────────────────────── */
+/**
+ * Une visite dont la date est passée, jamais démarrée dans l'application —
+ * faite sur papier, ou avant que l'équipe n'utilise l'outil. Rien à saisir :
+ * on la clôture à la date où elle était prévue, sans checklist. L'échéance du
+ * site repart de là.
+ *
+ * Réservée aux rôles admin et superadmin : c'est une déclaration, pas un
+ * relevé du terrain. L'historique le dit.
+ */
+async function closePast(req, res) {
+  try {
+    if (!ADMIN_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Seuls les administrateurs peuvent clôturer sans saisie.' })
+    }
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (intervention.status !== 'planifie') {
+      return res.status(409).json({ message: 'Seule une visite pas encore démarrée se clôture sans saisie.' })
+    }
+    const when = intervention.scheduledDate
+    if (!when || new Date(when) > new Date()) {
+      return res.status(409).json({ message: "La date prévue n'est pas encore passée." })
+    }
+
+    intervention.status        = 'termine'
+    intervention.startedAt     = when
+    intervention.completedDate = when
+    intervention.enAttente     = false
+    intervention.history.push({
+      action:   'cloture',
+      user:     req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details:  `Visite passée clôturée sans saisie, à sa date prévue (${new Date(when).toLocaleDateString('fr-FR', { timeZone: 'Africa/Tunis' })})`,
+    })
+    await intervention.save()
+    await refreshNextControl(intervention)
+    res.json(await withParc(intervention))
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -1595,5 +1644,5 @@ module.exports = {
   saveFiche, removeFiche, closeIntervention, reopenIntervention,
   uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
-  saveRapportPdf, saveBonPdf, getDeleted, setAttente, setControlType,
+  saveRapportPdf, saveBonPdf, getDeleted, setAttente, setControlType, closePast,
 }

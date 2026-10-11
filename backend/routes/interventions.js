@@ -33,6 +33,8 @@ router.patch('/:id/rapport', ctrl.submitRapport)
 router.patch('/:id/fiche',   ctrl.saveFiche)
 router.delete('/:id/fiche/:deaId', ctrl.removeFiche)
 router.patch('/:id/close',   ctrl.closeIntervention)
+/* Visite passée, jamais démarrée : clôturée à sa date prévue, sans saisie. */
+router.patch('/:id/close-past', ctrl.closePast)
 /* Oubli constaté juste après la clôture : la visite se rouvre, et la
    réouverture apparaît dans l'historique. */
 router.patch('/:id/reopen',  ctrl.reopenIntervention)

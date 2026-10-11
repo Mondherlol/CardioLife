@@ -18,12 +18,15 @@ import FormationModal from '../components/FormationModal'
 import ControlCreateModal from '../components/ControlCreateModal'
 import ScheduleControlModal from '../components/ScheduleControlModal'
 import { isToSchedule } from '../lib/scheduledControls'
+import {
+  FRESH_MS, rangeKey, getRange, setRange, markAllStale, clearRanges, side, loadView, saveView,
+} from '../lib/planningCache'
 import { AttenteListModal } from '../components/ControlAdminModals'
 import AppointmentViewModal from '../components/AppointmentViewModal'
 import { useAuth } from '../context/AuthContext'
 import {
   TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime, localDateStr,
-  DEDICATED_TYPES, CONTROL_TYPES, controlTypeToPlanning, controlEventTitle,
+  DEDICATED_TYPES, controlTypeToPlanning, controlEventTitle,
   placeTitle, eventTooltip,
 } from '../lib/appointmentConstants'
 
@@ -226,13 +229,19 @@ export default function PlanningPage() {
      (alerte du tableau de bord) ouvre directement la liste. */
   const [params, setParams] = useSearchParams()
   const [attenteOpen,  setAttenteOpen]  = useState(params.get('attente') === '1')
-  const [attenteCount, setAttenteCount] = useState(0)
+  const [attenteCount, setAttenteCount] = useState(side.attenteCount)
   const [attenteKey,   setAttenteKey]   = useState(0)
   const [viewing,     setViewing]     = useState(null)   // RDV consulté sans droit d'édition
-  const [todayEvents, setTodayEvents] = useState([])
-  const [upcoming,     setUpcoming]     = useState([])   // contrôles à venir, tous horizons
+  // Dernières valeurs connues d'abord : le retour sur la page est immédiat.
+  const [todayEvents, setTodayEvents] = useState(side.today || [])
+  const [upcoming,     setUpcoming]     = useState(side.upcoming || [])   // contrôles à venir, tous horizons
   const [upcomingOpen, setUpcomingOpen] = useState(false)
-  const [typeFilter,  setTypeFilter]  = useState(null)
+  // Vue, date et filtre retrouvés au retour d'une fiche.
+  const [initialView] = useState(() => loadView())
+  const [typeFilter,  setTypeFilter]  = useState(initialView.typeFilter || null)
+  useEffect(() => { saveView({ typeFilter }) }, [typeFilter])
+  // Revenir sur la page : tout ce qui est en mémoire sera revérifié.
+  useState(() => { markAllStale(); return null })
   const [users,       setUsers]       = useState([])
 
   /* Le technicien lit le planning, il ne l'écrit pas : le serveur refuse ses
@@ -248,7 +257,7 @@ export default function PlanningPage() {
     const { start, end } = todayRange()
     Promise.all([
       getAppointments({ start, end }).catch(() => []),
-      getInterventions({ from: start, to: end }).catch(() => []),
+      getInterventions({ from: start, to: end, light: '1' }).catch(() => []),
       getInstallations({ status: 'a_installer', from: start, to: end }).catch(() => ({ data: [] })),
       getFormations({ from: start, to: end }).catch(() => []),
     ]).then(([appts, intvs, instRes, fmns]) => {
@@ -276,6 +285,7 @@ export default function PlanningPage() {
           clientName: f.clientName, status: f.status, _raw: f,
         })),
       ].sort((a, b) => new Date(a.start) - new Date(b.start))
+      side.today = items
       setTodayEvents(items)
     }).catch(() => {})
   }, [])
@@ -286,69 +296,77 @@ export default function PlanningPage() {
      mois à la fois, cette liste donne la suite — y compris les échéances les
      plus lointaines — dans l'ordre où elles tomberont. */
   const fetchUpcoming = useCallback(() => {
-    getInterventions()
+    getInterventions({ light: '1' })
       .then(data => {
         const now = new Date(); now.setHours(0, 0, 0, 0)
         const list = Array.isArray(data) ? data : []
-        setAttenteCount(list.filter(i => i.enAttente && i.status !== 'termine').length)
-        setUpcoming(
-          list
-            .filter(i => i.status !== 'termine' && i.scheduledDate && !i.enAttente
-              && new Date(i.scheduledDate) >= now)
-            .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
-        )
+        side.attenteCount = list.filter(i => i.enAttente && i.status !== 'termine').length
+        side.upcoming = list
+          .filter(i => i.status !== 'termine' && i.scheduledDate && !i.enAttente
+            && new Date(i.scheduledDate) >= now)
+          .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
+        setAttenteCount(side.attenteCount)
+        setUpcoming(side.upcoming)
       })
       .catch(() => {})
   }, [])
 
   useEffect(() => { fetchUpcoming() }, [fetchUpcoming])
 
+  /* Après une modification faite ici : les périodes en mémoire ne disent plus
+     vrai, on repart du serveur. */
   function refetch() {
+    clearRanges()
     calendarRef.current?.getApi().refetchEvents()
     fetchToday()
   }
 
-  const loadEvents = useCallback((info, success, fail) => {
-    // Sources : RDV (appointments), contrôles (interventions), poses (installations
-    // à installer), formations. Un filtre par type ne montre que la source correspondante.
-    const wantAppt = !typeFilter || !DEDICATED_TYPES.includes(typeFilter)
-    const wantIntv = !typeFilter || CONTROL_TYPES.includes(typeFilter)
-    const wantInst = !typeFilter || typeFilter === 'installation'
-    const wantFmn  = !typeFilter || typeFilter === 'formation'
+  /* Tout ce qu'affiche une période, toutes sources confondues : le filtre par
+     type s'applique ensuite, sans requête — changer de filtre est immédiat. */
+  function fetchRange(info) {
+    return Promise.all([
+      getAppointments({ start: info.startStr, end: info.endStr }).catch(() => []),
+      getInterventions({ from: info.startStr, to: info.endStr, light: '1' }).catch(() => []),
+      getInstallations({ status: 'a_installer', from: info.startStr, to: info.endStr }).catch(() => ({ data: [] })),
+      getFormations({ from: info.startStr, to: info.endStr }).catch(() => []),
+    ]).then(([appts, intvs, instRes, fmns]) => ({
+      appts: Array.isArray(appts) ? appts : [],
+      intvs: Array.isArray(intvs) ? intvs : [],
+      insts: Array.isArray(instRes) ? instRes : (instRes?.data || []),
+      fmns:  Array.isArray(fmns) ? fmns : [],
+    }))
+  }
 
-    const apptP = wantAppt
-      ? getAppointments({
-          start: info.startStr, end: info.endStr,
-          ...(typeFilter && !DEDICATED_TYPES.includes(typeFilter) ? { type: typeFilter } : {}),
-        }).catch(() => [])
-      : Promise.resolve([])
-    const intvP = wantIntv
-      ? getInterventions({ from: info.startStr, to: info.endStr }).catch(() => [])
-      : Promise.resolve([])
-    const instP = wantInst
-      ? getInstallations({ status: 'a_installer', from: info.startStr, to: info.endStr }).catch(() => ({ data: [] }))
-      : Promise.resolve({ data: [] })
-    const fmnP = wantFmn
-      ? getFormations({ from: info.startStr, to: info.endStr }).catch(() => [])
-      : Promise.resolve([])
-
-    Promise.all([apptP, intvP, instP, fmnP])
-      .then(([appts, intvs, instRes, fmns]) => {
-        const insts = Array.isArray(instRes) ? instRes : (instRes?.data || [])
-        // Les contrôles arrivent d'une seule requête : le tri semestriel /
-        // annuel / hors contrat se fait ici.
-        const keepIntv = i => i.scheduledDate &&
-          (!typeFilter || controlTypeToPlanning(i.controlType) === typeFilter)
-
-        success([
-          ...(Array.isArray(appts) ? appts : []).map(toFCEvent),
-          ...(Array.isArray(intvs) ? intvs : []).filter(keepIntv).map(i => toInterventionEvent(i, !readOnlyPlanning)),
-          ...insts.filter(i => i.scheduledDate).map(toInstallationEvent),
-          ...(Array.isArray(fmns) ? fmns : []).map(toFormationEvent),
-        ])
-      })
-      .catch(fail)
+  const buildEvents = useCallback(({ appts, intvs, insts, fmns }) => {
+    const want = t => !typeFilter || t === typeFilter
+    return [
+      ...appts.filter(a => !typeFilter || (!DEDICATED_TYPES.includes(typeFilter) && a.type === typeFilter)).map(toFCEvent),
+      // Les contrôles arrivent d'une seule requête : le tri semestriel /
+      // annuel / hors contrat se fait ici.
+      ...intvs.filter(i => i.scheduledDate && want(controlTypeToPlanning(i.controlType)))
+        .map(i => toInterventionEvent(i, !readOnlyPlanning)),
+      ...(want('installation') ? insts.filter(i => i.scheduledDate).map(toInstallationEvent) : []),
+      ...(want('formation') ? fmns.map(toFormationEvent) : []),
+    ]
   }, [typeFilter, readOnlyPlanning])
+
+  /* Période déjà vue : affichée tout de suite depuis la mémoire, puis
+     revérifiée en arrière-plan. Le calendrier n'est redessiné que si le serveur
+     dit autre chose. */
+  const loadEvents = useCallback((info, success, fail) => {
+    const key = rangeKey(info)
+    const hit = getRange(key)
+    if (hit) success(buildEvents(hit.data))
+    if (hit && Date.now() - hit.at < FRESH_MS) return
+
+    fetchRange(info)
+      .then(data => {
+        const changed = setRange(key, data)
+        if (!hit) success(buildEvents(data))
+        else if (changed) calendarRef.current?.getApi().refetchEvents()
+      })
+      .catch(err => { if (!hit) fail(err) })
+  }, [buildEvents])
 
   function handleSelect(info) {
     // Le technicien ne compose pas le planning : sélectionner un créneau ne
@@ -549,7 +567,13 @@ export default function PlanningPage() {
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
           locale={frLocale}
-          initialView="dayGridMonth"
+          initialView={initialView.view || 'dayGridMonth'}
+          initialDate={initialView.date || undefined}
+          // Vue et date retenues : le retour d'une fiche revient ici même.
+          datesSet={info => saveView({
+            view: info.view.type,
+            date: info.view.calendar.getDate().toISOString(),
+          })}
           headerToolbar={{
             left:   'prev,next today',
             center: 'title',
