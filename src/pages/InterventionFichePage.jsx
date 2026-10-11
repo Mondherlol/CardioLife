@@ -1138,6 +1138,29 @@ export default function InterventionFichePage() {
      pouvoir préparer sa tournée et voir ce qui l'attend — mais ne se saisit
      pas. Le verrou tombe au clic sur « Démarrer l'intervention ». */
   const notStarted    = iv.status === 'planifie'
+  /* Visite passée jamais démarrée (faite sur papier…) : clôturée à sa date
+     prévue, sans checklist. Admin et superadmin, depuis le bandeau « non
+     démarrée » — là où l'on constate qu'elle n'a jamais été saisie. */
+  const canClosePast  = ['admin', 'superadmin'].includes(user?.role) && notStarted
+    && Boolean(iv.scheduledDate) && new Date(iv.scheduledDate) < new Date()
+  async function handleClosePast() {
+    if (!window.confirm(`Clôturer cette visite au ${fmt(iv.scheduledDate)}, sa date prévue, sans saisir de checklist ?`)) return
+    setClosingPast(true)
+    try {
+      mergeIv(await closePastIntervention(id))
+      toast.success(`Visite clôturée au ${fmt(iv.scheduledDate)}.`)
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setClosingPast(false)
+    }
+  }
+  const closePastBtn = canClosePast && (
+    <button className="btn btn--ghost fiche-start-btn" onClick={handleClosePast} disabled={closingPast}>
+      {closingPast ? <span className="spinner spinner--sm" /> : <CheckCircle2 size={15} />}
+      Clôturer à la date prévue
+    </button>
+  )
   const readOnly      = correcting ? false : (!canFill || isTermine || notStarted)
   /* Aucune fiche enregistrée côté serveur : rien n'a encore été saisi. Les
      entrées locales, elles, sont pré-remplies depuis le parc et ne disent rien. */
@@ -1321,26 +1344,6 @@ export default function InterventionFichePage() {
           )}
           {/* Un contrôle du contrat ne se supprime pas : il reste dû. Il se
               met en attente de RDV quand le client ne veut pas le caler. */}
-          {/* Visite passée jamais démarrée (faite sur papier…) : clôturée à sa
-              date prévue, sans checklist. Admin et superadmin. */}
-          {['admin', 'superadmin'].includes(user?.role) && notStarted
-            && iv.scheduledDate && new Date(iv.scheduledDate) < new Date() && (
-            <button className="btn btn--ghost" disabled={closingPast} onClick={async () => {
-              if (!window.confirm(`Clôturer cette visite au ${fmt(iv.scheduledDate)}, sa date prévue, sans saisir de checklist ?`)) return
-              setClosingPast(true)
-              try {
-                mergeIv(await closePastIntervention(id))
-                toast.success(`Visite clôturée au ${fmt(iv.scheduledDate)}.`)
-              } catch (err) {
-                toast.error(err.message)
-              } finally {
-                setClosingPast(false)
-              }
-            }}>
-              {closingPast ? <span className="spinner spinner--sm" /> : <CheckCircle2 size={14} />}
-              Clôturer (visite passée)
-            </button>
-          )}
           {isAdmin && notStarted && iv.controlType !== 'intervention' && !iv.enAttente && (
             <button className="btn btn--ghost" onClick={() => setShowAttente(true)}>
               <Clock size={14} /> Mettre en attente
@@ -1594,14 +1597,17 @@ export default function InterventionFichePage() {
                 </p>
               </div>
               <Countdown date={iv.scheduledDate} />
-              <button
-                className="btn btn--primary fiche-start-btn"
-                onClick={handleStart}
-                disabled={starting}
-              >
-                {starting ? <span className="spinner spinner--sm" /> : <PlayCircle size={15} />}
-                Démarrer l'intervention
-              </button>
+              <div className="fiche-start-actions">
+                {closePastBtn}
+                <button
+                  className="btn btn--primary fiche-start-btn"
+                  onClick={handleStart}
+                  disabled={starting}
+                >
+                  {starting ? <span className="spinner spinner--sm" /> : <PlayCircle size={15} />}
+                  Démarrer l'intervention
+                </button>
+              </div>
             </div>
           )}
           {notStarted && !canFill && (
@@ -1611,6 +1617,7 @@ export default function InterventionFichePage() {
                 Intervention non démarrée : le technicien n'est pas encore
                 intervenu. La checklist affichée reprend le parc du site.
               </span>
+              {closePastBtn && <span style={{ marginLeft: 'auto' }}>{closePastBtn}</span>}
             </div>
           )}
           {/* Le superadmin qui ouvre une fiche encore vierge doit savoir qu'il
