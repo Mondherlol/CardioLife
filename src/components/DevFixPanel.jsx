@@ -166,6 +166,12 @@ function RecalageReport({ report, task, onApplied }) {
         {c.late && <span className="rc-late"> — en retard{c.skipped ? ` (${c.skipped} visite${c.skipped > 1 ? 's' : ''} plus ancienne${c.skipped > 1 ? 's' : ''} non recréée${c.skipped > 1 ? 's' : ''})` : ''}</span>}
       </>
     }
+    if (c.action === 'duplicate') {
+      return <>
+        <strong>Supprimer</strong> {c.label} : doublon de {c.of}, le même jour
+        <span className="rc-firm"> (copie gardée dans l'historique des suppressions)</span>
+      </>
+    }
     if (c.action === 'unmatched') {
       return <span className="rc-muted">{c.label} : aucune échéance proche, laissé tel quel</span>
     }
@@ -186,7 +192,8 @@ function RecalageReport({ report, task, onApplied }) {
         <Info size={12} /> {report.sites.length} site{report.sites.length > 1 ? 's' : ''} concerné{report.sites.length > 1 ? 's' : ''} :
         {' '}{report.totals.retype} type{report.totals.retype > 1 ? 's' : ''} corrigé{report.totals.retype > 1 ? 's' : ''},
         {' '}{report.totals.move} déplacement{report.totals.move > 1 ? 's' : ''},
-        {' '}{report.totals.create} visite{report.totals.create > 1 ? 's' : ''} à créer.
+        {' '}{report.totals.create} visite{report.totals.create > 1 ? 's' : ''} à créer
+        {report.totals.duplicate ? `, ${report.totals.duplicate} doublon${report.totals.duplicate > 1 ? 's' : ''} à supprimer` : ''}.
       </p>
 
       {report.dry && actionable.length > 0 && (

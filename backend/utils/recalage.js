@@ -1,4 +1,5 @@
 const Intervention = require('../models/Intervention')
+const DeletionLog  = require('../models/DeletionLog')
 const Site         = require('../models/Site')
 const { syncSiteNextControl } = require('./controls')
 
@@ -86,12 +87,14 @@ function planSite(controls, today = new Date()) {
     .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
   if (!pending.length) return null
 
-  // Échéances attendues après le dernier contrôle, jusqu'au-delà du dernier prévu.
+  /* Échéances attendues après le dernier contrôle, jusqu'au-delà du dernier
+     prévu — et au moins autant que de contrôles à ranger : deux visites
+     calées le même jour en octobre laissent l'autre partir en avril. */
   const limit = addMonths(new Date(Math.max(new Date(pending.at(-1).scheduledDate), today)), 3)
   const slots = []
   for (let k = 1; k <= 40; k++) {
     const date = addMonths(dateOf(last), 6 * k)
-    if (date > limit) break
+    if (date > limit && slots.length >= pending.length) break
     slots.push({ date, type: k % 2 ? opposite(last.controlType) : last.controlType, taken: null })
   }
 
@@ -110,12 +113,24 @@ function planSite(controls, today = new Date()) {
   const changes = []
   const label   = c => `${LABEL[c.controlType]} du ${fmt(c.scheduledDate)}`
 
-  // 1. Ce que l'équipe a calé : la date reste, le type suit l'échéance.
+  /* 1. Ce que l'équipe a calé : la date reste, le type suit l'échéance. Quand
+     deux contrôles calés visent le même créneau, celui qui a déjà le bon type
+     le prend ; l'autre, s'il tombe le même jour qu'une visite rattachée, est
+     un doublon de cette visite. */
   const firm = pending.filter(isFirm)
   const theo = pending.filter(c => !isFirm(c))
+  const fits = c => nearestFree(c, FIRM_WINDOW)?.type === c.controlType
+  firm.sort((a, b) => fits(b) - fits(a) || new Date(a.scheduledDate) - new Date(b.scheduledDate))
   for (const c of firm) {
     const s = nearestFree(c, FIRM_WINDOW)
-    if (!s) { changes.push({ action: 'unmatched', id: c._id, label: label(c), firm: true }); continue }
+    if (!s) {
+      const t = new Date(c.scheduledDate).getTime()
+      const twin = slots.find(x => x.taken && Math.abs(new Date(x.taken.scheduledDate) - t) <= 7 * DAY)
+      changes.push(twin && c.status === 'planifie'
+        ? { action: 'duplicate', id: c._id, label: label(c), firm: true, of: label(twin.taken) }
+        : { action: 'unmatched', id: c._id, label: label(c), firm: true })
+      continue
+    }
     s.taken = c
     if (s.type !== c.controlType) {
       changes.push({
@@ -174,7 +189,7 @@ async function recalerControles({ dry = true, selection, userId = null } = {}) {
   const siteInfo = Object.fromEntries(siteDocs.map(s => [String(s._id), s]))
 
   const wanted = Array.isArray(selection) ? new Set(selection.map(String)) : null
-  const report = { task: 'recaler-controles', dry, sites: [], totals: { sites: 0, retype: 0, move: 0, create: 0, applied: 0 } }
+  const report = { task: 'recaler-controles', dry, sites: [], totals: { sites: 0, retype: 0, move: 0, create: 0, duplicate: 0, applied: 0 } }
 
   for (const [siteId, list] of Object.entries(bySite)) {
     const plan = planSite(list)
@@ -211,6 +226,20 @@ async function recalerControles({ dry = true, selection, userId = null } = {}) {
             details: `${LABEL[c.toType]} recréé : visite manquante dans le calendrier du site`,
           }],
         })
+        continue
+      }
+      if (c.action === 'duplicate') {
+        // Doublon d'une visite du même jour : supprimé, copie gardée au journal.
+        const dup = await Intervention.findById(c.id)
+        if (!dup || dup.status !== 'planifie') continue
+        await DeletionLog.create({
+          kind: 'intervention', refId: dup._id,
+          label: `Contrôle ${dup.controlType}`, clientName: dup.clientName, siteName: dup.siteName,
+          reason: `Doublon de « ${c.of} » (recalage du calendrier)`,
+          snapshot: dup.toObject({ flattenMaps: true }),
+          deletedBy: userId || undefined, deletedByName: 'Recalage du calendrier',
+        })
+        await dup.deleteOne()
         continue
       }
       const doc = await Intervention.findById(c.id)
