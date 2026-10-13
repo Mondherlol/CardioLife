@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { X, Archive, Building2, ChevronRight, MapPin } from 'lucide-react'
 import { formatDate } from './siteHelpers'
 
@@ -12,6 +13,10 @@ import { formatDate } from './siteHelpers'
  * `installations` : le parc au format « installation » (voir `deaParc`).
  */
 export default function ArmoirePilesModal({ installations, onClose, onOpenClient }) {
+  const navigate = useNavigate()
+  // Site et appareil ouvrent leur fiche ; la fenêtre se ferme en partant.
+  const go = path => { onClose(); navigate(path) }
+
   useEffect(() => {
     const onKey = e => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -28,8 +33,11 @@ export default function ArmoirePilesModal({ installations, onClose, onOpenClient
       }
       const c = byClient.get(id)
       const siteName = inst.site?.name || '—'
-      if (!c.sites.has(siteName)) c.sites.set(siteName, { name: siteName, city: inst.site?.address?.city, deas: [] })
-      c.sites.get(siteName).deas.push(inst)
+      const siteKey  = String(inst.site?._id || siteName)
+      if (!c.sites.has(siteKey)) {
+        c.sites.set(siteKey, { key: siteKey, id: inst.site?._id || null, name: siteName, city: inst.site?.address?.city, deas: [] })
+      }
+      c.sites.get(siteKey).deas.push(inst)
       c.count++
     }
     return [...byClient.values()]
@@ -65,19 +73,24 @@ export default function ArmoirePilesModal({ installations, onClose, onOpenClient
                   {c.id && <ChevronRight size={14} />}
                 </button>
                 {c.sites.map(s => (
-                  <div key={s.name} className="arm-alert-site">
-                    <span className="arm-alert-site-name">
+                  <div key={s.key} className="arm-alert-site">
+                    <button type="button" className="arm-alert-site-name arm-alert-link" disabled={!s.id}
+                      onClick={() => s.id && go(`/sites/${s.id}`)} title="Ouvrir la fiche du site">
                       <MapPin size={11} /> {s.name}{s.city ? ` · ${s.city}` : ''}
-                    </span>
+                      {s.id && <ChevronRight size={12} />}
+                    </button>
                     <ul>
                       {s.deas.map(d => (
                         <li key={d._id}>
-                          <span>{[d.deviceType, d.serialNumber].filter(Boolean).join(' · ') || 'DAE'}</span>
-                          {d.location && <span className="arm-alert-muted">{d.location}</span>}
-                          <span className="arm-alert-muted">
-                            {d.armoire.model ? `Armoire ${d.armoire.model}` : 'Armoire'}
-                            {d.armoire.pilesCheckedAt ? ` · constaté le ${formatDate(d.armoire.pilesCheckedAt)}` : ''}
-                          </span>
+                          <button type="button" className="arm-alert-dea" onClick={() => go(`/devices/${d._id}`)}
+                            title="Ouvrir la fiche de l'appareil">
+                            <span>{[d.deviceType, d.serialNumber].filter(Boolean).join(' · ') || 'DAE'}</span>
+                            {d.location && <span className="arm-alert-muted">{d.location}</span>}
+                            <span className="arm-alert-muted">
+                              {d.armoire.model ? `Armoire ${d.armoire.model}` : 'Armoire'}
+                              {d.armoire.pilesCheckedAt ? ` · constaté le ${formatDate(d.armoire.pilesCheckedAt)}` : ''}
+                            </span>
+                          </button>
                         </li>
                       ))}
                     </ul>

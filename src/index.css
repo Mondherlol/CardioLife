@@ -21956,3 +21956,13 @@ div.att-main { cursor: default; }
   margin-right: 4px; padding: 0 4px; border-radius: 4px;
   background: #a855f7; color: #fff; font-size: 9.5px; font-weight: 700; vertical-align: 1px;
 }
+
+/* Fenêtre « piles à remplacer » : sites et appareils ouvrent leur fiche. */
+.arm-alert-link, .arm-alert-dea {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 2px 4px; margin-left: -4px; border: none; border-radius: 6px;
+  background: none; font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.arm-alert-dea { display: flex; gap: 2px 10px; width: 100%; padding: 4px; }
+.arm-alert-link:hover:not(:disabled), .arm-alert-dea:hover { background: var(--gray-100); color: var(--brand); }
+.arm-alert-link:disabled { cursor: default; }
