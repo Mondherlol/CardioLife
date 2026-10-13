@@ -282,12 +282,16 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
               placeholder="ex. Contrôle + formation des nouveaux agents" />
           </div>
 
-          {picked && (picked.formation?.formation
+          {/* Toujours proposé : on coche « avec formation » avant même d'avoir
+              choisi le contrôle. Une formation existante se choisit une fois le
+              contrôle (donc le site) connu. */}
+          {picked?.formation?.formation
             ? <p className="form-hint">
                 <GraduationCap size={11} /> Une formation accompagne déjà ce contrôle
                 {picked.formation.titre ? ` (${picked.formation.titre})` : ''} — elle se gère dans l'onglet Formation de sa fiche.
               </p>
-            : <FormationLinkFields siteId={picked.site?._id || picked.site} value={fLink} onChange={setFLink} />)}
+            : <FormationLinkFields siteId={picked?.site?._id || picked?.site} value={fLink} onChange={setFLink}
+                noSiteHint="Choisissez d'abord le client et le contrôle à programmer." />}
 
           <div className="form-row">
             <div className="form-group">

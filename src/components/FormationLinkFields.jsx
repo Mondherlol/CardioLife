@@ -18,7 +18,7 @@ const STATUS = { planifie: 'Programmée', en_cours: 'En cours', fait: 'Réalisé
  * Partagé par la programmation d'un contrôle et la création d'une
  * intervention ; l'onglet Formation de la fiche le réutilise (`alwaysOn`).
  */
-export default function FormationLinkFields({ siteId, value, onChange, alwaysOn = false }) {
+export default function FormationLinkFields({ siteId, value, onChange, alwaysOn = false, noSiteHint = "Choisissez d'abord le site." }) {
   const [options, setOptions] = useState([])
   const set = patch => onChange({ ...value, ...patch })
   const on  = alwaysOn || value.enabled
@@ -65,7 +65,7 @@ export default function FormationLinkFields({ siteId, value, onChange, alwaysOn 
               </div>
             </div>
           ) : !siteId ? (
-            <p className="form-hint">Choisissez d'abord le site.</p>
+            <p className="form-hint">{noSiteHint}</p>
           ) : options.length === 0 ? (
             <p className="form-hint">Aucune formation enregistrée pour ce site.</p>
           ) : (

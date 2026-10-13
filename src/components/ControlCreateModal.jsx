@@ -351,9 +351,9 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
             </div>
           </div>
 
-          {form.siteId && (
-            <FormationLinkFields siteId={form.siteId} value={fLink} onChange={setFLink} />
-          )}
+          {/* Toujours proposé ; une formation existante se choisit une fois le site connu. */}
+          <FormationLinkFields siteId={form.siteId} value={fLink} onChange={setFLink}
+            noSiteHint="Choisissez d'abord le client et le site." />
 
           <div className="form-group">
             <label className="form-label"><StickyNote size={12} /> Notes</label>
