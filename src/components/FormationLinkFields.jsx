@@ -56,11 +56,11 @@ export default function FormationLinkFields({ siteId, value, onChange, alwaysOn 
             <div className="form-row">
               <div className="form-group">
                 <label className="form-label">Intitulé</label>
-                <input className="form-input" value={value.title} onChange={e => set({ title: e.target.value })} />
+                <input className="form-input form-input--plain" value={value.title} onChange={e => set({ title: e.target.value })} />
               </div>
               <div className="form-group" style={{ maxWidth: 160 }}>
                 <label className="form-label">Agents à former</label>
-                <input className="form-input" type="number" min="0" value={value.participantsCount}
+                <input className="form-input form-input--plain" type="number" min="0" value={value.participantsCount}
                   onChange={e => set({ participantsCount: e.target.value })} placeholder="ex. 12" />
               </div>
             </div>
@@ -70,7 +70,7 @@ export default function FormationLinkFields({ siteId, value, onChange, alwaysOn 
             <p className="form-hint">Aucune formation enregistrée pour ce site.</p>
           ) : (
             <div className="fiche-select-wrap">
-              <select className="form-input" value={value.formationId} onChange={e => set({ formationId: e.target.value })}>
+              <select className="form-input form-input--plain" value={value.formationId} onChange={e => set({ formationId: e.target.value })}>
                 <option value="">— Choisir une formation —</option>
                 {options.map(f => (
                   <option key={f._id} value={f._id}>

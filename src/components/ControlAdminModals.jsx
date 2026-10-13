@@ -148,7 +148,7 @@ function MotifModal({ title, icon: Icon, intro, placeholder, required, confirmLa
           <p style={{ marginTop: 0 }}>{intro}</p>
           <div className="form-group">
             <label className="form-label">Motif{required ? ' *' : ''}</label>
-            <textarea className="form-input" rows={3} autoFocus value={motif}
+            <textarea className="form-input form-input--plain" rows={3} autoFocus value={motif}
               placeholder={placeholder} onChange={e => setMotif(e.target.value)} />
           </div>
           {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}

@@ -161,7 +161,7 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--md modal--dropdown">
+      <div className="modal modal--md">
         <div className="modal-header">
           <h2 className="modal-title"><CalendarCheck size={16} /> Programmer un contrôle</h2>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
@@ -278,7 +278,7 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
 
           <div className="form-group">
             <label className="form-label"><Type size={12} /> Titre <span className="form-label-opt">(facultatif)</span></label>
-            <input className="form-input" value={title} onChange={e => setTitle(e.target.value)}
+            <input className="form-input form-input--plain" value={title} onChange={e => setTitle(e.target.value)}
               placeholder="ex. Contrôle + formation des nouveaux agents" />
           </div>
 
@@ -296,7 +296,7 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
           <div className="form-row">
             <div className="form-group">
               <label className="form-label"><Calendar size={12} /> Date *</label>
-              <input type="date" className="form-input" value={date} onChange={e => setDate(e.target.value)} />
+              <input type="date" className="form-input form-input--plain" value={date} onChange={e => setDate(e.target.value)} />
               {slotDiffers && date !== slot.day && (
                 <button type="button" className="sc-slot-btn"
                   onClick={() => { setDate(slot.day); if (slot.time) setTime(slot.time) }}>
@@ -306,14 +306,14 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
             </div>
             <div className="form-group">
               <label className="form-label"><Clock size={12} /> Heure</label>
-              <input type="time" className="form-input" value={time} onChange={e => setTime(e.target.value)} />
+              <input type="time" className="form-input form-input--plain" value={time} onChange={e => setTime(e.target.value)} />
             </div>
           </div>
 
           <div className="form-group">
             <label className="form-label"><User size={12} /> Technicien</label>
             <div className="fiche-select-wrap">
-              <select className="form-input" value={tech} onChange={e => setTech(e.target.value)}>
+              <select className="form-input form-input--plain" value={tech} onChange={e => setTech(e.target.value)}>
                 <option value="">— Non assigné —</option>
                 {techs.map(t => <option key={t._id} value={t._id}>{t.fullName || t.username}</option>)}
               </select>

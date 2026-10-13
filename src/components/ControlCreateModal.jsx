@@ -200,7 +200,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal--md modal--dropdown">
+      <div className="modal modal--md">
         <div className="modal-header">
           <h2 className="modal-title">
             <Plus size={16} /> {isIntv ? 'Nouvelle intervention' : 'Nouveau contrôle'}
@@ -231,7 +231,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
             <div className="form-group">
               <label className="form-label"><Wrench size={12} /> Objet *</label>
               <input
-                className="form-input"
+                className="form-input form-input--plain"
                 placeholder="ex. Changement batterie lithium + piles d'armoire"
                 value={form.objet}
                 onChange={e => setF('objet', e.target.value)}
@@ -243,7 +243,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
             <div className="form-group">
               <label className="form-label"><Wrench size={12} /> Titre <span className="form-label-opt">(facultatif)</span></label>
               <input
-                className="form-input"
+                className="form-input form-input--plain"
                 placeholder="ex. Contrôle après déménagement de l'accueil"
                 value={form.objet}
                 onChange={e => setF('objet', e.target.value)}
@@ -303,7 +303,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
               </label>
               <div className="fiche-select-wrap">
                 <select
-                  className="form-input"
+                  className="form-input form-input--plain"
                   value={form.installation}
                   onChange={e => setF('installation', e.target.value)}
                 >
@@ -331,7 +331,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
               <label className="form-label"><Calendar size={12} /> Date planifiée *</label>
               <input
                 type="date"
-                className="form-input"
+                className="form-input form-input--plain"
                 value={form.scheduledDate}
                 onChange={e => setF('scheduledDate', e.target.value)}
               />
@@ -340,7 +340,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
             <div className="form-group">
               <label className="form-label"><User size={12} /> Technicien assigné</label>
               <div className="fiche-select-wrap">
-                <select className="form-input" value={form.technicien} onChange={selectTechnicien}>
+                <select className="form-input form-input--plain" value={form.technicien} onChange={selectTechnicien}>
                   <option value="">— Non assigné —</option>
                   {techniciens.map(t => (
                     <option key={t._id} value={t._id}>{t.fullName || t.username}</option>
@@ -358,7 +358,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
           <div className="form-group">
             <label className="form-label"><StickyNote size={12} /> Notes</label>
             <textarea
-              className="form-input"
+              className="form-input form-input--plain"
               rows={2}
               placeholder="Instructions pour le technicien…"
               value={form.notes}
