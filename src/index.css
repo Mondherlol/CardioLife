@@ -21345,8 +21345,11 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 /* Fenêtre de l'alerte « piles à remplacer » : un bloc par client. */
 .arm-alert-modal { max-width: 640px; }
 .arm-alert-intro { margin: 0 0 12px; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
-.arm-alert-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
-.arm-alert-client { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+/* Un seul défilement, celui du corps de la fenêtre. La liste limitée en hauteur
+   et défilante à son tour écrasait les cartes (éléments flex rétrécis) au lieu
+   de défiler : on ne voyait plus que des bandes vides. */
+.arm-alert-list { display: flex; flex-direction: column; gap: 8px; }
+.arm-alert-client { flex-shrink: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 
 .arm-alert-head {
   display: flex;
