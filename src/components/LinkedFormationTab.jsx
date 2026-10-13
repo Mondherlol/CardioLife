@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
-import { GraduationCap, ExternalLink, Unlink, Calendar, Users, User, CheckCircle2, Link2 } from 'lucide-react'
+import { GraduationCap, ExternalLink, Unlink, Calendar, Users, User, CheckCircle2, Link2, Trash2 } from 'lucide-react'
 import { setFormationLink } from '../api/interventions'
-import { getFormation } from '../api/formations'
+import { getFormation, deleteFormation } from '../api/formations'
 import { getUsers } from '../api/users'
 import FormationModal from './FormationModal'
 import FormationLinkFields, { emptyFormationLink, formationLinkError, applyFormationLink } from './FormationLinkFields'
@@ -59,6 +59,22 @@ export default function LinkedFormationTab({ iv, canManage, onChanged, onRefresh
     }
   }
 
+  /* Supprimer : la séance disparaît du tableau des formations ; le serveur
+     retire au passage le lien côté visite. */
+  async function remove() {
+    if (!window.confirm(`Supprimer la formation « ${f.title} » ? Elle sera déliée de la visite et effacée du tableau des formations.`)) return
+    setSaving(true)
+    try {
+      await deleteFormation(f._id)
+      toast.success('Formation supprimée.')
+      await onRefresh()
+    } catch (e) {
+      toast.error(e.message || 'Suppression impossible.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function open() {
     try { setModal(await getFormation(f._id)) } catch (e) { toast.error(e.message) }
   }
@@ -108,6 +124,11 @@ export default function LinkedFormationTab({ iv, canManage, onChanged, onRefresh
             {canManage && (
               <button className="btn btn--ghost btn--sm" onClick={unlink} disabled={saving}>
                 <Unlink size={13} /> Délier
+              </button>
+            )}
+            {canManage && (
+              <button className="btn btn--ghost btn--sm fiche-delete-btn" onClick={remove} disabled={saving}>
+                <Trash2 size={13} /> Supprimer
               </button>
             )}
           </div>
