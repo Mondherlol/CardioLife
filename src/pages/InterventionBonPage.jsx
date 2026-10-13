@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { Download, Printer, RotateCcw } from 'lucide-react'
+import { Download, Printer, RotateCcw, Undo2, X } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getIntervention, saveBon, uploadBonPdf } from '../api/interventions'
 import { getFormationBon, saveFormationBon, uploadFormationBonPdf } from '../api/formations'
@@ -79,7 +79,7 @@ function Lines({ text, className }) {
  * (bon imprimé d'avance pour la tournée) n'en a pas, on prend alors les DAE
  * qu'elle vise — l'appareil désigné, sinon tout le parc du site.
  */
-export function bonLines(iv, natures, custom = {}) {
+export function bonLines(iv, natures, custom = {}, removed = []) {
   const snap = iv.installationSnap || {}
   const siteDeas = iv.siteDeas || []
   const targets = iv.installation
@@ -116,13 +116,15 @@ export function bonLines(iv, natures, custom = {}) {
     ? chosen.map(n => ({ id: n.id, text: n.designation }))
     : [{ id: 'defaut', text: 'Intervention sur le défibrillateur cardiaque' }]
   /* Une ligne par nature et par appareil. Le texte proposé se remplace à la
-     main quand le libellé type ne colle pas à ce qui a été fait. */
+     main quand le libellé type ne colle pas à ce qui a été fait ; une ligne
+     sans objet (une seule formation pour trois DAE) se retire — `off`, elle
+     reste à l'écran pour être rétablie mais n'est pas imprimée. */
   return designations.flatMap(n => devices.map(d => {
     const key  = `${n.id}|${d.key}`
     const auto = `${n.text} ${d.model}`
     return {
       key, auto, text: custom[key]?.trim() ? custom[key] : auto,
-      model: d.model, serial: d.serial,
+      model: d.model, serial: d.serial, off: removed.includes(key),
     }
   }))
 }
@@ -303,7 +305,7 @@ export default function InterventionBonPage({ source = 'intervention' }) {
   if (error) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>{src.notFound}</div>
   if (!iv || !bon) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>Chargement…</div>
 
-  const lines = bonLines(iv, bon.natures, bon.custom)
+  const lines = bonLines(iv, bon.natures, bon.custom, bon.removed)
 
   return (
     <div className="bi-wrap">
@@ -350,6 +352,8 @@ export function initialBon(iv) {
     signer:  iv.bon?.signataire || iv.visite?.visa || '',
     // Désignations retouchées, par ligne (« <nature>|<appareil> »).
     custom:  iv.bon?.designations || {},
+    // Lignes retirées du bon, mêmes clés.
+    removed: iv.bon?.retirees || [],
   }
 }
 
@@ -364,7 +368,7 @@ export function bonPayload(bon, lines) {
     .filter(([k, v]) => autoOf[k] !== undefined && v.trim() && v.trim() !== autoOf[k]))
   return {
     reference: bon.ref, bonCommande: bon.bc, nature: bon.natures,
-    signataire: bon.signer, designations,
+    signataire: bon.signer, designations, retirees: bon.removed || [],
   }
 }
 
@@ -390,6 +394,12 @@ export function BonTitleReminder({ iv }) {
 export function BonFields({ value, onChange, lines }) {
   const set = (k, v) => onChange(cur => ({ ...cur, [k]: v }))
   const setCustom = fn => onChange(cur => ({ ...cur, custom: fn(cur.custom || {}) }))
+  const toggleLine = key => onChange(cur => {
+    const removed = cur.removed || []
+    return { ...cur, removed: removed.includes(key) ? removed.filter(k => k !== key) : [...removed, key] }
+  })
+  // Un bon garde au moins une ligne.
+  const activeCount = lines.filter(l => !l.off).length
   const toggleNature = nid => onChange(cur => ({
     ...cur,
     natures: cur.natures.includes(nid) ? cur.natures.filter(n => n !== nid) : [...cur.natures, nid],
@@ -436,11 +446,25 @@ export function BonFields({ value, onChange, lines }) {
         <div className="bi-desi-edit">
           {lines.map(l => {
             const edited = l.text !== l.auto
+            if (l.off) return (
+              <div key={l.key} className="bi-desi-edit-row bi-desi-edit-row--off">
+                <span className="bi-desi-off-text">{l.text}</span>
+                <button type="button" className="btn btn--ghost btn--sm"
+                  title="Remettre cette ligne sur le bon" onClick={() => toggleLine(l.key)}>
+                  <Undo2 size={13} /> Rétablir
+                </button>
+              </div>
+            )
             return (
               <div key={l.key} className="bi-desi-edit-row">
                 <textarea className="form-input form-input--plain" rows={2}
                   value={l.text}
                   onChange={e => setCustom(c => ({ ...c, [l.key]: e.target.value }))} />
+                <button type="button" className="btn btn--ghost btn--sm"
+                  title={activeCount > 1 ? 'Retirer cette ligne du bon' : 'Le bon doit garder au moins une ligne'}
+                  disabled={activeCount <= 1} onClick={() => toggleLine(l.key)}>
+                  <X size={13} />
+                </button>
                 {edited && (
                   <button type="button" className="btn btn--ghost btn--sm"
                     title="Revenir au texte par défaut"
@@ -534,7 +558,7 @@ export function BonDocument({ iv, company, reference, bc, signer, lines }) {
           </tr>
         </thead>
         <tbody>
-          {lines.map(l => (
+          {lines.filter(l => !l.off).map(l => (
             <tr key={l.key}>
               <td className="bi-col-qty">1</td>
               <td>

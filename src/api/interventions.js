@@ -40,6 +40,12 @@ export const saveDeaItems = (id, kind, dea, items) =>
 export const saveFormationOutcome = (id, data) =>
   patch(`/interventions/${id}/formation`, data)
 
+/* Formation liée à la visite : { mode: 'new', title, participantsCount } |
+   { mode: 'existing', formationId } | { mode: 'none' }. */
+export const setFormationLink = (id, data) => put(`/interventions/${id}/formation-link`, data)
+/* Agents à former / formés, écrits sur la formation liée. */
+export const saveFormationCounts = (id, data) => patch(`/interventions/${id}/formation-counts`, data)
+
 /* Bon d'intervention : nature du passage et signature recueillie sur place. */
 export const saveBon = (id, data) => patch(`/interventions/${id}/bon`, data)
 

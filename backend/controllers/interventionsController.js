@@ -12,6 +12,7 @@ const { syncFicheToParc } = require('../utils/ficheSync')
 const { syncDeaWithItem, syncDeaConsumables } = require('../utils/productItems')
 const { archiveRapport, archiveBon } = require('../utils/rapportArchive')
 const { applyBon } = require('../utils/bon')
+const { linkFormation, unlinkFormation, createLinkedFormation, followVisitDate } = require('../utils/formationLink')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
 
@@ -508,7 +509,7 @@ async function getAll(req, res) {
        nommer une visite, sans les checklists, l'historique ni le bon — le gros
        du poids d'une intervention. */
     const projection = req.query.light === '1'
-      ? '-fiches -fiche -history -rapport -bon -visite -formation'
+      ? '-fiches -fiche -history -rapport -bon -visite'
       : undefined
     const interventions = await Intervention.find(query, projection)
       .sort({ scheduledDate: -1 })
@@ -551,6 +552,7 @@ async function getOne(req, res) {
     json.formations    = await formationsOf(intervention)
     json.horsDelai     = await horsDelaiOf(intervention)
     json.nextControl   = await nextControlOf(intervention)
+    json.linkedFormation = await linkedFormationOf(intervention)
 
     // Fiches d'avant les visites multi-DAE : présentées comme une liste d'une
     // seule entrée, pour que l'écran n'ait qu'une forme à connaître.
@@ -658,6 +660,7 @@ async function update(req, res) {
       else if (hadNotes && hasNotes)               changed.push('Notes modifiées')
     }
 
+    const oldDate = intervention.scheduledDate
     const allowed = ['client','clientName','installation','installationSnap',
                      'technicien','technicienName','scheduledDate','notes','objet','status','controlType','contract']
     allowed.forEach(k => { if (req.body[k] !== undefined) intervention[k] = req.body[k] })
@@ -685,6 +688,7 @@ async function update(req, res) {
     })
 
     await intervention.save()
+    if (req.body.scheduledDate !== undefined) await followVisitDate(intervention, oldDate, req.user)
     await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
@@ -1495,6 +1499,11 @@ async function remove(req, res) {
       deletedBy:     req.user._id,
       deletedByName: req.user.fullName || req.user.username,
     })
+    if (intervention.formation?.formation) {
+      await Formation.updateOne(
+        { _id: intervention.formation.formation, intervention: intervention._id },
+        { $unset: { intervention: 1 } })
+    }
     await intervention.deleteOne()
     await refreshNextControl(intervention)
     res.json({ message: 'Supprimée.' })
@@ -1514,6 +1523,110 @@ async function getDeleted(req, res) {
       .select('-snapshot')
       .lean()
     res.json(logs)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/* ─── Formation liée à la visite ─────────────────────────────── */
+/** Séance liée, avec ce que la fiche du contrôle et la checklist en montrent. */
+async function linkedFormationOf(intervention) {
+  const id = intervention.formation?.formation
+  if (!id) return null
+  const f = await Formation.findById(id)
+    .select('title date end status participantsCount participants formedCount attestationDelivered assignedTo siteName intervention')
+    .populate('assignedTo', 'fullName username')
+    .lean()
+  if (!f) return null
+  const list = f.participants || []
+  return {
+    ...f,
+    participants: undefined,
+    hasList:  list.length > 0,
+    aFormer:  list.length ? list.filter(p => p.status !== 'absent').length : (f.participantsCount || 0),
+    formes:   list.length ? list.filter(p => p.status === 'forme').length : (f.formedCount ?? null),
+  }
+}
+
+/**
+ * Lier une formation à la visite : une nouvelle (même jour, agents à former),
+ * une existante du site — même ancienne —, ou aucune.
+ */
+async function setFormationLink(req, res) {
+  try {
+    if (!isAdmin(req.user) && !req.user.permissions?.canManageFormations) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+
+    const { mode, formationId, title, participantsCount } = req.body || {}
+    if (mode === 'new') {
+      await createLinkedFormation(intervention, { title, participantsCount }, req.user)
+    } else if (mode === 'existing') {
+      const formation = await Formation.findById(formationId)
+      if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+      await linkFormation(intervention, formation, req.user)
+    } else if (mode === 'none') {
+      await unlinkFormation(intervention, req.user)
+    } else {
+      return res.status(400).json({ message: 'Mode attendu : new, existing ou none.' })
+    }
+
+    const json = await withParc(intervention)
+    json.formations      = await formationsOf(intervention)
+    json.linkedFormation = await linkedFormationOf(intervention)
+    res.json(json)
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/**
+ * Agents à former / agents formés, saisis depuis la visite. Ils s'écrivent sur
+ * la formation liée — une seule source, la checklist et la fiche formation
+ * disent donc toujours la même chose. Avec une liste nominative, c'est la
+ * liste qui fait foi : les nombres ne s'y saisissent pas.
+ */
+async function saveFormationCounts(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!canWriteFiche(req.user, intervention) && !isAdmin(req.user)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    const formation = intervention.formation?.formation
+      ? await Formation.findById(intervention.formation.formation)
+      : null
+    if (!formation) return res.status(409).json({ message: 'Aucune formation liée à cette visite.' })
+    if (formation.participants?.length) {
+      return res.status(409).json({ message: 'La formation a une liste nominative : les agents se gèrent sur sa fiche.' })
+    }
+
+    const num = v => (v === null || v === '' ? null : Math.max(0, Math.round(Number(v))))
+    const parts = []
+    if (req.body.aFormer !== undefined && num(req.body.aFormer) !== null) {
+      formation.participantsCount = num(req.body.aFormer)
+      parts.push(`à former : ${formation.participantsCount}`)
+    }
+    if (req.body.formes !== undefined) {
+      const n = num(req.body.formes)
+      formation.formedCount = n === null ? undefined : n
+      parts.push(`formés : ${n === null ? '—' : n}`)
+    }
+    if (parts.length) {
+      formation.history.push({
+        action: 'Agents mis à jour depuis la visite', by: req.user._id, at: new Date(),
+        details: parts.join(' · '),
+      })
+      await formation.save()
+      intervention.history.push({
+        action: 'formation', user: req.user._id, userName: req.user.fullName || req.user.username,
+        details: `Agents (formation liée) — ${parts.join(' · ')}`,
+      })
+      await intervention.save()
+    }
+    res.json({ linkedFormation: await linkedFormationOf(intervention) })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -1645,4 +1758,5 @@ module.exports = {
   uploadFichePhoto, deleteFichePhoto,
   saveDeaItems, saveFormation, saveBon,
   saveRapportPdf, saveBonPdf, getDeleted, setAttente, setControlType, closePast,
+  setFormationLink, saveFormationCounts,
 }

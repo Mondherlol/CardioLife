@@ -209,6 +209,8 @@ const interventionSchema = new Schema({
     // Désignations retouchées à la main, par ligne du tableau
     // (« <nature>|<appareil> »). Une ligne absente garde le texte par défaut.
     designations: { type: Map, of: String, default: undefined },
+    // Lignes proposées mais retirées du bon (mêmes clés que `designations`).
+    retirees:     { type: [String], default: undefined },
   },
 
   /* Rapport PDF rangé dans les documents du client à la clôture. Une

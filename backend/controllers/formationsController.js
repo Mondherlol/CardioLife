@@ -115,6 +115,15 @@ async function getByClient(req, res) {
   } catch (err) { res.status(500).json({ message: err.message }) }
 }
 
+/* Une séance, avec tout ce qu'en montre sa fiche (ouverte depuis un contrôle). */
+async function getOne(req, res) {
+  try {
+    const formation = await Formation.findById(req.params.id).populate(POPULATE_OPTS)
+    if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+    res.json(formation)
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
 async function getBySite(req, res) {
   try {
     const formations = await Formation.find({ site: req.params.siteId })
@@ -345,6 +354,12 @@ async function remove(req, res) {
   try {
     const formation = await Formation.findByIdAndDelete(req.params.id)
     if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+    // La visite qu'elle accompagnait n'a plus de séance liée.
+    if (formation.intervention) {
+      await require('../models/Intervention').updateOne(
+        { _id: formation.intervention, 'formation.formation': formation._id },
+        { $unset: { 'formation.formation': 1 }, $set: { 'formation.titre': '' } })
+    }
     for (const doc of formation.documents) {
       await fsp.unlink(path.join(__dirname, '../uploads', doc.path)).catch(() => {})
     }
@@ -408,6 +423,7 @@ async function saveBonPdf(req, res) {
 }
 
 module.exports = {
+  getOne,
   getBon, saveBon, saveBonPdf,
   getAll, getByClient, getBySite, create, update, toggleAttestation,
   addDocuments, removeDocument, remove,

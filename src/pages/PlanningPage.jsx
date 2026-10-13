@@ -138,7 +138,7 @@ function toFCEvent(a) {
 // planning distingue semestriel, annuel et hors contrat.
 // Un contrôle à venir se déplace au glisser-déposer (date réelle) ; sa durée,
 // elle, n'a pas de sens dans le planning.
-function toInterventionEvent(iv, canMove) {
+function toInterventionEvent(iv, canMove, withFormation = false) {
   const type  = controlTypeToPlanning(iv.controlType)
   const color = TYPE_MAP[type].color
   const start = new Date(iv.scheduledDate)
@@ -157,7 +157,8 @@ function toInterventionEvent(iv, canMove) {
     extendedProps:   {
       kind: 'intervention', type, status: iv.status, toSchedule, _intv: iv,
       place:   { client: iv.clientName, site: iv.siteName || iv.site?.name },
-      tooltip: eventTooltip(type, iv.objet),
+      withFormation,
+      tooltip: eventTooltip(type, iv.objet) + (withFormation ? ' + Formation des agents' : ''),
     },
   }
 }
@@ -339,14 +340,28 @@ export default function PlanningPage() {
 
   const buildEvents = useCallback(({ appts, intvs, insts, fmns }) => {
     const want = t => !typeFilter || t === typeFilter
+    /* Une visite et sa formation le même jour : un seul événement « + Formation »
+       plutôt que deux pavés côte à côte. La formation reprise ailleurs (autre
+       jour, reportée) garde le sien. */
+    const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString()
+    const fById   = new Map(fmns.map(f => [String(f._id), f]))
+    const merged  = new Set()
+    const withFormationOf = i => {
+      const f = i.formation?.formation && fById.get(String(i.formation.formation))
+      if (!f || f.status === 'annule' || !sameDay(f.date, i.scheduledDate)) return false
+      merged.add(String(f._id))
+      return true
+    }
+    const intvEvents = intvs
+      .filter(i => i.scheduledDate && (want(controlTypeToPlanning(i.controlType)) || (typeFilter === 'formation' && i.formation?.formation)))
+      .map(i => toInterventionEvent(i, !readOnlyPlanning, withFormationOf(i)))
+      // Filtre « Formation » : seules les visites qui en portent une restent.
+      .filter(e => typeFilter !== 'formation' || e.extendedProps.withFormation)
     return [
       ...appts.filter(a => !typeFilter || (!DEDICATED_TYPES.includes(typeFilter) && a.type === typeFilter)).map(toFCEvent),
-      // Les contrôles arrivent d'une seule requête : le tri semestriel /
-      // annuel / hors contrat se fait ici.
-      ...intvs.filter(i => i.scheduledDate && want(controlTypeToPlanning(i.controlType)))
-        .map(i => toInterventionEvent(i, !readOnlyPlanning)),
+      ...intvEvents,
       ...(want('installation') ? insts.filter(i => i.scheduledDate).map(toInstallationEvent) : []),
-      ...(want('formation') ? fmns.map(toFormationEvent) : []),
+      ...(want('formation') ? fmns.filter(f => !merged.has(String(f._id))).map(toFormationEvent) : []),
     ]
   }, [typeFilter, readOnlyPlanning])
 
@@ -605,6 +620,7 @@ export default function PlanningPage() {
             if (status === 'fait' || status === 'termine') cls.push('fc-event--fait')
             if (status === 'annule') cls.push('fc-event--annule')
             if (info.event.extendedProps.toSchedule) cls.push('fc-event--a-programmer')
+            if (info.event.extendedProps.withFormation) cls.push('fc-event--with-formation')
             return cls
           }}
           eventContent={info => {
@@ -615,7 +631,14 @@ export default function PlanningPage() {
             const site   = place.site && place.site.toLowerCase() !== String(client).toLowerCase() ? place.site : ''
             return (
               <div className="plan-event-inner">
-                <span className="plan-event-title">{client}</span>
+                <span className="plan-event-title">
+                  {info.event.extendedProps.withFormation && (
+                    <span className="plan-event-fbadge" title="Contrôle + formation des agents">
+                      <GraduationCap size={10} /> +F
+                    </span>
+                  )}
+                  {client}
+                </span>
                 {site && <span className="plan-event-client">{site}</span>}
               </div>
             )

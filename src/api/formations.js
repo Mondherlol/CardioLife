@@ -8,6 +8,7 @@ export const getFormations          = (params = {})    => {
 }
 export const getFormationsByClient  = (clientId)       => get(`/formations/client/${clientId}`)
 export const getFormationsBySite    = (siteId)         => get(`/formations/site/${siteId}`)
+export const getFormation           = (id)             => get(`/formations/${id}`)
 export const createFormation        = (formData)        => upload('/formations', formData)
 export const updateFormation        = (id, data)        => put(`/formations/${id}`, data)
 export const toggleAttestation      = (id)              => patch(`/formations/${id}/attestation`, {})

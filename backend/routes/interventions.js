@@ -42,6 +42,9 @@ router.patch('/:id/reopen',  ctrl.reopenIntervention)
 router.put('/:id/dea-items/:kind', ctrl.saveDeaItems)
 /* Formation des agents : effectuée ou reportée, tranché pendant la visite. */
 router.patch('/:id/formation', ctrl.saveFormation)
+/* Formation liée à la visite (nouvelle, existante, aucune) et ses agents. */
+router.put('/:id/formation-link',     ctrl.setFormationLink)
+router.patch('/:id/formation-counts', ctrl.saveFormationCounts)
 /* Bon d'intervention : nature du passage et signature du client. */
 router.patch('/:id/bon', ctrl.saveBon)
 

@@ -68,7 +68,15 @@ const formationSchema = new mongoose.Schema({
     signataire:   { type: String, trim: true },
     signedAt:     Date,
     designations: { type: Map, of: String, default: undefined },
+    retirees:     { type: [String], default: undefined },
   },
+  /* Visite (contrôle, intervention) que cette séance accompagne. Le lien vit
+     aussi côté visite (`Intervention.formation.formation`). */
+  intervention:           { type: mongoose.Schema.Types.ObjectId, ref: 'Intervention', index: true },
+  /* Agents effectivement formés, quand il n'y a pas de liste nominative
+     (saisi depuis la checklist de la visite). Avec une liste, c'est elle qui
+     compte : les participants « formé ». */
+  formedCount:            { type: Number, min: 0 },
   // Bon d'intervention rangé dans les documents du client (dernière version).
   bonDocument:            { type: mongoose.Schema.Types.ObjectId, ref: 'Document' },
   history:                [historySchema],

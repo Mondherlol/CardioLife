@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
 import {
-  X, CalendarCheck, Building2, Calendar, Clock, User, ChevronDown, AlertTriangle, Info, Plus, Type,
+  X, CalendarCheck, Building2, Calendar, Clock, User, ChevronDown, AlertTriangle, Info, Plus, Type, GraduationCap,
 } from 'lucide-react'
 import { updateIntervention, setControlType } from '../api/interventions'
 import { useFollowingControls, RealignPreview } from './ControlAdminModals'
+import FormationLinkFields, { emptyFormationLink, formationLinkError, applyFormationLink } from './FormationLinkFields'
 import { get } from '../api/http'
 import { ClientSearchInput } from './PlanningInputs'
 import { localDateStr, localTimeStr } from '../lib/appointmentConstants'
@@ -62,6 +63,8 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
      reprendre l'alternance à partir de lui. */
   const [visitType, setVisitType] = useState(null)
   const [realign,   setRealign]   = useState(true)
+  // Formation des agents qui accompagne la visite (nouvelle ou existante).
+  const [fLink,     setFLink]     = useState(emptyFormationLink)
 
   useEffect(() => {
     get('/users?role=technicien&limit=100')
@@ -130,6 +133,8 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
     setError('')
     if (!picked) return setError('Choisissez le contrôle à programmer.')
     if (!date)   return setError('Indiquez la date.')
+    const flErr = formationLinkError(fLink)
+    if (flErr) return setError(flErr)
     const t = techs.find(u => String(u._id) === String(tech))
     const when = joinDateTime(date, time)
     setSaving(true)
@@ -141,6 +146,8 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
         technicienName: t ? (t.fullName || t.username) : '',
         objet:          title.trim(),
       })
+      // Après la date : une séance nouvelle se cale sur le jour de la visite.
+      await applyFormationLink(picked._id, fLink)
       toast.success(`${CONTROL_LABELS[typeChanged ? visitType : picked.controlType] || 'Contrôle'} programmé le ${fmtDay(when)}.`)
       onDone()
     } catch (err) {
@@ -274,6 +281,13 @@ export default function ScheduleControlModal({ presetDate, presetType, presetCon
             <input className="form-input" value={title} onChange={e => setTitle(e.target.value)}
               placeholder="ex. Contrôle + formation des nouveaux agents" />
           </div>
+
+          {picked && (picked.formation?.formation
+            ? <p className="form-hint">
+                <GraduationCap size={11} /> Une formation accompagne déjà ce contrôle
+                {picked.formation.titre ? ` (${picked.formation.titre})` : ''} — elle se gère dans l'onglet Formation de sa fiche.
+              </p>
+            : <FormationLinkFields siteId={picked.site?._id || picked.site} value={fLink} onChange={setFLink} />)}
 
           <div className="form-row">
             <div className="form-group">

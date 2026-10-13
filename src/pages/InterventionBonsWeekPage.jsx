@@ -198,7 +198,7 @@ export default function InterventionBonsWeekPage() {
     setSaving(true)
     const byId = Object.fromEntries((items || []).map(iv => [iv._id, iv]))
     const results = await Promise.allSettled(ids.map(id => {
-      const lines = bonLines(byId[id], bons[id].natures, bons[id].custom)
+      const lines = bonLines(byId[id], bons[id].natures, bons[id].custom, bons[id].removed)
       return saveBon(id, bonPayload(bons[id], lines)).then(() => id)
     }))
     const ok = results.filter(r => r.status === 'fulfilled').map(r => r.value)
@@ -359,7 +359,7 @@ export default function InterventionBonsWeekPage() {
           {/* ── Bon sélectionné : réglages puis aperçu ── */}
           {current && bons[current._id] && (() => {
             const value = bons[current._id]
-            const lines = bonLines(current, value.natures, value.custom)
+            const lines = bonLines(current, value.natures, value.custom, value.removed)
             return (
               <section className="bw-editor">
                 <div className="bw-editor-head">
@@ -411,7 +411,7 @@ export default function InterventionBonsWeekPage() {
           return (
             <div key={iv._id} className="bi-week-page" data-id={iv._id}>
               <BonDocument iv={iv} company={company} reference={value.ref} bc={value.bc}
-                signer={value.signer} lines={bonLines(iv, value.natures, value.custom)} />
+                signer={value.signer} lines={bonLines(iv, value.natures, value.custom, value.removed)} />
             </div>
           )
         })}

@@ -587,6 +587,15 @@ export default function FormationModal({
                         : raw.siteName}
                     </>
                   )}
+                  {/* La visite que cette séance accompagne. */}
+                  {raw.intervention && (
+                    <>
+                      {' · '}
+                      <Link className="fm-subtitle-link" to={`/interventions/${raw.intervention?._id || raw.intervention}`} onClick={onClose}>
+                        avec un contrôle
+                      </Link>
+                    </>
+                  )}
                 </p>
               )}
             </div>

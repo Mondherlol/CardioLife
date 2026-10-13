@@ -5,7 +5,7 @@ const { BON_NATURES } = require('../models/Intervention')
  * de l'écran du bon. Lève une erreur `status: 400` sur une nature inconnue.
  */
 function applyBon(target, body) {
-  const { nature, signataire, reference, bonCommande, designations } = body
+  const { nature, signataire, reference, bonCommande, designations, retirees } = body
   // Une nature seule (ancien client) vaut une liste d'un élément.
   const natures = nature === undefined ? undefined
     : [...new Set((Array.isArray(nature) ? nature : [nature]).filter(Boolean))]
@@ -25,6 +25,12 @@ function applyBon(target, body) {
       .filter(([k, v]) => /^[\w-]+\|[\w-]+$/.test(k) && typeof v === 'string' && v.trim())
       .map(([k, v]) => [k, v.trim().slice(0, 1000)])
     target.bon.designations = clean.length ? new Map(clean) : undefined
+  }
+  if (retirees !== undefined) {
+    // Lignes proposées mais écartées du bon (une seule formation pour trois DAE…).
+    const keys = [...new Set((Array.isArray(retirees) ? retirees : [])
+      .filter(k => typeof k === 'string' && /^[\w-]+\|[\w-]+$/.test(k)))].slice(0, 200)
+    target.bon.retirees = keys.length ? keys : undefined
   }
   if (signataire !== undefined) {
     target.bon.signataire = signataire

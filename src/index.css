@@ -20894,6 +20894,9 @@ a.fm-doc-name:hover { color: var(--orange-600); text-decoration: underline; }
 .bi-desi-edit { display: flex; flex-direction: column; gap: 6px; }
 .bi-desi-edit-row { display: flex; gap: 6px; align-items: flex-start; }
 .bi-desi-edit-row textarea { flex: 1; resize: vertical; min-height: 38px; }
+/* Ligne retirée : gardée à l'écran pour être rétablie, absente du bon. */
+.bi-desi-edit-row--off { align-items: center; padding: 6px 10px; border: 1px dashed #d1d5db; border-radius: 10px; }
+.bi-desi-off-text { flex: 1; color: #9ca3af; text-decoration: line-through; font-size: 13px; }
 .bi-desi::before { content: '– '; }
 .bi-desi-sn {
   margin-top: 8px;
@@ -21924,3 +21927,29 @@ div.att-main { cursor: default; }
 
 /* Bandeau « non démarrée » : clôture d'une visite passée à côté de « Démarrer ». */
 .fiche-start-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── Formation liée à une visite ── */
+.fl-box { margin-bottom: 12px; }
+.fl-body { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--gray-50); }
+.fl-body .ct-type-choice { margin-bottom: 10px; }
+.fl-card { border: 1px solid #e9d5ff; background: #faf5ff; border-radius: 12px; padding: 14px 16px; }
+.fl-card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fl-card-title { font-size: 15px; color: var(--text-primary); }
+.fl-status { font-size: 11.5px; font-weight: 650; padding: 2px 9px; border-radius: 20px; }
+.fl-status--plan { background: #ede9fe; color: #6d28d9; }
+.fl-status--done { background: var(--green-50); color: var(--green-700); }
+.fl-status--off  { background: var(--gray-100); color: var(--text-muted); }
+.fl-card-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+.fl-card-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.fl-card-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.fl-counts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.fl-count { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-muted); }
+.fl-count input { width: 120px; }
+.pd-tab-dot { width: 7px; height: 7px; border-radius: 50%; background: #a855f7; margin-left: 4px; display: inline-block; }
+/* Planning : visite accompagnée d'une formation le même jour. */
+.plan-cal-wrap .fc-event.fc-event--with-formation { box-shadow: inset 4px 0 0 #a855f7; }
+.plan-event-fbadge {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-right: 4px; padding: 0 4px; border-radius: 4px;
+  background: #a855f7; color: #fff; font-size: 9.5px; font-weight: 700; vertical-align: 1px;
+}

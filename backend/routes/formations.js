@@ -19,6 +19,7 @@ router.use(requireAnyPermission(['canManageFormations', 'canManageClients']))
 router.get('/',                          ctrl.getAll)
 router.get('/client/:clientId',          ctrl.getByClient)
 router.get('/site/:siteId',              ctrl.getBySite)
+router.get('/:id',                       ctrl.getOne)
 router.post('/',                         ctrl.create)
 router.put('/:id',                       ctrl.update)
 // Bon d'intervention de la séance (même écran que celui d'une intervention).

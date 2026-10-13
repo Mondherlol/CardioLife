@@ -19,7 +19,8 @@ import {
 import { get, STATIC_BASE } from '../api/http'
 import { archiveRapportPdf } from '../lib/rapportPdf'
 import { DeleteInterventionModal, AttenteModal, ControlTypeModal } from '../components/ControlAdminModals'
-import { setInterventionAttente, closePastIntervention } from '../api/interventions'
+import { setInterventionAttente, closePastIntervention, saveFormationCounts } from '../api/interventions'
+import LinkedFormationTab from '../components/LinkedFormationTab'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
@@ -1389,6 +1390,14 @@ export default function InterventionFichePage() {
         >
           <ClipboardList size={13} /> Fiche
         </button>
+        {/* La formation des agents qui accompagne la visite. */}
+        <button
+          className={`pd-tab${tab === 'formation' ? ' pd-tab--active' : ''}`}
+          onClick={() => setTab('formation')}
+        >
+          <GraduationCap size={13} /> Formation
+          {iv.linkedFormation && <span className="pd-tab-dot" title={iv.linkedFormation.title} />}
+        </button>
         <button
           className={`pd-tab${tab === 'history' ? ' pd-tab--active' : ''}`}
           onClick={() => setTab('history')}
@@ -1405,6 +1414,16 @@ export default function InterventionFichePage() {
           )}
         </button>
       </div>
+
+      {/* ══ Formation tab ══ */}
+      {tab === 'formation' && (
+        <LinkedFormationTab
+          iv={iv}
+          canManage={isAdmin || Boolean(user?.permissions?.canManageFormations)}
+          onChanged={updated => mergeIv(updated)}
+          onRefresh={async () => { try { mergeIv(await getIntervention(id)) } catch { /* rien */ } }}
+        />
+      )}
 
       {/* ══ History tab ══ */}
       {tab === 'history' && (
@@ -2096,6 +2115,33 @@ export default function InterventionFichePage() {
                     </button>
                   ))}
                 </div>
+                {/* Agents de la formation liée : lus et écrits sur la séance
+                    elle-même — la fiche formation dit donc la même chose. */}
+                {iv.linkedFormation && (iv.linkedFormation.hasList ? (
+                  <p className="form-hint" style={{ marginTop: 6 }}>
+                    {iv.linkedFormation.aFormer} à former · {iv.linkedFormation.formes ?? 0} formé(s) — liste
+                    nominative gérée sur la fiche formation (onglet Formation).
+                  </p>
+                ) : (
+                  <div className="fl-counts">
+                    {[['aFormer', 'Agents à former', iv.linkedFormation.aFormer],
+                      ['formes',  'Agents formés',   iv.linkedFormation.formes]].map(([k, label, val]) => (
+                      <label key={k} className="fl-count">
+                        <span>{label}</span>
+                        <input type="number" min="0" className="fiche-input"
+                          key={`${k}-${val ?? ''}`} defaultValue={val ?? ''} disabled={readOnly}
+                          onBlur={async e => {
+                            const v = e.target.value
+                            if (String(v) === String(val ?? '')) return
+                            try {
+                              const { linkedFormation } = await saveFormationCounts(id, { [k]: v === '' ? null : v })
+                              setIv(prev => ({ ...prev, linkedFormation }))
+                            } catch (err) { toast.error(err.message) }
+                          }} />
+                      </label>
+                    ))}
+                  </div>
+                ))}
               </AutoField>
 
               <AutoField label="Recommandation" icon={StickyNote} saving={savingField === 'observationGenerale'}>

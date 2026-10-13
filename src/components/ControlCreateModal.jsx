@@ -11,6 +11,7 @@ import {
 import { lookupSites } from '../api/sites'
 import { get } from '../api/http'
 import { ClientSearchInput } from './PlanningInputs'
+import FormationLinkFields, { emptyFormationLink, formationLinkError, applyFormationLink } from './FormationLinkFields'
 import { localDateStr } from '../lib/appointmentConstants'
 
 /**
@@ -84,6 +85,8 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
      contrat posé près d'une échéance, est presque toujours ce contrôle-là —
      qu'il faut déplacer, pas doubler. */
   const [pending, setPending] = useState([])
+  // Formation des agents qui accompagne la visite (nouvelle ou existante).
+  const [fLink,   setFLink]   = useState(emptyFormationLink)
   const [moving,  setMoving]  = useState(false)
   useEffect(() => {
     if (!form.clientId) { setPending([]); return }
@@ -157,6 +160,8 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
     if (!form.clientId)      return setError('Choisissez le client concerné.')
     if (!form.siteId)        return setError('Choisissez le site à visiter.')
     if (!form.scheduledDate) return setError('Indiquez la date planifiée.')
+    const flErr = formationLinkError(fLink)
+    if (flErr) return setError(flErr)
 
     setSaving(true)
     try {
@@ -182,6 +187,8 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
         notes:          form.notes,
       })
       toast.success(isIntv ? 'Intervention programmée.' : 'Contrôle programmé.')
+      // La séance, s'il y en a une, se crée au jour de la visite et s'y lie.
+      await applyFormationLink(created._id, fLink)
       onCreated(created)
       onClose()
     } catch (err) {
@@ -343,6 +350,10 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
               </div>
             </div>
           </div>
+
+          {form.siteId && (
+            <FormationLinkFields siteId={form.siteId} value={fLink} onChange={setFLink} />
+          )}
 
           <div className="form-group">
             <label className="form-label"><StickyNote size={12} /> Notes</label>
