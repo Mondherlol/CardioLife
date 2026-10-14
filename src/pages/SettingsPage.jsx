@@ -1014,7 +1014,14 @@ function CategoriesTab() {
                   <button className="action-btn action-btn--edit" title="Modifier" onClick={() => setModal(c)}>
                     <Pencil size={14} />
                   </button>
-                  <button className="action-btn action-btn--delete" title="Supprimer" onClick={() => setDeleting(c)}>
+                  <button
+                    className="action-btn action-btn--delete"
+                    disabled={(c.stats?.products ?? 0) > 0}
+                    title={(c.stats?.products ?? 0) > 0
+                      ? 'Suppression impossible : des produits sont rattachés à cette catégorie'
+                      : 'Supprimer'}
+                    onClick={() => setDeleting(c)}
+                  >
                     <Trash2 size={14} />
                   </button>
                 </div>

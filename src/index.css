@@ -16801,6 +16801,16 @@ button {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+/* Pas de tableau ici : les actions restent visibles en permanence. */
+.cat-settings-row .row-actions {
+  opacity: 1;
+}
+
+.cat-settings-row .action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .cat-settings-row:hover {
   border-color: var(--gray-300);
   box-shadow: 0 4px 12px -8px rgba(15, 23, 42, 0.4);
