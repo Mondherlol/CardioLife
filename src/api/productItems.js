@@ -23,6 +23,8 @@ const qs = (params) => {
 
 export const getProductItems  = (params = {}) => get(`/product-items${qs(params)}`)
 export const getStockModels   = (params = {}) => get(`/product-items/models${qs(params)}`)
+// N° de série ou de lot → exemplaires (stock, installés) et DAE du parc.
+export const searchSerials    = (q, category) => get(`/product-items/serial-search${qs({ q, category })}`)
 export const getProductItem   = (id)          => get(`/product-items/${id}`)
 export const createProductItems = (data)      => post('/product-items', data)
 export const updateProductItem  = (id, data)  => patch(`/product-items/${id}`, data)

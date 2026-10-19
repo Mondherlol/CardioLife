@@ -10,6 +10,8 @@ router.use(protect)
 router.use(stockGuard())
 
 router.get('/models',  ctrl.getModels)
+// Retrouver un exemplaire (en stock ou installé) par son n° de série ou de lot.
+router.get('/serial-search', ctrl.serialSearch)
 router.get('/',        ctrl.getAll)
 router.get('/:id',     ctrl.getById)
 

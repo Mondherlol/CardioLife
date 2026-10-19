@@ -96,6 +96,68 @@ async function getModels(req, res) {
   })))
 }
 
+/**
+ * GET /api/product-items/serial-search?q=…&category=…
+ *
+ * Retrouver un exemplaire par son n° de série ou de lot : c'est ce que le
+ * technicien a sous les yeux. Les articles d'abord (en stock comme installés —
+ * un DAE posé chez un client garde son article « installé ») ; puis le parc des
+ * sites, pour un DAE qui n'aurait pas d'article.
+ */
+async function serialSearch(req, res) {
+  const q = String(req.query.q || '').trim()
+  const { category } = req.query
+  if (q.length < 3) return res.json({ productIds: [], matches: [] })
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+
+  const items = await ProductItem.find({
+    $or: [{ serialNumber: re }, { lotNumber: re }],
+    ...(category ? { category } : {}),
+  })
+    .limit(50)
+    .populate('product', 'name')
+    .populate('client', 'name')
+    .populate('site', 'name')
+    .lean()
+
+  const matches = items.map(it => ({
+    source:  'stock',
+    itemId:  it._id,
+    productId:   it.product?._id || it.product,
+    productName: it.product?.name || '',
+    serial:  it.serialNumber || '',
+    lot:     it.lotNumber || '',
+    status:  it.status,
+    client:  it.client?.name || '',
+    site:    it.site?.name || '',
+    dea:     it.dea || null,
+  }))
+
+  // Parc : DAE déclarés sur un site sans article correspondant.
+  if (!category || category === 'defibrillateurs') {
+    const known = new Set(matches.map(m => String(m.serial).toLowerCase()))
+    const sites = await Site.find({ 'deas.serialNumber': re })
+      .select('name client deas.serialNumber deas.product deas.deviceType deas._id')
+      .populate('client', 'name')
+      .lean()
+    for (const s of sites) {
+      for (const d of s.deas || []) {
+        if (!d.serialNumber || !re.test(d.serialNumber) || known.has(d.serialNumber.toLowerCase())) continue
+        matches.push({
+          source: 'parc', productId: d.product || null, productName: d.deviceType || 'DAE',
+          serial: d.serialNumber, status: 'installe',
+          client: s.client?.name || '', site: s.name, dea: d._id,
+        })
+      }
+    }
+  }
+
+  res.json({
+    productIds: [...new Set(matches.map(m => m.productId && String(m.productId)).filter(Boolean))],
+    matches,
+  })
+}
+
 /* GET /api/product-items/:id — la fiche article. */
 async function getById(req, res) {
   const item = await ProductItem.findById(req.params.id)
@@ -417,4 +479,4 @@ async function remove(req, res) {
   res.json({ message: 'Article supprimé.' })
 }
 
-module.exports = { getAll, getModels, getById, create, update, changeStatus, remove }
+module.exports = { getAll, getModels, serialSearch, getById, create, update, changeStatus, remove }

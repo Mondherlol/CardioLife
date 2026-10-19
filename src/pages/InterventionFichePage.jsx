@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
@@ -784,10 +784,56 @@ export default function InterventionFichePage() {
   /* ── Fiche handlers ── */
   /* Toutes les saisies portent sur l'appareil affiché : `activeKey` accompagne
      donc chaque enregistrement, côté serveur comme côté état local. */
+  /* Saisies en attente d'enregistrement. Un champ ne s'enregistrait qu'en le
+     quittant : taper « 62 » puis clôturer aussitôt — ou valider au clavier
+     d'une tablette, qui ne fait pas toujours quitter le champ — perdait la
+     valeur. Chaque saisie est donc aussi notée ici, enregistrée 1,5 s après la
+     dernière frappe, et tout ce qui reste est enregistré avant la clôture. */
+  const pendingRef = useRef({ fiches: {}, visite: {} })
+  const flushTimer = useRef(null)
+  const fichesRef  = useRef(fiches)
+  useEffect(() => { fichesRef.current = fiches }, [fiches])
+
+  function markPending(scope, key, field, value) {
+    const p = pendingRef.current
+    if (scope === 'visite') p.visite[field] = value
+    else (p.fiches[key] ||= {})[field] = value
+    clearTimeout(flushTimer.current)
+    flushTimer.current = setTimeout(() => { flushPending().catch(() => {}) }, 1500)
+  }
+  function clearPending(scope, key, fields) {
+    const p = pendingRef.current
+    for (const f of fields) {
+      if (scope === 'visite') delete p.visite[f]
+      else if (p.fiches[key]) delete p.fiches[key][f]
+    }
+  }
+  /** Enregistre tout ce qui est en attente. Lève une erreur si un envoi échoue. */
+  async function flushPending() {
+    clearTimeout(flushTimer.current)
+    const { fiches: byKey, visite: visiteFields } = pendingRef.current
+    pendingRef.current = { fiches: {}, visite: {} }
+    const nul = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v ?? null]))
+    for (const [key, fields] of Object.entries(byKey)) {
+      if (!Object.keys(fields).length) continue
+      const entry = fichesRef.current.find(f => f.key === key)
+      mergeIv(await saveFiche(id, { dea: key || undefined, deaLabel: entry?.deaLabel, ...nul(fields) }), { parc: true })
+    }
+    if (Object.keys(visiteFields).length) {
+      mergeIv(await saveFiche(id, nul(visiteFields)), { parc: true })
+    }
+  }
+  // Quitter la page : ce qui reste part quand même.
+  useEffect(() => () => { flushPending().catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   function set(k, v) {
     setFiches(list => list.map(f => (f.key === activeKey ? { ...f, [k]: v } : f)))
+    markPending('fiches', activeKey, k, v)
   }
-  function setVisiteField(k, v) { setVisite(s => ({ ...s, [k]: v })) }
+  function setVisiteField(k, v) {
+    setVisite(s => ({ ...s, [k]: v }))
+    markPending('visite', null, k, v)
+  }
 
   /* Le parc du site et le visuel de l'appareil sont joints par la lecture
      complète ; les enregistrements partiels ne les renvoient pas. Sans cette
@@ -814,6 +860,7 @@ export default function InterventionFichePage() {
   }
 
   async function autoSave(field, value, opts = {}) {
+    clearPending(opts.visite ? 'visite' : 'fiches', activeKey, [field])
     setSavingField(field)
     try {
       const body = opts.visite
@@ -834,6 +881,7 @@ export default function InterventionFichePage() {
   /* Plusieurs champs d'un coup (choix d'un appareil, pièce remplacée) : les
      enregistrer ensemble évite une fiche à moitié à jour si l'une échoue. */
   async function saveFields(values) {
+    clearPending('fiches', activeKey, Object.keys(values))
     setSavingField('serialNumber')
     try {
       mergeIv(await saveFiche(id, {
@@ -1065,6 +1113,13 @@ export default function InterventionFichePage() {
   async function handleClose() {
     setClosing(true)
     try {
+      // Rien ne doit rester en route : la clôture reporte la fiche sur le parc.
+      try {
+        await flushPending()
+      } catch {
+        toast.error("Certaines saisies n'ont pas pu être enregistrées : clôture annulée, réessayez.")
+        return
+      }
       const updated = await closeIntervention(id)
       mergeIv(updated)
       setShowClose(false)

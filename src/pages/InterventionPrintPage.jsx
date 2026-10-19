@@ -137,18 +137,21 @@ export function RapportDocument({ iv }) {
      propre colonne, l'y répéter la laissait vide et surchargeait celle-ci. */
   const deviceLabelOf = (f) => {
     const dea = deaOf(f)
+    /* `deaLabel` vaut « Modèle · N° de série » : on n'en garde que le modèle.
+       Le n° a sa propre colonne — et celui de la fiche peut différer de celui
+       du parc (corrigé sur place), si bien que l'ôter « par la fin » laissait
+       l'autre en double. */
     const label = dea?.deviceType
       || [snap.deviceType, iv.installation?.deviceProduct?.name || snap.deviceModel]
         .filter(Boolean).join(' · ')
-      || f.deaLabel
+      || String(f.deaLabel || '').split(' · ')[0]
       || 'DAE'
-    /* Les fiches d'avant les colonnes séparées collaient le n° au libellé : on
-       le retire par la fin, sans expression régulière — un numéro de série
-       contient tout ce qu'il veut. */
-    const sn = serialOf(f)
+    // Tout n° de série connu de cet appareil est retiré du libellé, où qu'il soit.
+    const serials = [f.serialNumber, dea?.serialNumber, snap.serialNumber,
+      String(f.deaLabel || '').split(' · ')[1]].filter(s => s && s.length >= 3)
     let out = String(label)
-    if (sn && out.endsWith(sn)) out = out.slice(0, -sn.length)
-    return out.replace(/[\s·—-]+$/, '').trim() || 'DAE'
+    for (const sn of serials) out = out.split(sn).join('')
+    return out.replace(/\s*·\s*(·\s*)+/g, ' · ').replace(/^[\s·—-]+|[\s·—-]+$/g, '').trim() || 'DAE'
   }
 
   const serialOf = f => f.serialNumber || deaOf(f)?.serialNumber || snap.serialNumber || ''
@@ -196,7 +199,11 @@ export function RapportDocument({ iv }) {
           <table className="pr-table">
             <tbody>
               <InfoRow label="Nom"         value={iv.clientName} />
-              <InfoRow label="Adresse"     value={snap.address} />
+              <InfoRow label="Site"        value={iv.site?.name || iv.siteName} />
+              {/* L'adresse du site d'abord : le snapshot n'en a pas toujours une. */}
+              <InfoRow label="Adresse"     value={
+                [iv.site?.address?.street, iv.site?.address?.city].filter(Boolean).join(', ') || snap.address
+              } />
             </tbody>
           </table>
         </Section>

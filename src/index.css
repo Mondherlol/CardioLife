@@ -21976,3 +21976,21 @@ div.att-main { cursor: default; }
 .arm-alert-dea { display: flex; gap: 2px 10px; width: 100%; padding: 4px; }
 .arm-alert-link:hover:not(:disabled), .arm-alert-dea:hover { background: var(--gray-100); color: var(--brand); }
 .arm-alert-link:disabled { cursor: default; }
+
+/* Stock : exemplaires retrouvés par n° de série / lot. */
+.sn-hits { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; overflow: hidden; }
+.sn-hits-title { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--gray-50);
+  border-bottom: 1px solid var(--border); font-size: 12.5px; font-weight: 650; color: var(--text-secondary, #374151); }
+.sn-hit { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; padding: 9px 12px;
+  border: none; border-bottom: 1px solid var(--border-light, #f1f5f9); background: var(--surface); text-align: left; cursor: pointer; font: inherit; }
+.sn-hit:last-child { border-bottom: none; }
+.sn-hit:hover { background: var(--gray-50); }
+.sn-hit > svg { margin-left: auto; color: var(--text-muted); }
+.sn-hit-serial { font-family: ui-monospace, monospace; font-weight: 700; font-size: 13px; color: var(--text-primary); }
+.sn-hit-product { font-size: 13px; color: var(--text-primary); }
+.sn-hit-where { font-size: 12px; color: var(--text-muted); }
+.sn-hit-status { font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 20px; background: var(--gray-100); color: var(--text-muted); }
+.sn-hit-status--green { background: var(--green-50); color: var(--green-700); }
+.sn-hit-status--blue { background: #eff6ff; color: #1d4ed8; }
+.sn-hit-status--amber, .sn-hit-status--orange { background: #fff7ed; color: #c2410c; }
+.sn-hit-status--red { background: #fef2f2; color: #b91c1c; }

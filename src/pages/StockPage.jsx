@@ -16,7 +16,7 @@ import {
   productImageUrl,
 } from '../api/products'
 import { getProductCategories } from '../api/productCategories'
-import { getStockModels } from '../api/productItems'
+import { getStockModels, searchSerials, itemStatus } from '../api/productItems'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ProductModal from '../components/ProductModal'
 import ParcExpiryTab from '../components/ParcExpiryTab'
@@ -932,6 +932,9 @@ export default function StockPage() {
 
   // Filtres de la vue catégorie
   const [search,         setSearch]         = useState('')
+  /* N° de série ou de lot : ils vivent sur les exemplaires, pas sur le modèle.
+     La recherche part au serveur, et les modèles concernés restent affichés. */
+  const [serialHits, setSerialHits] = useState({ q: '', productIds: new Set(), matches: [] })
   const [brandFilter,    setBrandFilter]    = useState('')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [stockState,     setStockState]     = useState('')
@@ -1015,10 +1018,24 @@ export default function StockPage() {
   const brands    = useMemo(() => [...new Set(models.map(p => p.brand).filter(Boolean))].sort(), [models])
   const suppliers = useMemo(() => [...new Set(models.map(p => p.supplier).filter(Boolean))].sort(), [models])
 
+  useEffect(() => {
+    const q = search.trim()
+    if (q.length < 3 || !activeCat) { setSerialHits({ q: '', productIds: new Set(), matches: [] }); return }
+    let alive = true
+    const t = setTimeout(() => {
+      searchSerials(q, activeCat.slug)
+        .then(r => { if (alive) setSerialHits({ q, productIds: new Set(r.productIds || []), matches: r.matches || [] }) })
+        .catch(() => {})
+    }, 300)
+    return () => { alive = false; clearTimeout(t) }
+  }, [search, activeCat])
+
   const visibleModels = useMemo(() => {
     const q = search.trim().toLowerCase()
+    const bySerial = serialHits.q.toLowerCase() === q ? serialHits.productIds : new Set()
     return models.filter(m => {
-      if (q && ![m.name, m.reference, m.brand, m.supplier].some(v => v?.toLowerCase().includes(q))) return false
+      if (q && ![m.name, m.reference, m.brand, m.supplier].some(v => v?.toLowerCase().includes(q))
+          && !bySerial.has(String(m._id))) return false
       if (brandFilter    && m.brand    !== brandFilter)    return false
       if (supplierFilter && m.supplier !== supplierFilter) return false
       // Un modèle est « épuisé » quand plus aucun exemplaire n'est disponible.
@@ -1035,7 +1052,7 @@ export default function StockPage() {
       }
       return true
     })
-  }, [models, search, brandFilter, supplierFilter, stockState, expiryFilter])
+  }, [models, search, serialHits, brandFilter, supplierFilter, stockState, expiryFilter])
 
   function resetFilters() {
     setSearch(''); setBrandFilter(''); setSupplierFilter('')
@@ -1253,6 +1270,31 @@ export default function StockPage() {
           </div>
 
           {error && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
+
+          {/* Exemplaires retrouvés par leur n° de série ou de lot : un clic
+              ouvre l'article, ou la fiche du DAE chez le client. */}
+          {serialHits.matches.length > 0 && serialHits.q.toLowerCase() === search.trim().toLowerCase() && (
+            <div className="sn-hits">
+              <div className="sn-hits-title">
+                <Hash size={13} /> {serialHits.matches.length} exemplaire{serialHits.matches.length > 1 ? 's' : ''} pour « {serialHits.q} »
+              </div>
+              {serialHits.matches.map((m, i) => {
+                const st = itemStatus(m.status)
+                const to = m.source === 'stock' ? `/stock/articles/${m.itemId}` : `/devices/${m.dea}`
+                return (
+                  <button key={`${m.source}-${m.itemId || m.dea}-${i}`} type="button" className="sn-hit" onClick={() => navigate(to)}>
+                    <span className="sn-hit-serial">{m.serial || `Lot ${m.lot}`}</span>
+                    <span className="sn-hit-product">{m.productName}</span>
+                    <span className={`sn-hit-status sn-hit-status--${st.tone}`}>{st.label}</span>
+                    {(m.client || m.site) && (
+                      <span className="sn-hit-where">{[m.client, m.site].filter(Boolean).join(' — ')}</span>
+                    )}
+                    <ChevronRight size={14} />
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           {loading ? (
             <div className="table-loading"><span className="spinner" /></div>
