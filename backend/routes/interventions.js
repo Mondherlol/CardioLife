@@ -4,6 +4,8 @@ const { protect } = require('../middleware/auth')
 const { requireAnyOrRead } = require('../middleware/access')
 const multer   = require('multer')
 const uploadIv = require('../middleware/uploadIntervention')
+// Une écriture de checklist à la fois par visite (voir utils/ficheLock).
+const { lockedById } = require('../utils/ficheLock')
 
 // Rapport PDF généré par le navigateur : gardé en mémoire, le contrôleur le range.
 const uploadPdf = multer({
@@ -30,16 +32,17 @@ router.put('/:id', ctrl.update)
 router.patch('/:id/start', ctrl.startIntervention)
 
 router.patch('/:id/rapport', ctrl.submitRapport)
-router.patch('/:id/fiche',   ctrl.saveFiche)
-router.delete('/:id/fiche/:deaId', ctrl.removeFiche)
-router.patch('/:id/close',   ctrl.closeIntervention)
+router.patch('/:id/fiche',   lockedById(ctrl.saveFiche))
+router.delete('/:id/fiche/:deaId', lockedById(ctrl.removeFiche))
+// La clôture passe après les enregistrements en cours de la checklist.
+router.patch('/:id/close',   lockedById(ctrl.closeIntervention))
 /* Visite passée, jamais démarrée : clôturée à sa date prévue, sans saisie. */
 router.patch('/:id/close-past', ctrl.closePast)
 /* Oubli constaté juste après la clôture : la visite se rouvre, et la
    réouverture apparaît dans l'historique. */
 router.patch('/:id/reopen',  ctrl.reopenIntervention)
 /* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist. */
-router.put('/:id/dea-items/:kind', ctrl.saveDeaItems)
+router.put('/:id/dea-items/:kind', lockedById(ctrl.saveDeaItems))
 /* Formation des agents : effectuée ou reportée, tranché pendant la visite. */
 router.patch('/:id/formation', ctrl.saveFormation)
 /* Formation liée à la visite (nouvelle, existante, aucune) et ses agents. */
@@ -62,8 +65,8 @@ router.post('/:id/rapport-pdf', receivePdf, ctrl.saveRapportPdf)
 /* Bon d'intervention rangé dans « Documents » du client, à chaque version. */
 router.post('/:id/bon-pdf',     receivePdf, ctrl.saveBonPdf)
 
-router.post('/:id/photo',            uploadIv.single('photo'), ctrl.uploadFichePhoto)
-router.delete('/:id/photo/:filename', ctrl.deleteFichePhoto)
+router.post('/:id/photo',            uploadIv.single('photo'), lockedById(ctrl.uploadFichePhoto))
+router.delete('/:id/photo/:filename', lockedById(ctrl.deleteFichePhoto))
 
 /* Contrôle du contrat que le client ne veut pas encore caler. */
 router.patch('/:id/attente', ctrl.setAttente)

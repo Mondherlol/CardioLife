@@ -12,6 +12,7 @@ const { syncFicheToParc } = require('../utils/ficheSync')
 const { syncDeaWithItem, syncDeaConsumables } = require('../utils/productItems')
 const { archiveRapport, archiveBon } = require('../utils/rapportArchive')
 const { applyBon } = require('../utils/bon')
+const { mergeDuplicateFiches, withInterventionLock } = require('../utils/ficheLock')
 const { linkFormation, unlinkFormation, createLinkedFormation, followVisitDate } = require('../utils/formationLink')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
@@ -536,6 +537,17 @@ async function getOne(req, res) {
       .populate('contract', 'contractNumber status')
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
 
+    /* Deux fiches pour un même DAE : l'écran en montrait une, les saisies
+       allaient dans l'autre, et le rapport imprimait les deux. On les fusionne
+       à l'ouverture, dans la file d'écriture de la visite. */
+    if (mergeDuplicateFiches(intervention)) {
+      // Réparation persistée sur une version fraîche, dans la file de la visite.
+      await withInterventionLock(intervention._id, async () => {
+        const fresh = await Intervention.findById(intervention._id)
+        if (fresh && mergeDuplicateFiches(fresh)) { syncLegacyFiche(fresh); await fresh.save() }
+      })
+    }
+
     // Technician can only view their own
     if (req.user.role === 'technicien' &&
         String(intervention.technicien?._id || intervention.technicien) !== String(req.user._id)) {
@@ -866,6 +878,8 @@ async function saveFiche(req, res) {
     if (!ensureStarted(intervention, res)) return
 
     ensureFiches(intervention)
+    // Fiches en double d'un même DAE (anciens enregistrements simultanés) : fusionnées.
+    mergeDuplicateFiches(intervention)
 
     /* Ce que la saisie déplace réellement, relevé avant écriture : après
        clôture, c'est ce détail qui part dans l'historique. */
