@@ -123,6 +123,7 @@ export default function ContractDetailPage() {
   const status   = STATUS_MAP[contract.status]
   const installs = contract.installations || []
   const siteId   = contract.site?._id || contract.site
+  const deaPriceOf = new Map((contract.deaPrices || []).map(r => [String(r.dea), r.price]))
 
   return (
     <div className="page-content">
@@ -162,6 +163,7 @@ export default function ContractDetailPage() {
           <span className="ct-tile-label"><Banknote size={12} /> Prix</span>
           <span className="ct-tile-value">{formatPrice(contract.price)}</span>
           <span className="ct-tile-sub">
+            {deaPriceOf.size > 0 && `Somme de ${deaPriceOf.size} tarif${deaPriceOf.size > 1 ? 's' : ''} par DAE · `}
             {contract.priceIncreases?.length
               ? `+5 % appliqué le ${formatDate(contract.priceIncreases[contract.priceIncreases.length - 1].appliedAt)}`
               : '+5 % deux mois avant le contrôle annuel'}
@@ -232,6 +234,9 @@ export default function ContractDetailPage() {
                         {inst.deviceType || 'DAE'}
                         <span className={st.cls}>{st.label}</span>
                         {inst.serialNumber && <span className="ct-install-badge">N° {inst.serialNumber}</span>}
+                        {deaPriceOf.has(String(inst._id)) && (
+                          <span className="ct-install-price">{formatPrice(deaPriceOf.get(String(inst._id)))}</span>
+                        )}
                       </div>
                       <div className="ct-install-sub">
                         <MapPin size={11} /> {inst.location || inst.address || '—'}

@@ -6,6 +6,11 @@ export const getContracts = (params = {}) => {
 }
 export const getContract        = (id)       => get(`/contracts/${id}`)
 export const getContractStats   = ()         => get('/contracts/stats')
+// Contrats actifs regroupés par client, avec leur montant cumulé.
+export const getClientTotals    = (params = {}) => {
+  const qs = new URLSearchParams(params).toString()
+  return get(`/contracts/client-totals${qs ? `?${qs}` : ''}`)
+}
 export const getNextNumber      = ()         => get('/contracts/next-number')
 export const createContract     = (data)     => post('/contracts', data)
 export const updateContract     = (id, data) => put(`/contracts/${id}`, data)

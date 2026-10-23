@@ -80,6 +80,10 @@ const ficheSchema = new Schema({
   armoirePiles:           { type: Boolean },
   armoirePilesRemplacees: { type: Boolean },
   armoirePilesNote:       { type: String, trim: true },
+  /* Armoire changée pendant la visite : à la clôture, l'ancienne sort du parc
+     hors service et la nouvelle, de ce modèle, est posée sur le DAE. */
+  armoireRemplacee:       { type: Boolean },
+  armoireRemplaceeModele: { type: String, trim: true },
 
   /* ── Suivi documentaire ── */
   dernierControle:  Date,

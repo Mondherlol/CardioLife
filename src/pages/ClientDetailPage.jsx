@@ -5,12 +5,12 @@ import {
   ArrowLeft, Building2, MapPin,
   User, FileText, Activity, Calendar, Pencil,
   GraduationCap, ClipboardList, Clock, CheckCircle2, MinusCircle,
-  ChevronRight, AlertTriangle,
+  ChevronRight, AlertTriangle, Banknote,
 } from 'lucide-react'
 import { getClient, clientLogoUrl } from '../api/clients'
 import { getInstallations } from '../api/installations'
 import { getInterventions, closeIntervention } from '../api/interventions'
-import { getContracts } from '../api/contracts'
+import { getContracts, formatPrice } from '../api/contracts'
 
 /* Type de contrôle → libellé */
 const CD_CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention' }
@@ -245,6 +245,8 @@ export default function ClientDetailPage() {
   const [editOpen, setEditOpen]       = useState(false)
   // Nombre de sites couverts par un contrat actif — résumé du bandeau.
   const [covered, setCovered] = useState(0)
+  // Montant cumulé de ses contrats actifs (null : aucun prix renseigné).
+  const [contractTotal, setContractTotal] = useState(null)
 
   useLoadingBar(loading)
 
@@ -261,6 +263,9 @@ export default function ClientDetailPage() {
       setClient(clientData)
       setInstallations(Array.isArray(installationsData.data) ? installationsData.data : [])
       setCovered(new Set((contractsData?.data || []).map(c => String(c.site?._id || c.site))).size)
+      const priced = (contractsData?.data || []).filter(c => c.price != null)
+      setContractTotal(priced.length
+        ? Math.round(priced.reduce((s, c) => s + c.price, 0) * 1000) / 1000 : null)
     } catch (err) {
       toast.error(err.message || 'Client introuvable.')
       navigate('/clients')
@@ -315,6 +320,11 @@ export default function ClientDetailPage() {
                 ? <><CheckCircle2 size={12} /> {covered}/{counts.sites} site{counts.sites !== 1 ? 's' : ''} sous contrat <ChevronRight size={12} /></>
                 : <><MinusCircle size={12} /> Aucun site sous contrat <ChevronRight size={12} /></>}
             </button>
+            {contractTotal != null && (
+              <span className="cd-stat-chip" title="Total des contrats actifs du client">
+                <Banknote size={12} /> {formatPrice(contractTotal)}
+              </span>
+            )}
             {!client.isActive && (
               <span className="cd-stat-chip cd-stat-chip--red">Archivé</span>
             )}

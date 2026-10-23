@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, AlertTriangle, Wand2, Info } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
-  createContract, updateContract, getNextNumber, CONTRACT_STATUSES,
+  createContract, updateContract, getNextNumber, CONTRACT_STATUSES, formatPrice,
 } from '../api/contracts'
 
 function formatApiError(err) {
@@ -46,6 +46,34 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
   const [status, setStatus] = useState(contract?.status || 'actif')
   const [notes,  setNotes]  = useState(contract?.notes || '')
   const [price,  setPrice]  = useState(contract?.price ?? '')
+
+  /* Tarif par DAE : le prix d'un contrat varie selon le modèle des appareils.
+     Le prix du contrat devient la somme de ces tarifs. */
+  const deas = site?.deas || contract?.installations || []
+  const [perDea, setPerDea] = useState(contract?.deaPrices?.length > 0)
+  const [deaPrices, setDeaPrices] = useState(() => Object.fromEntries(
+    (contract?.deaPrices || []).map(r => [String(r.dea), r.price])))
+  const deaTotal = Object.values(deaPrices).reduce((s, v) => {
+    const n = Number(String(v).replace(',', '.'))
+    return v !== '' && Number.isFinite(n) ? s + n : s
+  }, 0)
+  const anyDeaPrice = Object.values(deaPrices).some(v => v !== '' && v != null)
+
+  /* Un tarif saisi vaut pour les autres appareils du même modèle encore sans
+     prix : un client à cinq DAE identiques n'a qu'une case à remplir. */
+  function propagateModel(dea) {
+    const value = deaPrices[String(dea._id)]
+    if (value === '' || value == null || !dea.deviceType) return
+    setDeaPrices(prev => {
+      const next = { ...prev }
+      for (const d of deas) {
+        const k = String(d._id)
+        if (d.deviceType === dea.deviceType && (next[k] === '' || next[k] == null)) next[k] = value
+      }
+      return next
+    })
+  }
+
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
 
@@ -75,7 +103,13 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
         endDate:   end   || undefined,
         status,
         notes,
-        price,
+        ...(perDea ? {
+          deaPrices: Object.entries(deaPrices)
+            .filter(([, v]) => v !== '' && v != null)
+            .map(([dea, v]) => ({ dea, price: v })),
+          // Sans aucun tarif saisi, le contrat n'a pas de prix.
+          ...(anyDeaPrice ? {} : { price: '' }),
+        } : { price, deaPrices: [] }),
       }
       const saved = isEdit
         ? await updateContract(contract._id, payload)
@@ -141,10 +175,46 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
 
           <div className="form-group">
             <label className="form-label">Prix du contrat (DT) <span className="form-label-opt">(optionnel)</span></label>
-            <input type="number" min="0" step="0.001" inputMode="decimal"
-              className="form-input form-input--plain"
-              value={price} onChange={e => setPrice(e.target.value)} placeholder="Ex. 450" />
+            {deas.length > 0 && (
+              <div className="ct-price-mode">
+                <button type="button" className={`ct-price-mode-btn${!perDea ? ' ct-price-mode-btn--active' : ''}`}
+                  onClick={() => setPerDea(false)}>Un prix pour le site</button>
+                <button type="button" className={`ct-price-mode-btn${perDea ? ' ct-price-mode-btn--active' : ''}`}
+                  onClick={() => setPerDea(true)}>Un tarif par DAE</button>
+              </div>
+            )}
+            {perDea ? (
+              <div className="ct-dea-prices">
+                {deas.map(d => (
+                  <div key={d._id} className="ct-dea-price-row">
+                    <div className="ct-dea-price-label">
+                      <span>{d.deviceType || 'DAE'}</span>
+                      {(d.serialNumber || d.location) && (
+                        <span className="ct-dea-price-sub">
+                          {[d.serialNumber && `N° ${d.serialNumber}`, d.location].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                    </div>
+                    <input type="number" min="0" step="0.001" inputMode="decimal"
+                      className="form-input form-input--plain ct-dea-price-input"
+                      value={deaPrices[String(d._id)] ?? ''}
+                      onChange={e => setDeaPrices(prev => ({ ...prev, [String(d._id)]: e.target.value }))}
+                      onBlur={() => propagateModel(d)}
+                      placeholder="DT" />
+                  </div>
+                ))}
+                <div className="ct-dea-price-total">
+                  <span>Total du contrat</span>
+                  <strong>{anyDeaPrice ? formatPrice(Math.round(deaTotal * 1000) / 1000) : '—'}</strong>
+                </div>
+              </div>
+            ) : (
+              <input type="number" min="0" step="0.001" inputMode="decimal"
+                className="form-input form-input--plain"
+                value={price} onChange={e => setPrice(e.target.value)} placeholder="Ex. 450" />
+            )}
             <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+              {perDea && 'Un tarif saisi est repris pour les autres DAE du même modèle encore vides. '}
               Augmente de 5 % deux mois avant chaque contrôle annuel.
             </span>
           </div>

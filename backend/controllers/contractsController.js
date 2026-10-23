@@ -26,6 +26,28 @@ function parsePrice(v) {
   return { value: roundPrice(n) }
 }
 
+/**
+ * Tarifs par DAE saisis : `[{ dea, price }]`. Une ligne sans montant est
+ * ignorée, et seuls les DAE du site comptent — un appareil retiré du parc ne
+ * se facture plus.
+ */
+function parseDeaPrices(v, site) {
+  if (v === undefined) return { skip: true }
+  if (!Array.isArray(v)) return { error: 'Tarifs par DAE invalides.' }
+  const onSite = new Set((site?.deas || []).map(d => String(d._id)))
+  const list = []
+  for (const row of v) {
+    if (!row || !onSite.has(String(row.dea))) continue
+    const p = parsePrice(row.price)
+    if (p.error) return { error: 'Le tarif de chaque DAE doit être un montant positif.' }
+    if (p.value === undefined || p.skip) continue
+    list.push({ dea: row.dea, price: p.value })
+  }
+  return { value: list }
+}
+
+const sumPrices = list => roundPrice(list.reduce((s, r) => s + r.price, 0))
+
 /* Un client est « sous contrat » dès qu'un de ses sites l'est. Le drapeau est
    dénormalisé sur la fiche client : listes et tableau de bord le lisent
    directement. */
@@ -73,13 +95,51 @@ async function generateNumber(req, res) {
 async function getStats(req, res) {
   const now = new Date()
   const in30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
-  const [total, actifs, expirent, expires] = await Promise.all([
+  const [total, actifs, expirent, expires, [sum]] = await Promise.all([
     Contract.countDocuments({ isActive: true }),
     Contract.countDocuments({ isActive: true, status: 'actif' }),
     Contract.countDocuments({ isActive: true, status: 'actif', endDate: { $gte: now, $lte: in30 } }),
     Contract.countDocuments({ isActive: true, status: 'actif', endDate: { $lt: now } }),
+    // Montant de l'ensemble des contrats actifs, tous clients confondus.
+    Contract.aggregate([
+      { $match: { isActive: true, status: 'actif' } },
+      { $group: { _id: null, amount: { $sum: { $ifNull: ['$price', 0] } } } },
+    ]),
   ])
-  res.json({ total, actifs, expirent, expires })
+  res.json({ total, actifs, expirent, expires, amount: roundPrice(sum?.amount || 0) })
+}
+
+/* ── Totaux par client ────────────────────────────────── */
+/**
+ * Contrats actifs regroupés par client : nombre de contrats, de DAE couverts
+ * et montant cumulé. Le total général est la somme de ces lignes.
+ */
+async function getClientTotals(req, res) {
+  const match = { isActive: true, status: 'actif' }
+  const re = searchRegex(req.query.search)
+  if (re) match.$or = [{ contractNumber: re }, { clientName: re }, { siteName: re }]
+
+  const rows = await Contract.aggregate([
+    { $match: match },
+    { $group: {
+      _id:        '$client',
+      clientName: { $first: '$clientName' },
+      contracts:  { $sum: 1 },
+      unpriced:   { $sum: { $cond: [{ $eq: [{ $ifNull: ['$price', null] }, null] }, 1, 0] } },
+      amount:     { $sum: { $ifNull: ['$price', 0] } },
+      sites:      { $push: '$site' },
+    } },
+    { $sort: { amount: -1, clientName: 1 } },
+  ])
+
+  const deaCounts = await deaCountsBySite(rows.flatMap(r => r.sites))
+  const data = rows.map(({ sites, ...r }) => ({
+    ...r,
+    client: r._id,
+    amount: roundPrice(r.amount),
+    deaCount: sites.reduce((n, s) => n + (deaCounts[String(s)] || 0), 0),
+  }))
+  res.json({ data, amount: roundPrice(data.reduce((s, r) => s + r.amount, 0)) })
 }
 
 /* ── Liste ────────────────────────────────────────────── */
@@ -169,6 +229,10 @@ async function create(req, res) {
   const client = await Client.findById(site.client).select('name')
   if (!client) return res.status(404).json({ message: 'Client introuvable.' })
 
+  const deaPrices = parseDeaPrices(b.deaPrices, site)
+  if (deaPrices.error) return res.status(422).json({ message: deaPrices.error })
+  const perDea = deaPrices.value || []
+
   // Un site n'a qu'un contrat en cours à la fois.
   const existing = await Contract.findOne({ site: site._id, isActive: true, status: 'actif' })
   if (existing) {
@@ -195,7 +259,8 @@ async function create(req, res) {
     status:     STATUSES.includes(b.status) ? b.status : 'actif',
     startDate,
     endDate,
-    price:      price.value,
+    price:      perDea.length ? sumPrices(perDea) : price.value,
+    deaPrices:  perDea,
     notes:      b.notes?.trim() || undefined,
     createdBy:  req.user._id,
   })
@@ -231,6 +296,15 @@ async function update(req, res) {
   if (b.endDate   !== undefined) contract.endDate   = b.endDate   || undefined
   if (b.notes     !== undefined) contract.notes     = b.notes?.trim() || undefined
   if (!price.skip) contract.price = price.value
+
+  if (b.deaPrices !== undefined) {
+    const site = await Site.findById(contract.site).select('deas._id')
+    const deaPrices = parseDeaPrices(b.deaPrices, site)
+    if (deaPrices.error) return res.status(422).json({ message: deaPrices.error })
+    contract.deaPrices = deaPrices.value
+    // Des tarifs par DAE : le prix du contrat en est la somme.
+    if (deaPrices.value.length) contract.price = sumPrices(deaPrices.value)
+  }
 
   await contract.save()
 
@@ -320,7 +394,12 @@ async function applyAnnualIncrease(req, res) {
   }
 
   const from = contract.price
-  const to   = roundPrice(from * (1 + ANNUAL_INCREASE_RATE))
+  let to = roundPrice(from * (1 + ANNUAL_INCREASE_RATE))
+  // Tarifs par DAE : chacun augmente, le prix reste leur somme.
+  if (contract.deaPrices?.length) {
+    contract.deaPrices.forEach(r => { r.price = roundPrice(r.price * (1 + ANNUAL_INCREASE_RATE)) })
+    to = sumPrices(contract.deaPrices)
+  }
   contract.price = to
   contract.priceIncreases.push({
     control: control._id, from, to, rate: ANNUAL_INCREASE_RATE, appliedBy: req.user._id,
@@ -392,7 +471,7 @@ async function permanentDelete(req, res) {
 }
 
 module.exports = {
-  generateNumber, getStats, getAll, getById,
+  generateNumber, getStats, getClientTotals, getAll, getById,
   create, update, terminate, archive, restore, permanentDelete,
   getAnnualIncreases, applyAnnualIncrease,
 }

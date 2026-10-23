@@ -469,9 +469,85 @@ async function syncDeaArmoire(site, dea, { userId } = {}) {
   }
 }
 
+/**
+ * Produit du catalogue d'un modèle d'armoire, créé s'il manque : une armoire
+ * posée sur le terrain doit pouvoir se suivre au stock, même d'un modèle que
+ * le catalogue ne connaissait pas encore.
+ */
+async function armoireProductFor(model, userId) {
+  const label = String(model || '').trim()
+  if (!label) return undefined
+  const probe = { armoire: { model: label } }
+  await alignArmoireProduct(probe)
+  if (probe.armoire.product) return probe.armoire.product
+  const created = await Product.create({
+    name: `Armoire ${label}`, brand: /^aivia\b/i.test(label) ? 'AIVIA' : '',
+    category: ARMOIRE_CATEGORY, stock: 0, listedOnWebsite: false,
+    notes: 'Modèle créé par une checklist (armoire remplacée)', createdBy: userId,
+  })
+  return created._id
+}
+
+/**
+ * Armoire changée pendant une visite.
+ *
+ * L'armoire déposée est défectueuse : elle sort du parc hors service, elle ne
+ * retourne pas en rayon. La nouvelle — `dea.armoire.product`, déjà aligné sur
+ * le modèle posé — est prise au stock quand il en reste, et naît « installée »
+ * sinon : elle est chez le client dans tous les cas.
+ *
+ * `marker` identifie la visite : la remontée de la checklist est rejouée à
+ * chaque correction, le remplacement ne doit se faire qu'une fois. Rend true
+ * s'il a eu lieu.
+ */
+async function replaceDeaArmoire(site, dea, { userId, marker }) {
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (await ProductItem.exists({ category: ARMOIRE_CATEGORY, 'history.note': new RegExp(esc(marker)) })) {
+    return false
+  }
+  const note = `${site.name} · ${marker}`
+
+  const old = await ProductItem.find({ dea: dea._id, category: ARMOIRE_CATEGORY, status: 'installe' })
+  for (const item of old) {
+    item.dea = undefined; item.site = undefined; item.client = undefined
+    item.status = 'hs'
+    await logHistory(item, { action: 'Armoire remplacée — déposée défectueuse', from: 'installe', to: 'hs', note, user: userId })
+    await syncProductStock(item.product)
+  }
+
+  const product = dea.armoire?.product
+  if (!product) return true
+
+  // Seulement du disponible : une armoire réservée l'est pour quelqu'un d'autre.
+  const found = await ProductItem.findOne({ product, status: 'disponible', dea: null })
+    .sort({ entryDate: 1 })
+  if (found) {
+    const unit = await takeOneUnit(found)
+    const from = unit.status
+    unit.dea = dea._id; unit.site = site._id; unit.client = site.client
+    unit.status = 'installe'
+    unit.reservedFor = undefined
+    await logHistory(unit, { action: 'Posée en remplacement de l’armoire', from, to: 'installe', note, user: userId })
+  } else {
+    const p = await Product.findById(product).select('category reference').lean()
+    if (!p) return true
+    await ProductItem.create({
+      product, category: p.category || ARMOIRE_CATEGORY, reference: p.reference || '',
+      quantity: 1, status: 'installe', entryDate: new Date(),
+      client: site.client, site: site._id, dea: dea._id,
+      notes: 'Armoire posée en remplacement, absente du stock',
+      history: [{ action: 'Posée en remplacement de l’armoire (hors stock)', to: 'installe', note, user: userId, date: new Date() }],
+      createdBy: userId,
+    })
+  }
+  await syncProductStock(product)
+  return true
+}
+
 module.exports = {
   modelViewSlugs, summarize,
   syncProductStock, logHistory, findItemForDea, syncDeaWithItem, syncDeaConsumables,
   detachItemFromParc, attachMountedParts, syncDeaArmoire, alignArmoireProduct, unmountItem,
+  replaceDeaArmoire, armoireProductFor,
   IN_STOCK_STATUSES,
 }

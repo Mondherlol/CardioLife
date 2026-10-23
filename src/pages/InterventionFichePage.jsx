@@ -704,6 +704,8 @@ export default function InterventionFichePage() {
         armoirePiles:           f.armoirePiles,
         armoirePilesRemplacees: f.armoirePilesRemplacees,
         armoirePilesNote:       f.armoirePilesNote ?? '',
+        armoireRemplacee:       f.armoireRemplacee,
+        armoireRemplaceeModele: f.armoireRemplaceeModele ?? '',
 
         dernierControle:  f.dernierControle,
         prochainControle: f.prochainControle,
@@ -924,7 +926,7 @@ export default function InterventionFichePage() {
       key: String(dea._id), dea: dea._id, deaLabel: deaLabelOf(dea),
       serialNumber: dea.serialNumber || '', emplacement: dea.location || '',
       signaletique: '', electrodesType: '', armoire: '', observation: '',
-      armoireModele: dea.armoire?.model || '', armoirePilesNote: '',
+      armoireModele: dea.armoire?.model || '', armoirePilesNote: '', armoireRemplaceeModele: '',
       batterieNote: '', electrodesNote: '',
       batterieRemplaceeRef: '', electrodesRemplaceesRef: '', kitRemplaceRef: '',
     }])
@@ -1891,9 +1893,6 @@ export default function InterventionFichePage() {
                   </div>
 
                   <div className="fiche-check-group">
-                    <CheckPoint label="Intégrité de l'emballage hermétique"
-                      value={fiche.electrodesEmballage} readOnly={readOnly}
-                      onChange={v => checkPoint('electrodesEmballage', v)} />
                     <CheckPoint label="Présence des électrodes adaptées"
                       value={fiche.electrodesAdaptees} readOnly={readOnly}
                       onChange={v => checkPoint('electrodesAdaptees', v)} />
@@ -1931,21 +1930,6 @@ export default function InterventionFichePage() {
 
                 <AutoField label="Kit de secours" icon={Package}>
                   <div className="fiche-check-group">
-                    <CheckPoint label="Gants de protection présents"
-                      value={fiche.kitGants} readOnly={readOnly}
-                      onChange={v => checkPoint('kitGants', v)} />
-                    <CheckPoint label="Ciseaux disponibles"
-                      value={fiche.kitCiseaux} readOnly={readOnly}
-                      onChange={v => checkPoint('kitCiseaux', v)} />
-                    <CheckPoint label="Rasoir présent"
-                      value={fiche.kitRasoir} readOnly={readOnly}
-                      onChange={v => checkPoint('kitRasoir', v)} />
-                    <CheckPoint label="Masque de ventilation disponible"
-                      value={fiche.kitMasque} readOnly={readOnly}
-                      onChange={v => checkPoint('kitMasque', v)} />
-                    <CheckPoint label="Compresses présentes"
-                      value={fiche.kitCompresses} readOnly={readOnly}
-                      onChange={v => checkPoint('kitCompresses', v)} />
                     <CheckPoint label="Kit remplacé"
                       value={fiche.kitRemplace} readOnly={readOnly}
                       onChange={v => checkPoint('kitRemplace', v)} />
@@ -1974,20 +1958,11 @@ export default function InterventionFichePage() {
                   {savedField === 'autotests' && <span className="fiche-saved-ok">✓</span>}
                 </AutoField>
 
-                {/* État général de l'appareil. */}
-                <AutoField label="État général du DAE" icon={Shield}>
-                  <div className="fiche-check-group">
-                    <CheckPoint label="Voyant de fonctionnement au vert"
-                      value={fiche.voyantVert} readOnly={readOnly}
-                      onChange={v => checkPoint('voyantVert', v)} />
-                  </div>
-                </AutoField>
-
                 {/* Armoire : sonore, ses piles font partie du contrôle. Le
                     constat remonte sur la fiche client et alimente l'alerte
                     « armoires dont les piles sont à remplacer ». */}
                 <AutoField label="Armoire" icon={Archive}
-                  saving={['armoire', 'armoireModele', 'armoirePilesNote'].includes(savingField)}>
+                  saving={['armoire', 'armoireModele', 'armoirePilesNote', 'armoireRemplaceeModele'].includes(savingField)}>
                   {parcArmoire && (
                     <div className={`fiche-parc-bar${parcArmoire.pilesStatus === 'a_remplacer' ? ' fiche-parc-bar--missing' : ''}`}>
                       <Archive size={14} />
@@ -2034,7 +2009,35 @@ export default function InterventionFichePage() {
                         ))}
                       </div>
                     </div>
+                    {/* Armoire remplacée : à la clôture, l'ancienne passe hors
+                        service dans le stock et la nouvelle est posée sur le DAE. */}
+                    <div className="fiche-check">
+                      <span className="fiche-check-label">Armoire remplacée</span>
+                      <div className="fiche-presets">
+                        {[{ v: true, label: 'Oui' }, { v: false, label: 'Non' }].map(o => (
+                          <button key={String(o.v)} type="button"
+                            className={`fiche-preset-chip${fiche.armoireRemplacee === o.v ? ' fiche-preset-chip--active' : ''}`}
+                            disabled={readOnly}
+                            onClick={() => checkPoint('armoireRemplacee',
+                              fiche.armoireRemplacee === o.v ? undefined : o.v)}>
+                            {o.v ? <Check size={12} /> : <X size={12} />} {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
+
+                  {fiche.armoireRemplacee && (<>
+                    <span className="fiche-sub-label">Modèle de la nouvelle armoire</span>
+                    <input {...field('armoireRemplaceeModele', fiche.armoireRemplaceeModele, 'Ex : AIVIA 200')} />
+                    {!readOnly && (
+                      <Presets presets={ARMOIRE_MODELS} value={fiche.armoireRemplaceeModele}
+                        onSelect={v => handlePreset('armoireRemplaceeModele', v)} />
+                    )}
+                    {!fiche.armoireRemplaceeModele && !readOnly && (
+                      <p className="form-hint">Indiquez le modèle posé : sans lui, le stock ne peut pas être mis à jour.</p>
+                    )}
+                  </>)}
 
                   <span className="fiche-sub-label">Note sur les piles</span>
                   <textarea
@@ -2042,7 +2045,7 @@ export default function InterventionFichePage() {
                     className={`fiche-input fiche-textarea-sm${readOnly ? ' fiche-input--ro' : ''}`}
                     rows={2}
                   />
-                  {['armoire', 'armoireModele', 'armoirePilesNote'].includes(savedField) && (
+                  {['armoire', 'armoireModele', 'armoirePilesNote', 'armoireRemplaceeModele'].includes(savedField) && (
                     <span className="fiche-saved-ok">✓</span>
                   )}
                 </AutoField>
@@ -2147,16 +2150,10 @@ export default function InterventionFichePage() {
               <span className="fiche-section-note">Commun à tous les appareils</span>
             </div>
             <div className="fiche-page-body">
-              <div className="fiche-row-2col">
-                <AutoField label="Date de réception" icon={Calendar} saving={savingField === 'dateReception'}>
-                  <input type="date" {...visiteField('dateReception', 'Date de réception')} />
-                  {savedField === 'dateReception' && <span className="fiche-saved-ok">✓</span>}
-                </AutoField>
-                <AutoField label="Visa / Signature" icon={User} saving={savingField === 'visa'}>
-                  <input {...visiteField('visa', 'Nom du responsable…')} />
-                  {savedField === 'visa' && <span className="fiche-saved-ok">✓</span>}
-                </AutoField>
-              </div>
+              <AutoField label="Visa / Signature" icon={User} saving={savingField === 'visa'}>
+                <input {...visiteField('visa', 'Nom du responsable…')} />
+                {savedField === 'visa' && <span className="fiche-saved-ok">✓</span>}
+              </AutoField>
               {/* Formation des agents : le technicien dit seulement si la séance
                   a eu lieu ou si elle est repoussée. */}
               <AutoField label="Formation" icon={GraduationCap} saving={savingFormation}>

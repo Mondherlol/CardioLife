@@ -18,6 +18,7 @@ router.use(requirePermission('canManageContracts'))
 
 router.get('/next-number',      ctrl.generateNumber)
 router.get('/stats',            ctrl.getStats)
+router.get('/client-totals',    ctrl.getClientTotals)
 router.get('/annual-increases', ctrl.getAnnualIncreases)
 router.get('/',                 ctrl.getAll)
 router.get('/:id',              ctrl.getById)

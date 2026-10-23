@@ -159,17 +159,18 @@ export function RapportDocument({ iv }) {
   /* Sort de la formation, tranché pendant la visite. */
   const fo = iv.formation || {}
   const FORMATION_LABELS = { effectuee: 'Effectuée', reportee: 'Reportée' }
+  // Le nombre de formés vit sur la formation liée, saisi depuis la checklist.
+  const formes = iv.linkedFormation?.formes
   const formationLine = fo.etat
     ? [
         FORMATION_LABELS[fo.etat] || fo.etat,
         fo.etat === 'effectuee' && fo.date ? `le ${fmtShort(fo.date)}` : '',
+        fo.etat === 'effectuee' && formes != null
+          ? `· ${formes} agent${formes > 1 ? 's' : ''} formé${formes > 1 ? 's' : ''}` : '',
         fo.titre ? `— ${fo.titre}` : '',
         fo.note || '',
       ].filter(Boolean).join(' ')
     : null
-
-  const observations = fiches.filter(f => f.observation)
-  const hasObservations = observations.length > 0 || visite.observationGenerale
 
   return (
     <div className="pr-document">
@@ -326,7 +327,9 @@ export function RapportDocument({ iv }) {
                   {(fiche.armoire || '').trim().toLowerCase() === 'conforme'
                     ? 'En bon état'
                     : (fiche.armoire || (fiche.armoireModele ? '' : '—'))}
-                  {fiche.armoireModele && <span className="pr-dt-note">{fiche.armoireModele}</span>}
+                  {fiche.armoireRemplacee && fiche.armoireRemplaceeModele ? (
+                    <span className="pr-dt-note">Remplacée — {fiche.armoireRemplaceeModele}</span>
+                  ) : fiche.armoireModele && <span className="pr-dt-note">{fiche.armoireModele}</span>}
                   {/* Armoire sonore : l'état de ses piles fait partie du rapport. */}
                   {(fiche.armoirePilesRemplacees || fiche.armoirePiles != null) && (
                     <span className="pr-dt-note">
@@ -347,7 +350,6 @@ export function RapportDocument({ iv }) {
       <Section title="Informations de visite">
         <table className="pr-table">
           <tbody>
-            <InfoRow label="Date de réception" value={visite.dateReception ? fmtShort(visite.dateReception) : '—'} />
             <InfoRow label="Visa / Signature"  value={visite.visa} />
             {/* La formation des agents fait partie de la prestation : le
                 client doit lire dans le rapport si sa séance a eu lieu. */}
@@ -356,55 +358,11 @@ export function RapportDocument({ iv }) {
         </table>
       </Section>
 
-      {/* Passages hors calendrier depuis le contrôle précédent : le rapport d'un
-          contrôle semestriel ou annuel retrace tout ce qui s'est fait entre deux. */}
-      {iv.horsDelai && (
-        <Section title="Interventions hors délai depuis le dernier contrôle">
-          <p className="pr-hd-period">
-            {iv.horsDelai.previous
-              ? `Depuis le contrôle ${iv.horsDelai.previous.controlType} du ${fmtShort(iv.horsDelai.previous.date)}`
-              : `Au cours des douze mois précédents (du ${fmtShort(iv.horsDelai.since)})`}
-            {` jusqu'au ${fmtShort(iv.horsDelai.until)}.`}
-          </p>
-          {iv.horsDelai.items.length === 0 ? (
-            <p className="pr-hd-empty">Aucune intervention hors délai sur cette période.</p>
-          ) : (
-            <table className="pr-hd-table">
-              <thead>
-                <tr><th>Date</th><th>Nature</th><th>Détail</th><th>Intervenant</th></tr>
-              </thead>
-              <tbody>
-                {iv.horsDelai.items.map((it, i) => (
-                  <tr key={i}>
-                    <td className="pr-hd-date">{fmtShort(it.date)}</td>
-                    <td className="pr-hd-nature">{it.nature}</td>
-                    <td>{it.detail || '—'}</td>
-                    <td>{it.by || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </Section>
-      )}
-
-      {/* Observations */}
-      {hasObservations && (
-        <Section title="Observations">
-          {observations.map((f, i) => (
-            <div key={f.dea || i} className="pr-note-box" style={{ marginBottom: 8 }}>
-              <div className="pr-note-label">
-                {fiches.length > 1 ? deviceLabelOf(f) : 'Observation'}
-              </div>
-              <div className="pr-note-text">{f.observation}</div>
-            </div>
-          ))}
-          {visite.observationGenerale && (
-            <div className="pr-note-box">
-              <div className="pr-note-label">Observation générale</div>
-              <div className="pr-note-text">{visite.observationGenerale}</div>
-            </div>
-          )}
+      {visite.observationGenerale && (
+        <Section title="Observation générale">
+          <div className="pr-note-box">
+            <div className="pr-note-text">{visite.observationGenerale}</div>
+          </div>
         </Section>
       )}
 

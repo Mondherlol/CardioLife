@@ -158,6 +158,7 @@ const FICHE_LABELS = {
   armoireAccessible: 'Armoire accessible', armoirePiles: 'Piles armoire',
   armoireModele: "Type d'armoire", armoirePilesRemplacees: 'Piles armoire remplacées',
   armoirePilesNote: 'Note piles armoire',
+  armoireRemplacee: 'Armoire remplacée', armoireRemplaceeModele: 'Modèle armoire posée',
 
   dernierControle: 'Dernier contrôle', prochainControle: 'Prochain contrôle',
   observation: 'Observation',
@@ -173,7 +174,7 @@ const DATE_FIELDS = new Set([
 const PCT_FIELDS  = new Set(['batteriePct', 'electrodesPct'])
 /* Trois familles de booléens, trois vocabulaires : une pièce est posée ou non,
    un accessoire est là ou non, un point de contrôle est conforme ou non. */
-const YESNO_FIELDS    = new Set(['batterieRemplacee', 'electrodesRemplacees', 'kitRemplace'])
+const YESNO_FIELDS    = new Set(['batterieRemplacee', 'electrodesRemplacees', 'kitRemplace', 'armoireRemplacee'])
 const PRESENCE_FIELDS = new Set(['kitGants', 'kitCiseaux', 'kitRasoir', 'kitMasque', 'kitCompresses'])
 
 const ELECTRODE_TYPE_LABELS = {
@@ -780,6 +781,7 @@ const FICHE_FIELDS = [
   'voyantVert', 'autotests', 'armoire', 'armoireAccessible',
   // Armoire et piles de son alarme
   'armoireModele', 'armoirePiles', 'armoirePilesRemplacees', 'armoirePilesNote',
+  'armoireRemplacee', 'armoireRemplaceeModele',
   // Suivi documentaire
   'dernierControle', 'prochainControle',
   'observation',

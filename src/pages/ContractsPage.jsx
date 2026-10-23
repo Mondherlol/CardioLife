@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   Search, X, FileText, AlertTriangle, Archive, RotateCcw, Trash,
-  Users, Building2, Calendar, Zap, Clock, CheckCircle2,
+  Users, Building2, Calendar, Zap, Clock, CheckCircle2, Banknote, List,
 } from 'lucide-react'
 import {
-  getContracts, getContractStats, archiveContract, restoreContract, destroyContract,
+  getContracts, getContractStats, getClientTotals, archiveContract, restoreContract, destroyContract,
   CONTRACT_STATUSES, formatPrice,
 } from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
@@ -75,6 +75,20 @@ export default function ContractsPage() {
   const tableWrapRef = useRef(null)
 
   const isArchived = tab === 'archived'
+  // « Par client » : un total par client, plutôt qu'une ligne par contrat.
+  const [byClient, setByClient] = useState(false)
+  const [totals,   setTotals]   = useState(null)
+  const showTotals = byClient && !isArchived
+
+  useEffect(() => {
+    if (!showTotals) return
+    let alive = true
+    setTotals(null)
+    getClientTotals(query ? { search: query } : {})
+      .then(t => { if (alive) setTotals(t) })
+      .catch(err => toast.error(formatApiError(err)))
+    return () => { alive = false }
+  }, [showTotals, query])
 
   const fetchStats = useCallback(async () => {
     try { setStats(await getContractStats()) } catch (_) {}
@@ -111,6 +125,7 @@ export default function ContractsPage() {
     { icon: CheckCircle2, label: 'Actifs',          value: stats.actifs,   color: 'var(--green-600)',  bg: 'var(--green-50)'  },
     { icon: Clock,        label: 'Expirent < 30j',  value: stats.expirent, color: 'var(--amber-600)',  bg: 'var(--amber-50)', alert: stats.expirent > 0 },
     { icon: AlertTriangle,label: 'Échus',           value: stats.expires,  color: 'var(--red-600)',    bg: 'var(--red-50)',   alert: stats.expires > 0 },
+    { icon: Banknote,     label: 'Montant total (contrats actifs)', value: formatPrice(stats.amount ?? 0), color: 'var(--blue-600)', bg: 'var(--blue-50)' },
   ] : []
 
   return (
@@ -139,7 +154,7 @@ export default function ContractsPage() {
 
       {/* Stats */}
       {!isArchived && stats && (
-        <div className="stock-stats-grid">
+        <div className="stock-stats-grid ct-stats-grid">
           {statCards.map(card => {
             const Icon = card.icon
             return (
@@ -165,15 +180,72 @@ export default function ContractsPage() {
             value={search} onChange={e => setSearch(e.target.value)} />
           {search && <button className="search-clear" onClick={() => setSearch('')}><X size={13} /></button>}
         </div>
-        {!isArchived && (
+        {!isArchived && !byClient && (
           <select className="cat-filter-select" value={statusF} onChange={e => setStatusF(e.target.value)}>
             <option value="">Tous les statuts</option>
             {CONTRACT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
         )}
+        {!isArchived && (
+          <div className="ct-view-toggle">
+            <button type="button" className={`ct-view-btn${!byClient ? ' ct-view-btn--active' : ''}`}
+              onClick={() => setByClient(false)}><List size={13} /> Par contrat</button>
+            <button type="button" className={`ct-view-btn${byClient ? ' ct-view-btn--active' : ''}`}
+              onClick={() => setByClient(true)}><Users size={13} /> Total par client</button>
+          </div>
+        )}
       </div>
 
-      {/* Tableau */}
+      {showTotals ? (
+        <div className="table-wrap">
+          {!totals ? (
+            <div className="table-loading"><span className="spinner" /></div>
+          ) : totals.data.length === 0 ? (
+            <div className="table-empty">
+              <Banknote size={36} color="var(--gray-300)" />
+              <p>{query ? 'Aucun contrat actif pour cette recherche.' : 'Aucun contrat actif.'}</p>
+            </div>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 200 }}>Client</th>
+                  <th>Contrats actifs</th>
+                  <th>DAE couverts</th>
+                  <th style={{ textAlign: 'right' }}>Total des contrats</th>
+                </tr>
+              </thead>
+              <tbody>
+                {totals.data.map(r => (
+                  <tr key={r.client} className="mv-row--clickable"
+                    onClick={() => navigate(`/clients/${r.client}`)} title="Voir le client">
+                    <td>
+                      <div className="cell-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Users size={13} color="var(--gray-300)" /> {r.clientName || '—'}
+                      </div>
+                    </td>
+                    <td className="cell-muted">
+                      {r.contracts}
+                      {r.unpriced > 0 && <span className="cell-secondary"> · {r.unpriced} sans prix</span>}
+                    </td>
+                    <td><span className="ct-count-chip"><Zap size={11} /> {r.deaCount}</span></td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} className="cell-primary">{formatPrice(r.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="ct-totals-foot">
+                  <td>Total — {totals.data.length} client{totals.data.length !== 1 ? 's' : ''}</td>
+                  <td>{totals.data.reduce((n, r) => n + r.contracts, 0)}</td>
+                  <td>{totals.data.reduce((n, r) => n + r.deaCount, 0)}</td>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{formatPrice(totals.amount)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      ) : (
+      /* Tableau */
       <div className="table-wrap" ref={tableWrapRef}>
         {error && !contracts.length && <div className="table-error"><AlertTriangle size={15} /> {error}</div>}
         {loading ? (
@@ -286,6 +358,7 @@ export default function ContractsPage() {
           />
         )}
       </div>
+      )}
 
       {archiving && (
         <ConfirmModal

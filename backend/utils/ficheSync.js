@@ -1,7 +1,7 @@
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
 const { skipWeekend, syncSiteNextControl } = require('./controls')
-const { syncDeaConsumables, syncDeaArmoire, alignArmoireProduct } = require('./productItems')
+const { syncDeaConsumables, syncDeaArmoire, alignArmoireProduct, replaceDeaArmoire, armoireProductFor } = require('./productItems')
 
 /**
  * Remontée de la checklist vers le parc et le planning.
@@ -72,6 +72,9 @@ function apply(target, field, value, label, changes, { date = false } = {}) {
 
 const PILES_LABELS = { ok: 'en état', a_remplacer: 'à remplacer' }
 
+// Sans modèle posé, le stock ne saurait pas quelle armoire mettre à la place.
+const armoireReplaced = fiche => fiche.armoireRemplacee === true && filled(fiche.armoireRemplaceeModele)
+
 /**
  * Armoire du DAE : modèle relevé et état des piles de l'alarme.
  *
@@ -84,11 +87,13 @@ function applyArmoire(fiche, dea, local, visitDate) {
     : fiche.armoirePiles === true ? 'ok'
     : fiche.armoirePiles === false ? 'a_remplacer'
     : null
-  if (!filled(fiche.armoireModele) && !status) return
+  // Une armoire remplacée : c'est le modèle posé qui figure désormais au parc.
+  const model = armoireReplaced(fiche) ? fiche.armoireRemplaceeModele : fiche.armoireModele
+  if (!filled(model) && !status) return
 
   if (!dea.armoire) dea.armoire = {}
   const arm = dea.armoire
-  apply(arm, 'model', fiche.armoireModele, "Type d'armoire", local)
+  apply(arm, 'model', model, "Type d'armoire", local)
   if (!status) return
 
   if (arm.pilesStatus !== status) {
@@ -267,17 +272,27 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
     const visitDate = intervention.completedDate || intervention.startedAt ||
       intervention.scheduledDate || new Date()
 
-    const touched = []
+    const touched  = []
+    const replaced = new Set()   // DAE dont l'armoire a été changée sur place
     for (const fiche of intervention.fiches || []) {
       const dea = resolveDea(site, intervention, fiche)
       if (!dea) continue
       applyFicheToDea(fiche, dea, changes, visitDate)
       if (!touched.some(d => String(d._id) === String(dea._id))) touched.push(dea)
+      if (armoireReplaced(fiche)) replaced.add(String(dea._id))
     }
 
-    if (changes.length && !dry) {
+    if ((changes.length || replaced.size) && !dry) {
       // Un modèle d'armoire relevé sur place retrouve son produit du catalogue.
-      for (const dea of touched) await alignArmoireProduct(dea)
+      for (const dea of touched) {
+        /* Armoire remplacée : le produit est celui du modèle posé, jamais
+           l'ancien gardé en repli — on prendrait au stock la mauvaise armoire. */
+        if (replaced.has(String(dea._id)) && dea.armoire) {
+          dea.armoire.product = await armoireProductFor(dea.armoire.model, user?._id)
+        } else {
+          await alignArmoireProduct(dea)
+        }
+      }
       await site.save()
       /* La chaîne va jusqu'au stock : la péremption relevée sur le terrain
          arrive sur la fiche du DAE, puis sur la fiche de l'article monté. Les
@@ -285,6 +300,14 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
       for (const dea of touched) {
         await syncDeaConsumables(site, dea, 'batteries')
         await syncDeaConsumables(site, dea, 'electrodes')
+        // Le remplacement d'abord : sans lui, l'article de l'ancienne armoire
+        // serait seulement « corrigé » vers le nouveau modèle.
+        if (replaced.has(String(dea._id))) {
+          const done = await replaceDeaArmoire(site, dea, {
+            userId: user?._id, marker: `Visite #${String(intervention._id).slice(-8).toUpperCase()}`,
+          })
+          if (done) changes.push(`${dea.deviceType || dea.serialNumber || 'DAE'} — Armoire remplacée par ${dea.armoire?.model} (ancienne hors service)`)
+        }
         if (dea.armoire) await syncDeaArmoire(site, dea, { userId: user?._id })
       }
     }

@@ -47,6 +47,16 @@ const contractSchema = new mongoose.Schema({
 
   // Prix du contrat. Relevé de 5 % deux mois avant chaque contrôle annuel.
   price:          { type: Number, min: 0 },
+  /* Tarif propre à chaque DAE du site, le prix variant selon le modèle. Dès
+     qu'il y en a un, `price` en est la somme : listes, totaux et hausses
+     annuelles continuent de lire `price`. */
+  deaPrices: {
+    type: [new mongoose.Schema({
+      dea:   { type: mongoose.Schema.Types.ObjectId, required: true },
+      price: { type: Number, min: 0, required: true },
+    }, { _id: false })],
+    default: [],
+  },
   priceIncreases: { type: [priceIncreaseSchema], default: [] },
 
   notes:    { type: String, trim: true },
