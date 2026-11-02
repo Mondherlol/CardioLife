@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Users, Package, FileText,
   Wrench, Calendar, File,
-  Settings, UserCircle, Heart, ChevronLeft, ChevronRight,
+  Settings, UserCircle, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { useSidebar } from '../context/SidebarContext'
 import { useAuth }    from '../context/AuthContext'
@@ -76,9 +76,7 @@ export default function Sidebar() {
     <aside className={cls}>
       {/* Logo */}
       <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">
-          <Heart size={18} strokeWidth={2.5} />
-        </div>
+        <img className="sidebar-logo-icon" src="/logocarre.png" alt="CardioLife" />
         <span className="sidebar-logo-text">
           <span className="sidebar-brand">Cardio</span>
           <span className="sidebar-track">Track</span>

@@ -535,12 +535,7 @@ button {
 .sidebar-logo-icon {
   width: 36px;
   height: 36px;
-  background: var(--orange-500);
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
+  object-fit: contain;
   flex-shrink: 0;
 }
 
