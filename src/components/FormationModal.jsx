@@ -4,7 +4,7 @@ import { toast } from 'react-toastify'
 import {
   GraduationCap, X, AlertTriangle, Trash2, Upload, FileText, Users,
   UserPlus, Check, Clock, History, User, Mail, Phone, Building2,
-  CalendarDays, Copy, Send, CircleDashed, CheckCircle2, Ban, ClipboardList,
+  CalendarDays, Copy, Send, CircleDashed, CheckCircle2, Ban, ClipboardList, Award,
 } from 'lucide-react'
 import {
   createFormation, updateFormation, deleteFormation,
@@ -12,10 +12,11 @@ import {
 } from '../api/formations'
 import { getSites } from '../api/sites'
 import { ClientSearchInput, AssignedToInput } from './PlanningInputs'
+import AttestationDialog from './AttestationDialog'
 import { localDateStr, localTimeStr, durationOptionsWith } from '../lib/appointmentConstants'
 import {
   STAGE_LIST, stageOf, stagePayload, PARTICIPANT_LIST, participantState,
-  countParticipants, seatsUsed, attestationRecipient,
+  countParticipants, seatsUsed, attestationRecipient, deaModels,
 } from '../lib/formations'
 
 const STAGE_ICONS = {
@@ -403,6 +404,7 @@ export default function FormationModal({
   const [uploading, setUploading] = useState(false)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState('')
+  const [attOpen,   setAttOpen]   = useState(false)
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
@@ -602,6 +604,9 @@ export default function FormationModal({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {/* Une formation n'a pas de page : son bon d'intervention s'ouvre d'ici. */}
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setAttOpen(true)}>
+              <Award size={14} /> Attestations
+            </button>
             {isEdit && raw._id && (
               <button type="button" className="btn btn--ghost btn--sm"
                 onClick={() => window.open(`/formations/${raw._id}/bon`, '_blank')}>
@@ -801,6 +806,18 @@ export default function FormationModal({
           </div>
         </form>
       </div>
+
+      {attOpen && (
+        <AttestationDialog
+          participants={participants}
+          devices={deaModels({ site: selectedSite || raw.site })}
+          trainer={form.assignedTo[0]?.fullName || ''}
+          date={form.date}
+          fileLabel={[form.clientName, form.date].filter(Boolean).join(' - ')}
+          onAttach={isEdit ? (blob, name) => uploadLive([new File([blob], name, { type: 'application/pdf' })]) : undefined}
+          onClose={() => setAttOpen(false)}
+        />
+      )}
     </div>
   )
 }
