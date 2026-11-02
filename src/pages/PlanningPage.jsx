@@ -25,7 +25,7 @@ import { AttenteListModal } from '../components/ControlAdminModals'
 import AppointmentViewModal from '../components/AppointmentViewModal'
 import { useAuth } from '../context/AuthContext'
 import {
-  TYPE_OPTS, STATUS_OPTS, TYPE_MAP, formatTime, localDateStr,
+  TYPE_OPTS, TYPE_MAP, formatTime, localDateStr,
   DEDICATED_TYPES, controlTypeToPlanning, controlEventTitle,
   placeTitle, eventTooltip,
 } from '../lib/appointmentConstants'
@@ -558,14 +558,8 @@ export default function PlanningPage() {
         </div>
 
         <div className="plan-side-section">
-          <h3 className="plan-side-title">Légende statuts</h3>
+          <h3 className="plan-side-title">Légende</h3>
           <div className="plan-status-list">
-            {STATUS_OPTS.map(s => (
-              <div key={s.value} className="plan-status-item">
-                <span className="plan-status-dot" style={{ background: s.color }} />
-                {s.label}
-              </div>
-            ))}
             {/* Contrôle du contrat pas encore calé : à glisser sur sa vraie date. */}
             <div className="plan-status-item" title="Contrôle du contrat sans technicien assigné — glissez-le sur le bon jour, ou programmez-le">
               <span className="plan-status-dot plan-status-dot--dashed" />

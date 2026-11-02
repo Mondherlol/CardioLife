@@ -219,7 +219,7 @@ async function getHistory(req, res) {
       .lean(),
     // Contrat en cours du site — le calendrier des visites en découle.
     Contract.findOne({ site: site._id, isActive: true, status: 'actif' })
-      .select('contractNumber status startDate endDate')
+      .select('contractNumber status startDate endDate termination')
       .lean(),
   ])
 

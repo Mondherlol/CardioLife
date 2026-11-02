@@ -266,7 +266,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
       return [
         { label: 'Ouvrir la fiche du site',   icon: ArrowUpRight, onClick: () => act.openSite(site) },
         contract
-          ? { label: 'Retirer le contrat', icon: FileX, danger: true, onClick: () => setCtrEnding({ site, contract }) }
+          ? { label: 'Résilier le contrat', icon: FileX, danger: true, onClick: () => setCtrEnding({ site, contract }) }
           : { label: 'Créer un contrat', icon: FileText, disabled: !site.deas?.length, onClick: () => act.openContract(site) },
         { separator: true },
         { label: 'Ajouter un DEA',            icon: Plus,      onClick: () => act.addDea(site) },

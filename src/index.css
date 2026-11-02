@@ -19822,7 +19822,7 @@ button {
 
 .fm-person-add {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1.4fr) minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
 }
@@ -22031,6 +22031,8 @@ div.att-main { cursor: default; }
 .att-person--off .form-input { opacity: .55; }
 
 .att-civ {
+  flex-shrink: 0;
+  justify-self: start;
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -22047,3 +22049,60 @@ div.att-main { cursor: default; }
 }
 .att-civ-btn + .att-civ-btn { border-left: 1px solid var(--border); }
 .att-civ-btn--on { background: #f4f7dc; color: #7a8524; }
+
+/* ── Contrats : renouvellement, résiliation, historique ────────── */
+.ct-renew-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 2px 34px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.ct-renew-row select { max-width: 140px; }
+
+.ct-term-opts { display: flex; flex-direction: column; }
+
+.ct-term-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--amber-200, #fde68a);
+  border-radius: 10px;
+  background: var(--amber-50);
+  color: var(--amber-700, #b45309);
+  font-size: 13px;
+}
+.ct-term-banner > span { flex: 1; min-width: 200px; }
+
+.ct-history-table td { vertical-align: middle; white-space: nowrap; }
+.ct-history-table td svg { vertical-align: -1px; }
+.ct-history-row--current td { background: var(--green-50); }
+.ct-history-muted { color: var(--text-muted); font-size: 12px; }
+
+.ct-history-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ct-history-tag--current { background: var(--green-100, #dcfce7); color: var(--green-700); }
+.ct-history-tag--free { margin-left: 0; background: #f4f7dc; color: #7a8524; }
+
+.ct-history-events { display: flex; flex-direction: column; gap: 8px; }
+.ct-history-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.ct-history-event > svg { color: var(--text-muted); flex-shrink: 0; }

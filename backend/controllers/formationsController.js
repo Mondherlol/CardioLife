@@ -59,6 +59,7 @@ function cleanParticipants(value) {
     .filter(p => p && String(p.name || '').trim())
     .map(p => ({
       name:   String(p.name).trim(),
+      civility: ['Mme', 'Mr'].includes(p.civility) ? p.civility : undefined,
       role:   p.role  ? String(p.role).trim()  : undefined,
       email:  p.email ? String(p.email).trim() : undefined,
       phone:  p.phone ? String(p.phone).trim() : undefined,

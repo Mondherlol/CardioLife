@@ -4,10 +4,14 @@ import { toast } from 'react-toastify'
 import {
   ArrowLeft, Pencil, FileText, Calendar, Zap, MapPin, Clock,
   User, CheckCircle2, ClipboardList, Building2, HeartPulse, Info, Banknote,
+  History, RefreshCw, Gift, FileX, AlertTriangle, TrendingUp, Undo2,
 } from 'lucide-react'
-import { getContract, CONTRACT_STATUSES, formatPrice } from '../api/contracts'
+import {
+  getContract, cancelTermination, CONTRACT_STATUSES, formatPrice, renewalLabel,
+} from '../api/contracts'
 import { useLoadingBar } from '../hooks/useLoadingBar'
 import ContractModal from '../components/ContractModal'
+import TerminateContractConfirm from '../components/TerminateContractConfirm'
 
 const STATUS_MAP = Object.fromEntries(CONTRACT_STATUSES.map(s => [s.value, s]))
 
@@ -30,6 +34,125 @@ function daysUntil(d) {
   if (!d) return null
   const t = new Date(d), n = new Date()
   return Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 86400000)
+}
+
+/* Durée d'une période, lisible : « 1 an », « 6 mois », « 1 an et 3 mois ». */
+function durationLabel(start, end) {
+  if (!start || !end) return '—'
+  const s = new Date(start), e = new Date(end)
+  let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth())
+  if (e.getDate() < s.getDate()) months--
+  if (months < 1) return `${Math.max(1, Math.round((e - s) / 86400000))} j`
+  const y = Math.floor(months / 12), m = months % 12
+  return [y && `${y} an${y > 1 ? 's' : ''}`, m && `${m} mois`].filter(Boolean).join(' et ')
+}
+
+const byName = u => (u && typeof u === 'object' ? (u.fullName || u.username) : null)
+
+/* ─── Onglet Historique ───
+   Toutes les périodes du contrat — la première puis chaque renouvellement —
+   avec leur durée et leur prix, et les événements qui ont modifié le prix ou
+   mis fin au contrat. */
+function HistoryTab({ contract }) {
+  const periods = [...(contract.periods || [])].reverse()
+  const now = new Date()
+
+  const events = [
+    ...(contract.priceIncreases || []).map(p => ({
+      at: p.appliedAt, icon: TrendingUp,
+      text: `Hausse de ${Math.round(p.rate * 100)} % : ${formatPrice(p.from)} → ${formatPrice(p.to)}`,
+      by: byName(p.appliedBy),
+    })),
+    ...(contract.termination?.date ? [{
+      at: contract.termination.requestedAt, icon: FileX,
+      text: `${contract.status === 'resilie' ? 'Résilié' : 'Résiliation programmée'} au ${formatDate(contract.termination.date)}`
+        + (contract.termination.reason ? ` — ${contract.termination.reason}` : ''),
+      by: byName(contract.termination.requestedBy),
+    }] : []),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at))
+
+  const billed = (contract.periods || []).reduce((s, p) => s + (p.free ? 0 : Number(p.price) || 0), 0)
+
+  return (
+    <>
+      <div className="ct-section">
+        <h3 className="ct-section-title">
+          <History size={15} /> Périodes du contrat
+          <span className="ct-inst-count">
+            {periods.length} période{periods.length !== 1 ? 's' : ''}
+            {billed > 0 && ` · ${formatPrice(Math.round(billed * 1000) / 1000)} facturés`}
+          </span>
+        </h3>
+
+        {periods.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
+            Ce contrat n'a pas de dates : renseignez son début et son échéance pour suivre ses périodes.
+          </p>
+        ) : (
+          <div className="table-wrap">
+            <table className="table ct-history-table">
+              <thead>
+                <tr>
+                  <th>Période</th>
+                  <th>Durée</th>
+                  <th>Prix</th>
+                  <th>Type</th>
+                  <th>Par</th>
+                </tr>
+              </thead>
+              <tbody>
+                {periods.map((p, i) => {
+                  const current = new Date(p.start) <= now && now < new Date(p.end)
+                  return (
+                    <tr key={p._id || i} className={current ? 'ct-history-row--current' : ''}>
+                      <td>
+                        {formatDate(p.start)} → {formatDate(p.end)}
+                        {current && <span className="ct-history-tag ct-history-tag--current">En cours</span>}
+                      </td>
+                      <td>{durationLabel(p.start, p.end)}</td>
+                      <td>
+                        {p.free
+                          ? <><span className="ct-history-tag ct-history-tag--free"><Gift size={11} /> Offerte</span>
+                              {p.price != null && <span className="ct-history-muted"> (tarif {formatPrice(p.price)})</span>}</>
+                          : formatPrice(p.price)}
+                      </td>
+                      <td>
+                        {p.kind === 'renouvellement'
+                          ? <><RefreshCw size={11} /> Renouvellement{p.auto ? ' auto' : ''}</>
+                          : 'Souscription'}
+                      </td>
+                      <td className="ct-history-muted">
+                        {p.auto ? 'Automatique' : (byName(p.createdBy) || '—')}
+                        {p.createdAt && <> · {formatDate(p.createdAt)}</>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {events.length > 0 && (
+        <div className="ct-section">
+          <h3 className="ct-section-title"><Clock size={15} /> Événements</h3>
+          <div className="ct-history-events">
+            {events.map((ev, i) => {
+              const Icon = ev.icon
+              return (
+                <div key={i} className="ct-history-event">
+                  <Icon size={13} />
+                  <span>{ev.text}</span>
+                  <span className="ct-history-muted">{formatDate(ev.at)}{ev.by && ` · ${ev.by}`}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  )
 }
 
 /* ─── Onglet Contrôles ─── */
@@ -104,6 +227,8 @@ export default function ContractDetailPage() {
   const [contract, setContract] = useState(null)
   const [loading,  setLoading]  = useState(true)
   const [editing,  setEditing]  = useState(false)
+  const [ending,   setEnding]   = useState(false)
+  const [undoing,  setUndoing]  = useState(false)
   const [tab, setTab] = useState('details')
 
   useLoadingBar(loading)
@@ -124,6 +249,20 @@ export default function ContractDetailPage() {
   const installs = contract.installations || []
   const siteId   = contract.site?._id || contract.site
   const deaPriceOf = new Map((contract.deaPrices || []).map(r => [String(r.dea), r.price]))
+  const periods    = contract.periods || []
+  const current    = periods[periods.length - 1]
+  const isActif    = contract.status === 'actif'
+  const scheduled  = isActif && contract.termination?.date
+
+  async function undoTermination() {
+    setUndoing(true)
+    try {
+      await cancelTermination(contract._id)
+      toast.success('Résiliation annulée.')
+      load()
+    } catch (err) { toast.error(err.message || 'Erreur.') }
+    finally { setUndoing(false) }
+  }
 
   return (
     <div className="page-content">
@@ -142,10 +281,31 @@ export default function ContractDetailPage() {
             </p>
           </div>
         </div>
-        <button className="btn btn--primary" onClick={() => setEditing(true)}>
-          <Pencil size={14} /> Modifier
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {isActif && !scheduled && (
+            <button className="btn btn--danger-ghost" onClick={() => setEnding(true)}>
+              <FileX size={14} /> Résilier
+            </button>
+          )}
+          <button className="btn btn--primary" onClick={() => setEditing(true)}>
+            <Pencil size={14} /> Modifier
+          </button>
+        </div>
       </div>
+
+      {scheduled && (
+        <div className="ct-term-banner">
+          <AlertTriangle size={15} />
+          <span>
+            Résiliation programmée au <strong>{formatDate(contract.termination.date)}</strong>
+            {contract.termination.reason && <> — {contract.termination.reason}</>}.
+            Le contrat ne sera pas renouvelé.
+          </span>
+          <button className="btn btn--ghost btn--sm" onClick={undoTermination} disabled={undoing}>
+            <Undo2 size={13} /> Annuler la résiliation
+          </button>
+        </div>
+      )}
 
       {/* Infos clés */}
       <div className="ct-detail-grid">
@@ -156,13 +316,26 @@ export default function ContractDetailPage() {
           <span className="ct-tile-sub">{contract.client?.name || contract.clientName || ''}</span>
         </button>
         <div className="ct-detail-tile">
-          <span className="ct-tile-label"><Calendar size={12} /> Période</span>
-          <span className="ct-tile-value">{formatDate(contract.startDate)} → {formatDate(contract.endDate)}</span>
+          <span className="ct-tile-label"><Calendar size={12} /> Période en cours</span>
+          <span className="ct-tile-value">{formatDate(current?.start || contract.startDate)} → {formatDate(contract.endDate)}</span>
+          <span className="ct-tile-sub">
+            {periods.length > 1 && `Client depuis le ${formatDate(contract.startDate)} · `}
+            {!isActif ? (STATUS_MAP[contract.status]?.label || '')
+              : scheduled ? `Résiliation le ${formatDate(contract.termination.date)}`
+              : contract.autoRenew !== false
+                ? <><RefreshCw size={10} /> Renouvelé auto · {renewalLabel(contract.renewalMonths || 12)}{contract.nextFree && ' · prochaine offerte'}</>
+                : 'Sans renouvellement automatique'}
+          </span>
         </div>
         <div className="ct-detail-tile">
           <span className="ct-tile-label"><Banknote size={12} /> Prix</span>
-          <span className="ct-tile-value">{formatPrice(contract.price)}</span>
+          <span className="ct-tile-value">
+            {contract.freePeriod
+              ? <span className="ct-history-tag ct-history-tag--free"><Gift size={12} /> Période offerte</span>
+              : formatPrice(contract.price)}
+          </span>
           <span className="ct-tile-sub">
+            {contract.freePeriod && contract.price != null && `Tarif ${formatPrice(contract.price)} · `}
             {deaPriceOf.size > 0 && `Somme de ${deaPriceOf.size} tarif${deaPriceOf.size > 1 ? 's' : ''} par DAE · `}
             {contract.priceIncreases?.length
               ? `+5 % appliqué le ${formatDate(contract.priceIncreases[contract.priceIncreases.length - 1].appliedAt)}`
@@ -193,9 +366,18 @@ export default function ContractDetailPage() {
             </span>
           )}
         </button>
+        <button className={`cd-tab${tab === 'historique' ? ' cd-tab--active' : ''}`} onClick={() => setTab('historique')}>
+          <History size={14} /> Historique
+          {periods.length > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 600, background: 'var(--gray-200)', color: 'var(--text-muted)', borderRadius: 999, padding: '0 6px', marginLeft: 4 }}>
+              {periods.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {tab === 'controles' && <ControlsTab controls={contract.controls} navigate={navigate} />}
+      {tab === 'historique' && <HistoryTab contract={contract} />}
 
       {tab === 'details' && (<>
 
@@ -261,6 +443,15 @@ export default function ContractDetailPage() {
         )}
 
       </>)}
+
+      {ending && (
+        <TerminateContractConfirm
+          contract={contract}
+          siteName={contract.site?.name || contract.siteName || 'ce site'}
+          onClose={() => setEnding(false)}
+          onDone={() => { setEnding(false); load() }}
+        />
+      )}
 
       {editing && (
         <ContractModal

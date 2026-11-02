@@ -14,8 +14,9 @@ export const getClientTotals    = (params = {}) => {
 export const getNextNumber      = ()         => get('/contracts/next-number')
 export const createContract     = (data)     => post('/contracts', data)
 export const updateContract     = (id, data) => put(`/contracts/${id}`, data)
-// Le site sort du contrat : résiliation et retrait des visites encore à faire.
-export const terminateContract  = (id)       => post(`/contracts/${id}/terminate`)
+// Le site sort du contrat, tout de suite ou à une date : { date?, reason? }.
+export const terminateContract  = (id, body = {}) => post(`/contracts/${id}/terminate`, body)
+export const cancelTermination  = (id)       => del(`/contracts/${id}/terminate`)
 export const archiveContract    = (id)       => del(`/contracts/${id}`)
 export const restoreContract    = (id)       => put(`/contracts/${id}/restore`)
 export const destroyContract    = (id)       => del(`/contracts/${id}/permanent`)
@@ -27,6 +28,20 @@ export const applyAnnualIncrease = (id, control) => post(`/contracts/${id}/incre
 export function formatPrice(n) {
   if (n == null || n === '') return '—'
   return `${Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} DT`
+}
+
+/* Durées proposées pour chaque renouvellement, en mois. */
+export const RENEWAL_DURATIONS = [
+  { value: 6,  label: '6 mois' },
+  { value: 12, label: '1 an' },
+  { value: 24, label: '2 ans' },
+  { value: 36, label: '3 ans' },
+]
+
+export function renewalLabel(months) {
+  const d = RENEWAL_DURATIONS.find(r => r.value === Number(months))
+  if (d) return d.label
+  return `${months} mois`
 }
 
 export const CONTRACT_TYPES = [

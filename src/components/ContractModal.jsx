@@ -3,6 +3,7 @@ import { X, AlertTriangle, Wand2, Info } from 'lucide-react'
 import { toast } from 'react-toastify'
 import {
   createContract, updateContract, getNextNumber, CONTRACT_STATUSES, formatPrice,
+  RENEWAL_DURATIONS,
 } from '../api/contracts'
 
 function formatApiError(err) {
@@ -16,9 +17,9 @@ function toDateInput(value) {
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
 }
 
-function addYear(dateStr) {
+function addMonthsStr(dateStr, months = 12) {
   const d = dateStr ? new Date(dateStr) : new Date()
-  d.setFullYear(d.getFullYear() + 1)
+  d.setMonth(d.getMonth() + Number(months || 12))
   return d.toISOString().slice(0, 10)
 }
 
@@ -42,10 +43,18 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
 
   const [number, setNumber] = useState(contract?.contractNumber || '')
   const [start,  setStart]  = useState(toDateInput(contract?.startDate) || new Date().toISOString().slice(0, 10))
-  const [end,    setEnd]    = useState(toDateInput(contract?.endDate)   || addYear())
+  const [end,    setEnd]    = useState(toDateInput(contract?.endDate)   || addMonthsStr())
   const [status, setStatus] = useState(contract?.status || 'actif')
   const [notes,  setNotes]  = useState(contract?.notes || '')
   const [price,  setPrice]  = useState(contract?.price ?? '')
+
+  /* Renouvellement : à l'échéance, une nouvelle période s'ouvre seule. Une
+     année peut être offerte — la période en cours ou la suivante. */
+  const [autoRenew,     setAutoRenew]     = useState(contract?.autoRenew !== false)
+  const [renewalMonths, setRenewalMonths] = useState(contract?.renewalMonths || 12)
+  const [freePeriod,    setFreePeriod]    = useState(!!contract?.freePeriod)
+  const [nextFree,      setNextFree]      = useState(!!contract?.nextFree)
+  const terminating = !!contract?.termination?.date && contract?.status === 'actif'
 
   /* Tarif par DAE : le prix d'un contrat varie selon le modèle des appareils.
      Le prix du contrat devient la somme de ces tarifs. */
@@ -103,6 +112,10 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
         endDate:   end   || undefined,
         status,
         notes,
+        autoRenew,
+        renewalMonths,
+        freePeriod,
+        nextFree: autoRenew && nextFree,
         ...(perDea ? {
           deaPrices: Object.entries(deaPrices)
             .filter(([, v]) => v !== '' && v != null)
@@ -163,7 +176,7 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
                 onChange={e => {
                   setStart(e.target.value)
                   // La fin suit le début tant qu'elle n'a pas été fixée à la main.
-                  if (!isEdit) setEnd(addYear(e.target.value))
+                  if (!isEdit) setEnd(addMonthsStr(e.target.value, renewalMonths))
                 }} />
             </div>
             <div className="form-group">
@@ -217,6 +230,50 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
               {perDea && 'Un tarif saisi est repris pour les autres DAE du même modèle encore vides. '}
               Augmente de 5 % deux mois avant chaque contrôle annuel.
             </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Renouvellement</label>
+            <label className="cat-track-row">
+              <input type="checkbox" checked={autoRenew} disabled={terminating}
+                onChange={e => setAutoRenew(e.target.checked)} />
+              <span>
+                <strong>Renouvellement automatique</strong>
+                <span className="cat-track-hint">
+                  {terminating
+                    ? 'Une résiliation est programmée : annulez-la depuis la fiche du contrat.'
+                    : "À l'échéance, une nouvelle période s'ouvre au prix en vigueur et les contrôles suivants sont planifiés."}
+                </span>
+              </span>
+            </label>
+            {autoRenew && !terminating && (
+              <div className="ct-renew-row">
+                <span>Renouveler pour</span>
+                <select className="form-input form-input--plain" value={renewalMonths}
+                  onChange={e => {
+                    setRenewalMonths(Number(e.target.value))
+                    if (!isEdit) setEnd(addMonthsStr(start, e.target.value))
+                  }}>
+                  {RENEWAL_DURATIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                </select>
+              </div>
+            )}
+            <label className="cat-track-row">
+              <input type="checkbox" checked={freePeriod} onChange={e => setFreePeriod(e.target.checked)} />
+              <span>
+                <strong>{isEdit ? 'Période en cours offerte' : 'Première période offerte'}</strong>
+                <span className="cat-track-hint">Année gratuite : non facturée, exclue des totaux.</span>
+              </span>
+            </label>
+            {autoRenew && !terminating && (
+              <label className="cat-track-row">
+                <input type="checkbox" checked={nextFree} onChange={e => setNextFree(e.target.checked)} />
+                <span>
+                  <strong>Prochaine période offerte</strong>
+                  <span className="cat-track-hint">Le prochain renouvellement sera gratuit, les suivants au prix normal.</span>
+                </span>
+              </label>
+            )}
           </div>
 
           {isEdit && (

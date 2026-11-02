@@ -63,9 +63,9 @@ function pageHtml({ person, device, trainer, date }) {
 
     ${line(146, 37, 'ATTESTATION', `font-weight:700;color:${GREEN};letter-spacing:.5pt;`)}
     ${line(206, 19.5, 'La société CARDIOLIFE atteste que')}
-    ${line(272, 22, `${civ} <span style="font-weight:700;">${esc(person.name)}</span>`)}
+    ${line(246, 22, `${civ} <span style="font-weight:700;">${esc(person.name)}</span>`)}
 
-    <div style="position:absolute;left:60pt;right:60pt;top:312pt;text-align:center;
+    <div style="position:absolute;left:60pt;right:60pt;top:292pt;text-align:center;
         font-size:17.5pt;line-height:23pt;">
       a suivi une formation pratique sur l'utilisation du<br/>
       défibrillateur cardiaque${dae}.<br/>

@@ -13,6 +13,7 @@ import {
 import { getSites } from '../api/sites'
 import { ClientSearchInput, AssignedToInput } from './PlanningInputs'
 import AttestationDialog from './AttestationDialog'
+import { CIVILITIES } from '../lib/attestationPdf'
 import { localDateStr, localTimeStr, durationOptionsWith } from '../lib/appointmentConstants'
 import {
   STAGE_LIST, stageOf, stagePayload, PARTICIPANT_LIST, participantState,
@@ -50,7 +51,22 @@ function humanSize(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
 }
-const emptyParticipant = () => ({ name: '', role: '', email: '', phone: '', status: 'a_former' })
+const emptyParticipant = () => ({ civility: '', name: '', role: '', email: '', phone: '', status: 'a_former' })
+
+/* Mme / Mr — repris tel quel sur l'attestation. */
+function CivilityToggle({ value, onChange }) {
+  return (
+    <div className="att-civ">
+      {CIVILITIES.map(c => (
+        <button key={c} type="button"
+          className={`att-civ-btn${value === c ? ' att-civ-btn--on' : ''}`}
+          onClick={() => onChange(value === c ? '' : c)}>
+          {c}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 /* ── Destinataire des attestations ───────────────────────────── */
 
@@ -163,7 +179,7 @@ function ParticipantsBlock({ participants, onChange, quotaLine }) {
 
   function add() {
     if (!draft.name.trim()) return
-    onChange([...participants, { ...draft, name: draft.name.trim() }])
+    onChange([...participants, { ...draft, name: draft.name.trim(), civility: draft.civility || undefined }])
     setDraft(emptyParticipant())
   }
 
@@ -208,6 +224,8 @@ function ParticipantsBlock({ participants, onChange, quotaLine }) {
                   <Icon size={14} />
                 </button>
 
+                <CivilityToggle value={p.civility} onChange={v => setAt(i, { civility: v || undefined })} />
+
                 <div className="fm-person-fields">
                   <input className="fm-person-name" value={p.name} placeholder="Nom de l'agent"
                     onChange={e => setAt(i, { name: e.target.value })} />
@@ -229,6 +247,7 @@ function ParticipantsBlock({ participants, onChange, quotaLine }) {
       )}
 
       <div className="fm-person-add">
+        <CivilityToggle value={draft.civility} onChange={v => setDraft(d => ({ ...d, civility: v }))} />
         <input className="form-input form-input--plain" placeholder="Nom de l'agent à former"
           value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
@@ -810,6 +829,8 @@ export default function FormationModal({
       {attOpen && (
         <AttestationDialog
           participants={participants}
+          onCivility={(i, civility) =>
+            setParticipants(list => list.map((p, idx) => (idx === i ? { ...p, civility } : p)))}
           devices={deaModels({ site: selectedSite || raw.site })}
           trainer={form.assignedTo[0]?.fullName || ''}
           date={form.date}

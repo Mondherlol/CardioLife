@@ -79,6 +79,9 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000
 const server = app.listen(PORT, () => console.log(`API CardioTrack démarrée sur le port ${PORT}`))
+
+// Contrats échus : renouvellement automatique, expiration, résiliation à date.
+require('./utils/contractRenewal').startRenewalScheduler()
 // Node coupe une requête au bout de 5 min. Envoyer une sauvegarde de plusieurs
 // centaines de Mo pour la restaurer peut prendre plus longtemps.
 server.requestTimeout = 60 * 60 * 1000

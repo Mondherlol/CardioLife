@@ -692,7 +692,7 @@ export default function SiteDetailPage() {
 
         {data.contract && (
           <button className="cd-edit-btn cd-edit-btn--danger" onClick={() => setCtrEnding(true)}>
-            <FileX size={14} /> Retirer le contrat
+            <FileX size={14} /> Résilier le contrat
           </button>
         )}
         <button className="cd-edit-btn" onClick={() => setEditOpen(true)}>

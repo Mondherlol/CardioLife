@@ -7,6 +7,9 @@ const Intervention = require('../models/Intervention')
 const { listInstallations } = require('../utils/deaParc')
 const { syncContractControls, syncSiteNextControl, addMonths } = require('../utils/controls')
 const { pageParams, pageResult, searchRegex } = require('../utils/paging')
+const {
+  syncClientContractFlag, ensurePeriods, periodsOf, closeContract, settleContract,
+} = require('../utils/contractRenewal')
 
 const { STATUSES } = Contract
 
@@ -48,14 +51,16 @@ function parseDeaPrices(v, site) {
 
 const sumPrices = list => roundPrice(list.reduce((s, r) => s + r.price, 0))
 
-/* Un client est « sous contrat » dès qu'un de ses sites l'est. Le drapeau est
-   dénormalisé sur la fiche client : listes et tableau de bord le lisent
-   directement. */
-async function syncClientContractFlag(clientId) {
-  if (!clientId) return
-  const n = await Contract.countDocuments({ client: clientId, isActive: true, status: 'actif' })
-  await Client.findByIdAndUpdate(clientId, { underContract: n > 0 })
+/* Durée d'une période renouvelée, en mois. */
+function parseMonths(v) {
+  if (v === undefined || v === null || v === '') return { skip: true }
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n) || n < 1 || n > 120) return { error: 'La durée de renouvellement doit être comprise entre 1 et 120 mois.' }
+  return { value: n }
 }
+
+/* Montant facturé : une période offerte ne compte pas dans les totaux. */
+const BILLED_PRICE = { $cond: [{ $eq: ['$freePeriod', true] }, 0, { $ifNull: ['$price', 0] }] }
 
 /* Le calendrier des visites vit dans utils/controls : il dépend de la date de
    pose des appareils, pas seulement du contrat, et se recalcule aussi quand le
@@ -98,12 +103,17 @@ async function getStats(req, res) {
   const [total, actifs, expirent, expires, [sum]] = await Promise.all([
     Contract.countDocuments({ isActive: true }),
     Contract.countDocuments({ isActive: true, status: 'actif' }),
-    Contract.countDocuments({ isActive: true, status: 'actif', endDate: { $gte: now, $lte: in30 } }),
+    // Un contrat qui se renouvelle seul n'expire pas : seuls comptent ceux
+    // sans renouvellement ou dont la résiliation est programmée.
+    Contract.countDocuments({
+      isActive: true, status: 'actif', endDate: { $gte: now, $lte: in30 },
+      $or: [{ autoRenew: false }, { 'termination.date': { $ne: null } }],
+    }),
     Contract.countDocuments({ isActive: true, status: 'actif', endDate: { $lt: now } }),
     // Montant de l'ensemble des contrats actifs, tous clients confondus.
     Contract.aggregate([
       { $match: { isActive: true, status: 'actif' } },
-      { $group: { _id: null, amount: { $sum: { $ifNull: ['$price', 0] } } } },
+      { $group: { _id: null, amount: { $sum: BILLED_PRICE } } },
     ]),
   ])
   res.json({ total, actifs, expirent, expires, amount: roundPrice(sum?.amount || 0) })
@@ -126,7 +136,7 @@ async function getClientTotals(req, res) {
       clientName: { $first: '$clientName' },
       contracts:  { $sum: 1 },
       unpriced:   { $sum: { $cond: [{ $eq: [{ $ifNull: ['$price', null] }, null] }, 1, 0] } },
-      amount:     { $sum: { $ifNull: ['$price', 0] } },
+      amount:     { $sum: BILLED_PRICE },
       sites:      { $push: '$site' },
     } },
     { $sort: { amount: -1, clientName: 1 } },
@@ -186,8 +196,20 @@ async function getAll(req, res) {
 }
 
 async function getById(req, res) {
-  const contract = await Contract.findById(req.params.id).populate(POPULATE).lean()
-  if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
+  // Un contrat échu depuis le dernier passage du planificateur est réglé tout de suite.
+  const due = await Contract.findById(req.params.id)
+  if (!due) return res.status(404).json({ message: 'Contrat introuvable.' })
+  if (due.isActive && due.status === 'actif') await settleContract(due)
+
+  const contract = await Contract.findById(req.params.id)
+    .populate([
+      ...POPULATE,
+      { path: 'periods.createdBy',        select: 'username fullName' },
+      { path: 'priceIncreases.appliedBy', select: 'username fullName' },
+      { path: 'termination.requestedBy',  select: 'username fullName' },
+    ])
+    .lean()
+  contract.periods = periodsOf(contract)
 
   // Contrôles liés à ce contrat (interventions générées / manuelles)
   const controls = await Intervention.find({ contract: contract._id })
@@ -241,13 +263,13 @@ async function create(req, res) {
     })
   }
 
+  const months = parseMonths(b.renewalMonths)
+  if (months.error) return res.status(422).json({ message: months.error })
+
   // Un contrat court un an par défaut : la création ne demande que le numéro.
   const startDate = b.startDate ? new Date(b.startDate) : new Date()
-  const endDate   = b.endDate ? new Date(b.endDate) : (() => {
-    const d = new Date(startDate)
-    d.setFullYear(d.getFullYear() + 1)
-    return d
-  })()
+  const endDate   = b.endDate ? new Date(b.endDate) : addMonths(startDate, months.value || 12)
+  const contractPrice = perDea.length ? sumPrices(perDea) : price.value
 
   const contract = await Contract.create({
     contractNumber: b.contractNumber?.trim() || undefined,
@@ -259,9 +281,17 @@ async function create(req, res) {
     status:     STATUSES.includes(b.status) ? b.status : 'actif',
     startDate,
     endDate,
-    price:      perDea.length ? sumPrices(perDea) : price.value,
+    price:      contractPrice,
     deaPrices:  perDea,
     notes:      b.notes?.trim() || undefined,
+    autoRenew:     b.autoRenew !== false,
+    renewalMonths: months.value || 12,
+    nextFree:      !!b.nextFree,
+    freePeriod:    !!b.freePeriod,
+    periods: [{
+      start: startDate, end: endDate, price: contractPrice, free: !!b.freePeriod,
+      kind: 'initial', createdBy: req.user._id,
+    }],
     createdBy:  req.user._id,
   })
 
@@ -285,17 +315,33 @@ async function update(req, res) {
   const price = parsePrice(b.price)
   if (price.error) return res.status(422).json({ message: price.error })
 
+  const months = parseMonths(b.renewalMonths)
+  if (months.error) return res.status(422).json({ message: months.error })
+
+  // Les contrats antérieurs à l'historique reçoivent leur première période
+  // avant modification : elle garde ainsi les valeurs d'origine.
+  ensurePeriods(contract)
+
   const before = {
     start: contract.startDate?.getTime(),
     end:   contract.endDate?.getTime(),
+    price: contract.price,
   }
 
   if (b.contractNumber !== undefined) contract.contractNumber = b.contractNumber?.trim() || undefined
-  if (b.status && STATUSES.includes(b.status)) contract.status = b.status
+  if (b.status && STATUSES.includes(b.status)) {
+    // Un contrat remis en vigueur à la main oublie sa résiliation passée.
+    if (b.status === 'actif' && contract.status !== 'actif') contract.termination = undefined
+    contract.status = b.status
+  }
   if (b.startDate !== undefined) contract.startDate = b.startDate || undefined
   if (b.endDate   !== undefined) contract.endDate   = b.endDate   || undefined
   if (b.notes     !== undefined) contract.notes     = b.notes?.trim() || undefined
   if (!price.skip) contract.price = price.value
+  if (b.autoRenew  !== undefined) contract.autoRenew  = !!b.autoRenew
+  if (b.nextFree   !== undefined) contract.nextFree   = !!b.nextFree
+  if (b.freePeriod !== undefined) contract.freePeriod = !!b.freePeriod
+  if (!months.skip) contract.renewalMonths = months.value
 
   if (b.deaPrices !== undefined) {
     const site = await Site.findById(contract.site).select('deas._id')
@@ -306,7 +352,20 @@ async function update(req, res) {
     if (deaPrices.value.length) contract.price = sumPrices(deaPrices.value)
   }
 
+  /* La saisie corrige la période en cours : ses bornes, son prix, sa gratuité.
+     Le début n'appartient qu'à la première période — celui des suivantes est
+     l'échéance de la précédente. */
+  const current = contract.periods[contract.periods.length - 1]
+  if (current) {
+    if (contract.periods.length === 1 && contract.startDate) current.start = contract.startDate
+    if (contract.endDate && !contract.termination?.date) current.end = contract.endDate
+    if (contract.price !== before.price) current.price = contract.price
+    current.free = !!contract.freePeriod
+  }
+
   await contract.save()
+  // Une échéance ramenée dans le passé est réglée sur-le-champ.
+  if (contract.isActive && contract.status === 'actif') await settleContract(contract)
 
   // Un changement de période redécoupe les échéances : les visites encore à
   // venir sont réalignées, celles déjà réalisées sont conservées telles quelles.
@@ -409,12 +468,18 @@ async function applyAnnualIncrease(req, res) {
   res.json({ price: to, from })
 }
 
-/* ── Retrait du contrat ────────────────────────────────── */
+/* ── Résiliation ───────────────────────────────────────── */
 /**
- * Le site sort du contrat : le contrat passe « résilié » et les visites
- * encore à faire qu'il avait planifiées disparaissent du planning. Les
- * visites réalisées ou en cours restent, elles font partie de l'historique ;
- * les interventions ponctuelles aussi, elles ne viennent pas du calendrier.
+ * Le site sort du contrat, tout de suite ou à une date.
+ *
+ * Immédiate : le contrat passe « résilié » et les visites encore à faire
+ * qu'il avait planifiées disparaissent du planning. Les visites réalisées ou
+ * en cours restent, elles font partie de l'historique ; les interventions
+ * ponctuelles aussi, elles ne viennent pas du calendrier.
+ *
+ * À date : le contrat court jusque-là (ses visites au-delà sont retirées),
+ * puis passe « résilié » de lui-même. Une date postérieure à l'échéance
+ * laisse les renouvellements se faire jusqu'à elle.
  */
 async function terminate(req, res) {
   const contract = await Contract.findById(req.params.id)
@@ -423,18 +488,43 @@ async function terminate(req, res) {
     return res.status(409).json({ message: 'Ce contrat est déjà résilié.' })
   }
 
-  contract.status = 'resilie'
+  const reason = String(req.body?.reason || '').trim() || undefined
+  const date   = req.body?.date ? new Date(req.body.date) : new Date()
+  if (isNaN(date.getTime())) return res.status(422).json({ message: 'Date de résiliation invalide.' })
+  // Fin de journée : le contrat couvre encore le jour indiqué.
+  if (req.body?.date) date.setHours(23, 59, 59, 999)
+
+  ensurePeriods(contract)
+  contract.termination = { date, reason, requestedBy: req.user._id }
+
+  if (date <= new Date()) {
+    contract.termination.date = new Date()
+    const removed = await closeContract(contract)
+    return res.json({ message: 'Contrat résilié.', removedControls: removed })
+  }
+
+  if (contract.endDate && date < contract.endDate) contract.endDate = date
   await contract.save()
-
-  const { deletedCount } = await Intervention.deleteMany({
-    contract:    contract._id,
-    status:      'planifie',
-    controlType: { $ne: 'intervention' },
-  })
-
+  await syncContractControls(contract, req.user._id)
   await syncClientContractFlag(contract.client)
-  await syncSiteNextControl(contract.site)
-  res.json({ message: 'Contrat retiré.', removedControls: deletedCount })
+  res.json({ message: 'Résiliation programmée.', scheduled: true, date })
+}
+
+/** Annule une résiliation programmée : la période en cours reprend sa fin. */
+async function cancelTermination(req, res) {
+  const contract = await Contract.findById(req.params.id)
+  if (!contract) return res.status(404).json({ message: 'Contrat introuvable.' })
+  if (contract.status !== 'actif' || !contract.termination?.date) {
+    return res.status(409).json({ message: 'Aucune résiliation programmée sur ce contrat.' })
+  }
+
+  const current = contract.periods[contract.periods.length - 1]
+  if (current?.end) contract.endDate = current.end
+  contract.termination = undefined
+  await contract.save()
+  await settleContract(contract)
+  await syncContractControls(contract, req.user._id)
+  res.json({ message: 'Résiliation annulée.' })
 }
 
 /* ── Archivage / restauration / suppression ───────────── */
@@ -472,6 +562,6 @@ async function permanentDelete(req, res) {
 
 module.exports = {
   generateNumber, getStats, getClientTotals, getAll, getById,
-  create, update, terminate, archive, restore, permanentDelete,
+  create, update, terminate, cancelTermination, archive, restore, permanentDelete,
   getAnnualIncreases, applyAnnualIncrease,
 }

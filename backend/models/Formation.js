@@ -20,6 +20,8 @@ const historySchema = new mongoose.Schema({
    séance : formé, ou toujours à former (absent le jour J, à replanifier). */
 const participantSchema = new mongoose.Schema({
   name:   { type: String, trim: true, required: true },
+  // Civilité imprimée sur l'attestation — le modèle ne connaît que « Mme » et « Mr ».
+  civility: { type: String, enum: ['Mme', 'Mr'] },
   role:   { type: String, trim: true },
   email:  { type: String, trim: true, lowercase: true },
   phone:  { type: String, trim: true },

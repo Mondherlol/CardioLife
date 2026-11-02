@@ -14,6 +14,7 @@ import { downloadBlob } from '../lib/bonPdf'
  *
  * Props :
  *  participants  liste nominative de la formation
+ *  onCivility    (index, civilité) — reporte le choix sur la fiche, enregistré avec elle
  *  devices       modèles de DAE posés sur le site formé
  *  trainer       nom du premier formateur
  *  date          date de la séance (aaaa-mm-jj)
@@ -21,12 +22,13 @@ import { downloadBlob } from '../lib/bonPdf'
  *  onAttach      (blob, filename) => Promise — absent en création
  */
 export default function AttestationDialog({
-  participants = [], devices = [], trainer = '', date = '', fileLabel = '', onAttach, onClose,
+  participants = [], onCivility, devices = [], trainer = '', date = '', fileLabel = '', onAttach, onClose,
 }) {
   const [people, setPeople] = useState(() => {
-    const named   = participants.filter(p => p.name?.trim())
+    const named   = participants.map((p, src) => ({ ...p, src })).filter(p => p.name?.trim())
     const trained = named.some(p => p.status === 'forme')
     return named.map(p => ({
+      src:      p.src,
       name:     p.name.trim(),
       civility: p.civility || 'Mme',
       checked:  trained ? p.status === 'forme' : p.status !== 'absent',
@@ -110,7 +112,10 @@ export default function AttestationDialog({
                     {CIVILITIES.map(c => (
                       <button key={c} type="button"
                         className={`att-civ-btn${p.civility === c ? ' att-civ-btn--on' : ''}`}
-                        onClick={() => setAt(i, { civility: c })}>
+                        onClick={() => {
+                          setAt(i, { civility: c })
+                          if (p.src != null) onCivility?.(p.src, c)
+                        }}>
                         {c}
                       </button>
                     ))}

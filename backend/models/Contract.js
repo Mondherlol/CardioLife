@@ -18,6 +18,30 @@ const priceIncreaseSchema = new mongoose.Schema({
   appliedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { _id: false })
 
+/* Une période du contrat : la première, puis chaque renouvellement. C'est
+   l'historique des durées et des prix — le prix noté est celui en vigueur au
+   début de la période, les hausses annuelles restant dans `priceIncreases`.
+   Une période « offerte » n'est pas facturée (année gratuite). */
+const periodSchema = new mongoose.Schema({
+  start:     { type: Date, required: true },
+  end:       { type: Date, required: true },
+  price:     { type: Number, min: 0 },
+  free:      { type: Boolean, default: false },
+  kind:      { type: String, enum: ['initial', 'renouvellement'], default: 'initial' },
+  auto:      { type: Boolean, default: false },   // renouvelée sans intervention
+  createdAt: { type: Date, default: Date.now },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+})
+
+/* Résiliation demandée : immédiate, ou à une date — le contrat court
+   jusque-là puis passe « résilié » de lui-même. */
+const terminationSchema = new mongoose.Schema({
+  date:        { type: Date, required: true },
+  reason:      { type: String, trim: true },
+  requestedAt: { type: Date, default: Date.now },
+  requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+}, { _id: false })
+
 /**
  * Contrat de maintenance d'un site.
  *
@@ -58,6 +82,17 @@ const contractSchema = new mongoose.Schema({
     default: [],
   },
   priceIncreases: { type: [priceIncreaseSchema], default: [] },
+
+  /* Renouvellement : à l'échéance, une nouvelle période de `renewalMonths`
+     s'ouvre d'elle-même au prix courant. `nextFree` rend la prochaine
+     période offerte ; `freePeriod` dit si la période en cours l'est (lu par
+     les totaux, qui ne comptent pas une année gratuite). */
+  autoRenew:     { type: Boolean, default: true },
+  renewalMonths: { type: Number, default: 12, min: 1, max: 120 },
+  nextFree:      { type: Boolean, default: false },
+  freePeriod:    { type: Boolean, default: false },
+  periods:       { type: [periodSchema], default: [] },
+  termination:   { type: terminationSchema },
 
   notes:    { type: String, trim: true },
   isActive:  { type: Boolean, default: true },   // archivage doux
