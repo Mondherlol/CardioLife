@@ -27,8 +27,12 @@ const ficheSchema = new Schema({
   // Appareil concerné. `null` sur les fiches d'avant les visites multi-DAE.
   dea:                 { type: Schema.Types.ObjectId },
   deaLabel:            { type: String, trim: true },
+  /* Visite d'installation : appareil prévu mais finalement pas posé (site pas
+     prêt, mauvais modèle livré…). Il reste « à installer », toujours réservé. */
+  nonPose:             { type: Boolean },
+  nonPoseMotif:        { type: String, trim: true },
 
-  serialNumber:        { type: String, trim: true },
+  serialNumber:       { type: String, trim: true },
   emplacement:         { type: String, trim: true },
   signaletique:        { type: String, trim: true },
 
@@ -135,7 +139,13 @@ const interventionSchema = new Schema({
   // hors contrat (planifié à la main), ou intervention ponctuelle — un
   // remplacement, un dépannage. L'intervention suit la même checklist mais ne
   // vaut pas contrôle : elle ne compte jamais comme échéance du site.
-  controlType:   { type: String, enum: ['semestriel','annuel','hors_contrat','intervention'], default: 'hors_contrat' },
+  // `installation` : pose de DAE réservés, sur le même circuit (voir
+  // utils/visitTypes) — elle non plus ne vaut jamais contrôle.
+  controlType:   { type: String, enum: ['semestriel','annuel','hors_contrat','intervention','installation'], default: 'hors_contrat' },
+  /* DAE visés (`_id` dans `Site.deas`). Une installation porte sur des
+     appareils précis, pas sur tout le parc du site, qui peut en compter
+     d'autres. Vide pour les autres visites. */
+  targets:       { type: [Schema.Types.ObjectId], default: undefined, index: true },
   // Objet d'une intervention (« Changement batterie + piles d'armoire »).
   objet:         { type: String, trim: true },
   contract:      { type: Schema.Types.ObjectId, ref: 'Contract' },

@@ -1,5 +1,6 @@
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
+const { ONLY_CONTROLS, NON_CONTROL_TYPES } = require('./visitTypes')
 const { skipWeekend, syncSiteNextControl } = require('./controls')
 const { syncDeaConsumables, syncDeaArmoire, alignArmoireProduct, replaceDeaArmoire, armoireProductFor } = require('./productItems')
 
@@ -193,7 +194,7 @@ async function applyNextControl(intervention, date, user, changes, dry) {
   const next = await Intervention.findOne({
     site:   intervention.site,
     status: { $ne: 'termine' },
-    controlType: { $ne: 'intervention' },
+    controlType: ONLY_CONTROLS,
     _id:    { $ne: intervention._id },
   }).sort({ scheduledDate: 1 })
 
@@ -224,10 +225,11 @@ async function applyNextControl(intervention, date, user, changes, dry) {
     clientName:    intervention.clientName,
     site:          intervention.site,
     siteName:      intervention.siteName,
-    installation:  intervention.installation,
-    installationSnap: intervention.installationSnap,
+    // Après une pose, le contrôle suivant porte sur tout le site, pas sur un DAE.
+    installation:  intervention.controlType === 'installation' ? undefined : intervention.installation,
+    installationSnap: intervention.controlType === 'installation' ? undefined : intervention.installationSnap,
     contract:      intervention.contract,
-    controlType:   intervention.controlType === 'intervention'
+    controlType:   NON_CONTROL_TYPES.includes(intervention.controlType)
       ? 'hors_contrat' : (intervention.controlType || 'hors_contrat'),
     scheduledDate: shifted,
     manualDate:    true,
@@ -275,6 +277,8 @@ async function syncFicheToParc(intervention, user, { dry = false, planning = tru
     const touched  = []
     const replaced = new Set()   // DAE dont l'armoire a été changée sur place
     for (const fiche of intervention.fiches || []) {
+      // Appareil finalement pas posé : rien de ce qui a été noté ne vaut constat.
+      if (fiche.nonPose) continue
       const dea = resolveDea(site, intervention, fiche)
       if (!dea) continue
       applyFicheToDea(fiche, dea, changes, visitDate)

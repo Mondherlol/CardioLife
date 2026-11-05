@@ -3,6 +3,7 @@ import { Calendar, Plus, Clock, CheckCircle2, User } from 'lucide-react'
 import { getAppointments } from '../api/appointments'
 import { getUsers } from '../api/users'
 import EventModal from './EventModal'
+import InstallationPlanModal from './InstallationPlanModal'
 import { TYPE_MAP, STATUS_MAP } from '../lib/appointmentConstants'
 
 function fmtDateTime(d) {
@@ -18,6 +19,8 @@ export default function PlanningClientTab({ clientId, clientName }) {
   const [users,        setUsers]        = useState([])
   const [loading,      setLoading]      = useState(true)
   const [modal,        setModal]        = useState(null)   // { mode, appt? }
+  // « Installation » choisie dans le type : ouvre la programmation de pose.
+  const [instSlot,     setInstSlot]     = useState(undefined)
 
   const load = useCallback(() => {
     getAppointments({ client: clientId })
@@ -126,6 +129,17 @@ export default function PlanningClientTab({ clientId, clientName }) {
           onSaved={() => { setModal(null); load() }}
           onDeleted={() => { setModal(null); load() }}
           onChanged={() => load()}
+          onSwitchToInstallation={slot => { setModal(null); setInstSlot(slot?.startStr || null) }}
+        />
+      )}
+
+      {instSlot !== undefined && (
+        <InstallationPlanModal
+          clientId={clientId}
+          clientName={clientName}
+          presetDate={instSlot}
+          onClose={() => setInstSlot(undefined)}
+          onDone={() => setInstSlot(undefined)}
         />
       )}
     </div>

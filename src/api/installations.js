@@ -9,3 +9,5 @@ export const createInstallation = (data)    => post('/installations', data)
 export const updateInstallation = (id, data) => put(`/installations/${id}`, data)
 export const completeInstallation = (id, data) => post(`/installations/${id}/complete`, data)
 export const deleteInstallation = (id)      => del(`/installations/${id}`)
+/* Programmer une installation : DEA à poser + visite au planning, en une fois. */
+export const planInstallation   = (data)    => post('/installations/plan', data)

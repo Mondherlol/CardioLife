@@ -29,6 +29,7 @@ const CONTROL_TYPE_META = {
   annuel:       { label: 'Annuel',       cls: 'ct-type-badge ct-type-badge--annuel' },
   hors_contrat: { label: 'Hors contrat', cls: 'ct-type-badge ct-type-badge--hors' },
   intervention: { label: 'Intervention', cls: 'ct-type-badge ct-type-badge--intervention' },
+  installation: { label: 'Installation', cls: 'ct-type-badge ct-type-badge--installation' },
 }
 const CONTROL_TYPE_OPTS = [
   { value: 'hors_contrat', label: 'Hors contrat' },
@@ -173,20 +174,61 @@ function TechnicianCard({ intervention, onClick }) {
  * Les poses assignées au technicien, avant ses contrôles : du matériel attend
  * d'être mis en service, c'est ce qui bloque le client.
  */
-function PosesSection({ poses, onPick }) {
+function PosesSection({ poses, visits = [], onPick, onOpen }) {
   const [open, setOpen] = useState(true)
+  const today = new Date(new Date().setHours(0, 0, 0, 0))
 
   return (
     <div className="iv-date-section">
       <button className="iv-date-section-hdr" onClick={() => setOpen(o => !o)}>
         <span className="iv-date-section-dot" style={{ background: 'var(--purple-500, #7c5cff)' }} />
         <span className="iv-date-section-label">Installations à réaliser</span>
-        <span className="iv-date-section-count">{poses.length}</span>
+        <span className="iv-date-section-count">{poses.length + visits.length}</span>
         <ChevronDown size={14} className={`iv-date-section-chevron${open ? ' iv-date-section-chevron--open' : ''}`} />
       </button>
 
       {open && (
         <div className="iv-cards-grid">
+          {/* Installations programmées : la visite se démarre, se remplit
+              (photos, fiche par appareil) et se clôture comme un contrôle. */}
+          {visits.map(v => {
+            const late = v.status === 'planifie' && v.scheduledDate && new Date(v.scheduledDate) < today
+            const n = v.targets?.length || 1
+            return (
+              <div key={v._id} className={`iv-card iv-card--pose${late ? ' iv-card--late' : ''}`}
+                onClick={() => onOpen(v._id)} style={{ cursor: 'pointer' }}>
+                <div className="iv-card-header">
+                  <div className="iv-card-client">{v.clientName || '—'}</div>
+                  <span className="pose-badge">{v.status === 'en_cours' ? 'En cours' : 'À installer'}</span>
+                </div>
+                <div className="iv-card-body">
+                  <div className="iv-card-row">
+                    <Zap size={13} strokeWidth={1.8} />
+                    <span>{v.objet || `Pose de ${n} DAE`}</span>
+                  </div>
+                  {v.siteName && (
+                    <div className="iv-card-row">
+                      <MapPin size={13} strokeWidth={1.8} />
+                      <span>{v.siteName}</span>
+                    </div>
+                  )}
+                  <div className="iv-card-row">
+                    <Calendar size={13} strokeWidth={1.8} />
+                    <span className={late ? 'iv-card-date--late' : ''}>
+                      Prévue le {fmt(v.scheduledDate)}
+                      {late && <AlertTriangle size={11} style={{ marginLeft: 4, color: 'var(--red-500)' }} />}
+                    </span>
+                  </div>
+                  {v.notes && <p className="iv-card-notes">{v.notes}</p>}
+                </div>
+                <div className="iv-card-foot">
+                  <button className="btn btn--primary btn--sm" onClick={e => { e.stopPropagation(); onOpen(v._id) }}>
+                    <CheckCircle2 size={13} /> {v.status === 'en_cours' ? "Reprendre l'installation" : "Ouvrir l'installation"}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
           {poses.map(p => {
             const late = p.scheduledDate &&
               new Date(p.scheduledDate) < new Date(new Date().setHours(0, 0, 0, 0))
@@ -354,13 +396,22 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
   // matériel qui attend d'être mis en service.
   const [poses, setPoses]         = useState([])
   const [posing, setPosing]       = useState(null)
+  // Visites d'installation assignées au technicien, encore à faire.
+  const [poseVisits, setPoseVisits] = useState([])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
       const data = await getInterventions()
       const list = Array.isArray(data) ? data : []
-      setAll(list.filter(i => (i.controlType === 'intervention') === isIntv))
+      /* Contrôles d'un côté, interventions de l'autre. Les installations ont
+         leur onglet ; le technicien les retrouve en tête de ses contrôles. */
+      setAll(list.filter(i => isIntv
+        ? i.controlType === 'intervention'
+        : !['intervention', 'installation'].includes(i.controlType)))
+      setPoseVisits(isIntv ? [] : list
+        .filter(i => i.controlType === 'installation' && i.status !== 'termine')
+        .sort((a, b) => new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)))
     } catch (err) {
       toast.error(err.message || 'Erreur de chargement.')
     } finally {
@@ -373,7 +424,9 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
     try {
       const res = await getInstallations({ status: 'a_installer', limit: 100 })
       const list = Array.isArray(res) ? res : (res?.data || [])
-      setPoses(list.sort((a, b) =>
+      // Les poses programmées viennent avec leur visite : seules restent ici
+      // celles qui n'en ont pas (anciennes poses, appareil non posé).
+      setPoses(list.filter(p => !p.visit || p.visit.status === 'termine').sort((a, b) =>
         new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)))
     } catch { /* la page reste utilisable sans les poses */ }
   }, [isTech, isIntv])
@@ -533,7 +586,10 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
       ) : isTech ? (
         filtered.length === 0 ? (
           <div className="iv-dashboard">
-            {poses.length > 0 && <PosesSection poses={poses} onPick={setPosing} />}
+            {isTech && (poses.length > 0 || poseVisits.length > 0) && (
+              <PosesSection poses={poses} visits={poseVisits} onPick={setPosing}
+                onOpen={id => navigate(`/interventions/${id}`)} />
+            )}
             <div className="table-empty" style={{ padding: '48px 0', textAlign: 'center' }}>
               {search || statusFilter
                 ? 'Aucune intervention pour ces critères.'
@@ -546,7 +602,10 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
           </div>
         ) : (
           <div className="iv-dashboard">
-            {poses.length > 0 && <PosesSection poses={poses} onPick={setPosing} />}
+            {isTech && (poses.length > 0 || poseVisits.length > 0) && (
+              <PosesSection poses={poses} visits={poseVisits} onPick={setPosing}
+                onOpen={id => navigate(`/interventions/${id}`)} />
+            )}
             {groupedSections.map(g => (
               <DateSection
                 key={g.key}

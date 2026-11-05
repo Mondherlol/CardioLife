@@ -57,7 +57,7 @@ function fileIcon(name) {
 export default function EventModal({
   mode, entity, entityKind, slot, presetClient, presetSite, quota, presetType, lockType,
   users = [], onClose, onSaved, onDeleted, onChanged,
-  onSwitchToFormation, onSwitchToControl, onSwitchToScheduled,
+  onSwitchToFormation, onSwitchToControl, onSwitchToScheduled, onSwitchToInstallation,
 }) {
   const isEdit = mode === 'edit'
   const raw    = entity || {}
@@ -147,6 +147,11 @@ export default function EventModal({
     // fiche de création dédiée.
     if (isEdit || !onSwitchToControl) {
       base = base.filter(t => !['controle_hors_contrat', 'intervention'].includes(t.value))
+    }
+    /* Une installation pose du matériel réservé : elle s'ouvre sur sa propre
+       planification (client, site, appareils, technicien). */
+    if (isEdit || !onSwitchToInstallation) {
+      base = base.filter(t => t.value !== 'installation')
     }
     /* Semestriel et annuel sont déjà prévus par le contrat : les choisir ici
        ouvre la programmation du contrôle existant, pas une création. */
@@ -341,6 +346,11 @@ export default function EventModal({
                       onSwitchToScheduled(currentSlot(),
                         e.target.value === 'controle_annuel' ? 'annuel' : 'semestriel',
                         form.title.trim())
+                      return
+                    }
+                    if (e.target.value === 'installation' && !isEdit && onSwitchToInstallation) {
+                      onSwitchToInstallation(currentSlot(), form.clientId
+                        ? { id: form.clientId, name: form.clientName } : null)
                       return
                     }
                     if (['controle_hors_contrat', 'intervention'].includes(e.target.value)

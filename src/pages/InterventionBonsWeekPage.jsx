@@ -25,6 +25,7 @@ const fmtDay = d => new Date(d).toLocaleDateString('fr-FR', { weekday: 'short', 
 
 const TYPE_LABELS = {
   semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention',
+  installation: 'Installation',
 }
 
 const techOf = iv => iv.technicienName || iv.technicien?.fullName || ''

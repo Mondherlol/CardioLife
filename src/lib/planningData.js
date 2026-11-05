@@ -53,7 +53,9 @@ export async function fetchPlanningItems({ from, to, typeFilter = null }) {
     })
   }
   for (const i of insts) {
-    if (!i.scheduledDate) continue
+    // Les poses programmées arrivent avec leur visite d'installation : seules
+    // celles qui n'en ont pas (ou plus) s'affichent à part.
+    if (!i.scheduledDate || (i.visit && i.visit.status !== 'termine')) continue
     items.push({
       id: i._id, kind: 'installation', type: 'installation',
       title: placeTitle(i.clientName, i.site?.name) || 'Installation',

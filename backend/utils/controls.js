@@ -1,5 +1,6 @@
 const Site         = require('../models/Site')
 const Intervention = require('../models/Intervention')
+const { ONLY_CONTROLS } = require('./visitTypes')
 
 /**
  * Calendrier des contrôles d'un site sous contrat.
@@ -165,7 +166,7 @@ async function syncSiteNextControl(siteId) {
     site: siteId,
     status: { $ne: 'termine' },
     scheduledDate: { $ne: null },
-    controlType: { $ne: 'intervention' },
+    controlType: ONLY_CONTROLS,
   }
 
   const upcoming = await Intervention.findOne({

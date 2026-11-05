@@ -8,6 +8,7 @@ export const CONTROL_LABELS = {
   annuel:       'Contrôle annuel',
   hors_contrat: 'Contrôle hors contrat',
   intervention: 'Intervention',
+  installation: 'Installation',
 }
 
 /**
@@ -26,7 +27,7 @@ export function isToSchedule(iv) {
 export async function pendingControlsOf(clientId) {
   const list = await getInterventions({ client: clientId })
   return (Array.isArray(list) ? list : [])
-    .filter(i => i.status !== 'termine' && i.controlType !== 'intervention' && i.scheduledDate)
+    .filter(i => i.status !== 'termine' && !['intervention', 'installation'].includes(i.controlType) && i.scheduledDate)
     .sort((a, b) => new Date(a.scheduledDate) - new Date(b.scheduledDate))
 }
 

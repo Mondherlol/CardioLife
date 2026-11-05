@@ -17,6 +17,7 @@ import EventModal from '../components/EventModal'
 import FormationModal from '../components/FormationModal'
 import ControlCreateModal from '../components/ControlCreateModal'
 import ScheduleControlModal from '../components/ScheduleControlModal'
+import InstallationPlanModal from '../components/InstallationPlanModal'
 import { isToSchedule } from '../lib/scheduledControls'
 import {
   FRESH_MS, rangeKey, getRange, setRange, markAllStale, clearRanges, side, loadView, saveView,
@@ -38,6 +39,7 @@ const CONTROL_LABELS = {
   annuel:       'Contrôle annuel',
   hors_contrat: 'Contrôle hors contrat',
   intervention: 'Intervention',
+  installation: 'Installation',
 }
 
 /** Délai lisible d'un coup d'œil : « dans 3 j », « dans 5 mois ». */
@@ -163,6 +165,11 @@ function toInterventionEvent(iv, canMove, withFormation = false) {
   }
 }
 
+/* Une pose « à installer » qui n'a pas (ou plus) de visite d'installation :
+   ancienne pose planifiée avant les visites, ou appareil non posé lors du
+   passage. Les poses programmées, elles, arrivent avec les visites. */
+const orphanPose = i => i.scheduledDate && (!i.visit || i.visit.status === 'termine')
+
 // Une pose d'installation « à installer » en lecture seule.
 function toInstallationEvent(inst) {
   const color = TYPE_MAP.installation.color
@@ -226,6 +233,8 @@ export default function PlanningPage() {
   const [ctrlModal,   setCtrlModal]   = useState(null)
   // Caler un contrôle déjà prévu par le contrat (date réelle, technicien).
   const [schedModal,  setSchedModal]  = useState(null)
+  // Programmer une installation (pose de DAE réservés).
+  const [instModal,   setInstModal]   = useState(null)
   /* Contrôles en attente de RDV : hors calendrier, listés à part. `?attente=1`
      (alerte du tableau de bord) ouvre directement la liste. */
   const [params, setParams] = useSearchParams()
@@ -273,7 +282,7 @@ export default function PlanningPage() {
           start: i.scheduledDate, type: controlTypeToPlanning(i.controlType),
           clientName: i.clientName, status: i.status,
         })),
-        ...insts.filter(i => i.scheduledDate).map(i => ({
+        ...insts.filter(orphanPose).map(i => ({
           _id: i._id, _kind: 'installation',
           title: placeTitle(i.clientName, i.site?.name) || 'Installation',
           start: i.scheduledDate, type: 'installation',
@@ -360,7 +369,7 @@ export default function PlanningPage() {
     return [
       ...appts.filter(a => !typeFilter || (!DEDICATED_TYPES.includes(typeFilter) && a.type === typeFilter)).map(toFCEvent),
       ...intvEvents,
-      ...(want('installation') ? insts.filter(i => i.scheduledDate).map(toInstallationEvent) : []),
+      ...(want('installation') ? insts.filter(orphanPose).map(toInstallationEvent) : []),
       ...(want('formation') ? fmns.filter(f => !merged.has(String(f._id))).map(toFormationEvent) : []),
     ]
   }, [typeFilter, readOnlyPlanning])
@@ -408,7 +417,9 @@ export default function PlanningPage() {
       if (ep.kind === 'intervention') {
         // Déplacer un contrôle, c'est lui donner sa date réelle.
         await updateIntervention(ep._intv._id, { scheduledDate: info.event.start.toISOString() })
-        toast.success(`Contrôle déplacé au ${info.event.start.toLocaleDateString('fr-FR')}.`)
+        const what = ep._intv.controlType === 'installation' ? 'Installation déplacée'
+          : ep._intv.controlType === 'intervention' ? 'Intervention déplacée' : 'Contrôle déplacé'
+        toast.success(`${what} au ${info.event.start.toLocaleDateString('fr-FR')}.`)
         refetch()
         fetchUpcoming()
         return
@@ -477,6 +488,10 @@ export default function PlanningPage() {
             <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
               onClick={() => setCtrlModal({ date: null, kind: 'intervention' })}>
               <Hammer size={14} /> Nouvelle intervention
+            </button>
+            <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
+              onClick={() => setInstModal({ date: null })}>
+              <Zap size={14} /> Programmer une installation
             </button>
             {/* La semaine affichée dans le calendrier (ou la semaine en cours). */}
             <button className="btn btn--ghost plan-add-btn" style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}
@@ -667,6 +682,10 @@ export default function PlanningPage() {
             setModal(null)
             setSchedModal({ date: slot?.startStr || null, type, title })
           }}
+          onSwitchToInstallation={(slot, client) => {
+            setModal(null)
+            setInstModal({ date: slot?.startStr || null, client })
+          }}
         />
       )}
 
@@ -691,6 +710,16 @@ export default function PlanningPage() {
           onClose={() => setSchedModal(null)}
           onDone={() => { setSchedModal(null); refetch(); fetchUpcoming(); setAttenteKey(k => k + 1) }}
           onHorsContrat={date => { setSchedModal(null); setCtrlModal({ date }) }}
+        />
+      )}
+
+      {instModal && (
+        <InstallationPlanModal
+          clientId={instModal.client?.id}
+          clientName={instModal.client?.name}
+          presetDate={instModal.date}
+          onClose={() => setInstModal(null)}
+          onDone={() => { setInstModal(null); refetch(); fetchUpcoming() }}
         />
       )}
 

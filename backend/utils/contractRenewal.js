@@ -1,6 +1,7 @@
 const Contract     = require('../models/Contract')
 const Client       = require('../models/Client')
 const Intervention = require('../models/Intervention')
+const { ONLY_CONTROLS } = require('./visitTypes')
 const { syncContractControls, syncSiteNextControl, addMonths } = require('./controls')
 
 /**
@@ -81,7 +82,7 @@ async function dropPlannedControls(contract) {
   const { deletedCount } = await Intervention.deleteMany({
     contract:    contract._id,
     status:      'planifie',
-    controlType: { $ne: 'intervention' },
+    controlType: ONLY_CONTROLS,
   })
   return deletedCount
 }

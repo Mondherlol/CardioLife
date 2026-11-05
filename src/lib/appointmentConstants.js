@@ -31,6 +31,7 @@ export function controlTypeToPlanning(controlType) {
   if (controlType === 'annuel')     return 'controle_annuel'
   if (controlType === 'semestriel') return 'controle_semestriel'
   if (controlType === 'intervention') return 'intervention'
+  if (controlType === 'installation') return 'installation'
   return 'controle_hors_contrat'
 }
 
@@ -77,13 +78,16 @@ export const DEDICATED_TYPES = [
 /** Types du planning alimentés par la collection des contrôles. */
 export const CONTROL_TYPES = [
   'controle_semestriel', 'controle_annuel', 'controle_hors_contrat', 'intervention',
+  // Une installation est une visite (pose de DAE) : même collection.
+  'installation',
 ]
 
-// Types proposés dans la modal : contrôles/installations exclus (créés depuis
-// leurs pages dédiées, mais affichés dans le planning quand même). Contrôle
-// hors contrat et intervention restent proposés : ils ouvrent leur fiche.
+// Types proposés dans la modal : les contrôles du contrat sont exclus (le
+// contrat les génère, ils s'affichent quand même). Contrôle hors contrat,
+// intervention et installation restent proposés : ils ouvrent leur propre
+// formulaire de programmation.
 export const MODAL_TYPE_OPTS = TYPE_OPTS.filter(
-  t => !['controle_semestriel', 'controle_annuel', 'installation'].includes(t.value)
+  t => !['controle_semestriel', 'controle_annuel'].includes(t.value)
 )
 
 // Durées prédéfinies (en minutes). 1 h par défaut.

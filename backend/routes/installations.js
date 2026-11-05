@@ -6,6 +6,11 @@ const { requireAnyOrRead } = require('../middleware/access')
 // Le contrôle d'accès fin (gestionnaire de parc OU technicien assigné) est géré
 // dans le contrôleur, car les techniciens accèdent à leurs poses assignées.
 router.use(protect)
+
+/* Programmer une pose : ouvert aussi à qui planifie les interventions (le
+   contrôleur vérifie le droit) — c'est une visite autant qu'un ajout au parc. */
+router.post('/plan', ctrl.plan)
+
 // Lecture ouverte au droit Clients : la fiche client affiche son parc.
 router.use(requireAnyOrRead(['canManageDevices'], ['canManageClients']))
 

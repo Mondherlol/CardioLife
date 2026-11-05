@@ -6,6 +6,8 @@ const ProductItem  = require('../models/ProductItem')
 const Document     = require('../models/Document')
 const Formation    = require('../models/Formation')
 const Intervention = require('../models/Intervention')
+const { ONLY_CONTROLS } = require('../utils/visitTypes')
+const { createPoseVisit } = require('../utils/pose')
 const Control      = require('../models/Control')
 const Appointment  = require('../models/Appointment')
 const Contract     = require('../models/Contract')
@@ -338,7 +340,23 @@ async function addDea(req, res) {
   if (!site) return
   site.deas.push(req.body)
   await site.save()
-  await syncDeaWithItem(site, site.deas[site.deas.length - 1])
+  const added = site.deas[site.deas.length - 1]
+  await syncDeaWithItem(site, added)
+  /* Pose planifiée depuis le site : elle a sa visite d'installation, qui la
+     met au planning et porte la fiche, les photos et le bon. */
+  if (added.status === 'a_installer' && added.scheduledDate) {
+    try {
+      const client = await Client.findById(site.client).select('name')
+      await createPoseVisit({
+        site, client, deas: [added],
+        scheduledDate:  added.scheduledDate,
+        technician:     added.technician,
+        technicianName: added.technicianName,
+        notes:          added.notes,
+        user:           req.user,
+      })
+    } catch (e) { console.error("Visite d'installation (addDea):", e.message) }
+  }
   res.status(201).json(await refreshSchedule(site, req.user._id))
 }
 
@@ -353,6 +371,17 @@ async function updateDea(req, res) {
   if (req.body.armoire !== undefined) await alignArmoireProduct(dea, armoireBefore)
   await site.save()
   await syncDeaWithItem(site, dea)
+  /* Pose replanifiée depuis le DAE : sa visite (si elle ne pose que lui) suit.
+     Une visite de plusieurs appareils se déplace depuis le planning. */
+  if (dea.status === 'a_installer' && (req.body.scheduledDate !== undefined || req.body.technician !== undefined)) {
+    await Intervention.updateMany(
+      { controlType: 'installation', status: 'planifie', targets: dea._id, 'targets.1': { $exists: false } },
+      { $set: {
+        scheduledDate: dea.scheduledDate, technicien: dea.technician || null,
+        technicienName: dea.technicianName || '',
+      } },
+    )
+  }
   // Batterie ou électrodes déclarées depuis la fiche client : même pont vers le
   // stock que depuis la checklist du technicien.
   for (const kind of ['batteries', 'electrodes']) {
@@ -373,7 +402,7 @@ async function updateDea(req, res) {
 async function moveNextVisit(site, when, user) {
   const pending = {
     site: site._id, status: { $ne: 'termine' }, scheduledDate: { $ne: null },
-    controlType: { $ne: 'intervention' },
+    controlType: ONLY_CONTROLS,
   }
 
   const visit =
@@ -464,9 +493,21 @@ async function removeDea(req, res) {
   if (!site) return
   const dea = site.deas.id(req.params.deaId)
   if (!dea) return res.status(404).json({ message: 'DEA introuvable.' })
-  await releaseItemForDea(dea._id)
+  const deaId = dea._id
+  await releaseItemForDea(deaId)
   dea.deleteOne()
   await site.save()
+  // Une pose prévue pour ce DEA ne l'attend plus : la visite le retire, et
+  // disparaît si elle n'avait plus rien à poser.
+  await Intervention.updateMany(
+    { controlType: 'installation', targets: deaId, status: 'planifie' },
+    { $pull: { targets: deaId } },
+  )
+  await Intervention.updateMany(
+    { controlType: 'installation', installation: deaId, status: 'planifie' },
+    { $unset: { installation: 1, installationSnap: 1 } },
+  )
+  await Intervention.deleteMany({ controlType: 'installation', status: 'planifie', targets: { $size: 0 } })
   res.json(await refreshSchedule(site, req.user._id))
 }
 

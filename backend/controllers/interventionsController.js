@@ -2,6 +2,7 @@ const mongoose       = require('mongoose')
 const path           = require('path')
 const fs             = require('fs')
 const Intervention   = require('../models/Intervention')
+const { ONLY_CONTROLS, NON_CONTROL_TYPES, VISIT_TYPE_LABELS } = require('../utils/visitTypes')
 const Site           = require('../models/Site')
 const Formation      = require('../models/Formation')
 const Replacement    = require('../models/Replacement')
@@ -14,8 +15,92 @@ const { archiveRapport, archiveBon } = require('../utils/rapportArchive')
 const { applyBon } = require('../utils/bon')
 const { mergeDuplicateFiches, withInterventionLock } = require('../utils/ficheLock')
 const { linkFormation, unlinkFormation, createLinkedFormation, followVisitDate } = require('../utils/formationLink')
+const { completePose, cancelPose } = require('../utils/pose')
+const { syncSiteControls } = require('../utils/controls')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
+
+/* ─── Visites d'installation ───────────────────────────────── */
+/* DEA qu'une installation vient poser : `targets`, à défaut l'appareil visé. */
+function poseTargets(intervention) {
+  if (intervention.controlType !== 'installation') return []
+  const ids = intervention.targets?.length ? intervention.targets : [intervention.installation]
+  return ids.filter(Boolean).map(String)
+}
+
+const deaName = dea => [dea.deviceType, dea.serialNumber].filter(Boolean).join(' · ') || 'DAE'
+
+/**
+ * Clôture d'une installation : chaque DEA visé passe « installé » à la date
+ * de la visite — sauf ceux que le technicien a marqués « non posé », qui
+ * restent à installer et réservés. Le calendrier des contrôles du site suit.
+ */
+async function completeInstallationPoses(intervention, user, date) {
+  const ids = poseTargets(intervention)
+  if (!ids.length || !intervention.site) return
+  const site = await Site.findById(intervention.site._id || intervention.site)
+  if (!site) return
+
+  const posed = [], skipped = []
+  for (const id of ids) {
+    const dea = site.deas.id(id)
+    if (!dea) continue
+    const fiche = (intervention.fiches || []).find(f => String(f.dea || '') === id)
+    if (fiche?.nonPose) { skipped.push(deaName(dea)); continue }
+    if (dea.status === 'installe') continue
+    await completePose(site, dea, {
+      date, userId: user?._id, clientName: intervention.clientName, syncControls: false,
+    })
+    posed.push(deaName(dea))
+  }
+
+  if (posed.length) {
+    try { await syncSiteControls(site._id, user?._id) }
+    catch (e) { console.error('Calendrier après pose :', e.message) }
+  }
+  if (posed.length || skipped.length) {
+    intervention.history.push({
+      action: 'pose', user: user?._id, userName: user?.fullName || user?.username,
+      details: [
+        posed.length && `Posé${posed.length > 1 ? 's' : ''} : ${posed.join(', ')}`,
+        skipped.length && `Non posé${skipped.length > 1 ? 's' : ''} (reste${skipped.length > 1 ? 'nt' : ''} à installer) : ${skipped.join(', ')}`,
+      ].filter(Boolean).join(' · '),
+    })
+    await intervention.save()
+  }
+}
+
+/* La date et le technicien de la visite valent pour les DEA encore à poser. */
+async function followPoseSchedule(intervention) {
+  const ids = poseTargets(intervention)
+  if (!ids.length || !intervention.site) return
+  const site = await Site.findById(intervention.site._id || intervention.site)
+  if (!site) return
+  let touched = false
+  for (const id of ids) {
+    const dea = site.deas.id(id)
+    if (!dea || dea.status !== 'a_installer') continue
+    dea.scheduledDate  = intervention.scheduledDate
+    dea.technician     = intervention.technicien?._id || intervention.technicien || null
+    dea.technicianName = intervention.technicienName || ''
+    touched = true
+  }
+  if (touched) await site.save()
+}
+
+/* Installation supprimée avant d'avoir eu lieu : les poses s'annulent, le
+   matériel reste réservé au client. */
+async function cancelInstallationPoses(intervention, user) {
+  const ids = poseTargets(intervention)
+  if (!ids.length || !intervention.site || intervention.status === 'termine') return 0
+  const site = await Site.findById(intervention.site._id || intervention.site)
+  if (!site) return 0
+  let n = 0
+  for (const id of ids) {
+    if (await cancelPose(site, site.deas.id(id), { userId: user?._id })) n++
+  }
+  return n
+}
 
 /**
  * Réaligne l'échéance affichée sur les DAE du site après un changement de visite.
@@ -316,6 +401,9 @@ async function parcOf(intervention) {
     location:     d.location,
     // La pose est déjà connue du parc : la checklist l'affiche sans la demander.
     installationDate: d.installationDate,
+    // « À installer » tant que la visite d'installation ne l'a pas posé.
+    status:        d.status || 'installe',
+    scheduledDate: d.scheduledDate,
     product:      d.product ? { _id: d.product._id, name: d.product.name, images: d.product.images } : null,
     /* Les consommables montés sur l'appareil : la checklist ne contrôle l'état
        d'une batterie que si le parc dit laquelle est en place. */
@@ -459,7 +547,7 @@ async function nextControlOf(intervention) {
     _id: { $ne: intervention._id },
     site: intervention.site._id || intervention.site,
     status: { $ne: 'termine' },
-    controlType: { $ne: 'intervention' },
+    controlType: ONLY_CONTROLS,
     scheduledDate: { $gt: after },
   }).sort({ scheduledDate: 1 }).select('scheduledDate controlType').lean()
   return next ? { date: next.scheduledDate, controlType: next.controlType } : null
@@ -674,6 +762,12 @@ async function update(req, res) {
     }
 
     const oldDate = intervention.scheduledDate
+    /* Une installation ne se requalifie pas, et rien ne le devient par
+       modification : ses poses naissent avec elle (POST /installations/plan). */
+    if (req.body.controlType !== undefined && req.body.controlType !== intervention.controlType
+        && [req.body.controlType, intervention.controlType].includes('installation')) {
+      return res.status(409).json({ message: "Le type d'une installation ne se change pas." })
+    }
     const allowed = ['client','clientName','installation','installationSnap',
                      'technicien','technicienName','scheduledDate','notes','objet','status','controlType','contract']
     allowed.forEach(k => { if (req.body[k] !== undefined) intervention[k] = req.body[k] })
@@ -702,6 +796,9 @@ async function update(req, res) {
 
     await intervention.save()
     if (req.body.scheduledDate !== undefined) await followVisitDate(intervention, oldDate, req.user)
+    if (req.body.scheduledDate !== undefined || req.body.technicien !== undefined) {
+      await followPoseSchedule(intervention)
+    }
     await refreshNextControl(intervention)
     res.json(intervention)
   } catch (err) {
@@ -785,6 +882,8 @@ const FICHE_FIELDS = [
   // Suivi documentaire
   'dernierControle', 'prochainControle',
   'observation',
+  // Installation : appareil finalement pas posé
+  'nonPose', 'nonPoseMotif',
 ]
 
 /* Ce qui appartient à la visite et non à un appareil : saisi une seule fois,
@@ -1016,8 +1115,12 @@ async function closeIntervention(req, res) {
 
     await intervention.save()
     await pushFicheToParc(intervention, req.user)
+    // Installation : les appareils posés entrent au parc, à la date du passage.
+    await completeInstallationPoses(intervention, req.user,
+      intervention.startedAt || intervention.completedDate)
     await refreshNextControl(intervention)
-    res.json(intervention)
+    // Le parc rafraîchi : une installation vient d'y faire entrer ses appareils.
+    res.json(intervention.controlType === 'installation' ? await withParc(intervention) : intervention)
   } catch (err) {
     res.status(500).json({ message: err.message })
   }
@@ -1059,6 +1162,7 @@ async function closePast(req, res) {
       details:  `Visite passée clôturée sans saisie, à sa date prévue (${new Date(when).toLocaleDateString('fr-FR', { timeZone: 'Africa/Tunis' })})`,
     })
     await intervention.save()
+    await completeInstallationPoses(intervention, req.user, when)
     await refreshNextControl(intervention)
     res.json(await withParc(intervention))
   } catch (err) {
@@ -1474,11 +1578,8 @@ async function saveBon(req, res) {
 }
 
 /* ─── Delete ────────────────────────────────────────────────── */
-const DELETABLE_TYPES = ['intervention', 'hors_contrat']
-const TYPE_LABELS = {
-  semestriel: 'Contrôle semestriel', annuel: 'Contrôle annuel',
-  hors_contrat: 'Contrôle hors contrat', intervention: 'Intervention',
-}
+const DELETABLE_TYPES = ['intervention', 'hors_contrat', 'installation']
+const TYPE_LABELS = VISIT_TYPE_LABELS
 
 /**
  * Suppression d'une intervention ponctuelle ou d'un contrôle hors contrat.
@@ -1520,6 +1621,8 @@ async function remove(req, res) {
         { _id: intervention.formation.formation, intervention: intervention._id },
         { $unset: { intervention: 1 } })
     }
+    // Installation pas encore faite : ses poses s'annulent, le matériel reste réservé.
+    await cancelInstallationPoses(intervention, req.user)
     await intervention.deleteOne()
     await refreshNextControl(intervention)
     res.json({ message: 'Supprimée.' })
@@ -1726,7 +1829,7 @@ async function setAttente(req, res) {
     if (!isAdmin(req.user)) return res.status(403).json({ message: 'Accès refusé.' })
     const intervention = await Intervention.findById(req.params.id)
     if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
-    if (intervention.status !== 'planifie' || intervention.controlType === 'intervention') {
+    if (intervention.status !== 'planifie' || NON_CONTROL_TYPES.includes(intervention.controlType)) {
       return res.status(409).json({ message: 'Seul un contrôle pas encore commencé peut être mis en attente.' })
     }
 

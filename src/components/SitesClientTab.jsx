@@ -343,9 +343,15 @@ export default function SitesClientTab({ clientId, onCountChange }) {
         <div className="cd-tab-empty">
           <Building2 size={40} color="var(--gray-300)" />
           <p>Aucun site enregistré pour ce client.</p>
-          <button className="btn btn--primary" onClick={act.addSite}>
-            <Plus size={14} /> Créer le premier site
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button className="btn btn--primary" onClick={act.addSite}>
+              <Plus size={14} /> Créer le premier site
+            </button>
+            {/* Nouveau client : la pose crée son site au passage. */}
+            <button className="btn btn--ghost" onClick={() => setPlanOpen({ site: null })}>
+              <CalendarClock size={14} /> Programmer une installation
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -362,7 +368,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
               <HeartPulse size={14} /> Ajouter un DEA
             </button>
             <button type="button" className="btn btn--ghost" onClick={() => setPlanOpen({ site: null })}>
-              <CalendarClock size={14} /> Planifier une installation
+              <CalendarClock size={14} /> Programmer une installation
             </button>
           </div>
         </>
@@ -475,7 +481,10 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           sites={sites}
           site={planOpen.site}
           onClose={() => setPlanOpen(null)}
-          onDone={() => { setPlanOpen(null); load(); loadReserved() }}
+          onDone={created => {
+            setPlanOpen(null); load(); loadReserved()
+            if (created?._id) navigate(`/interventions/${created._id}`)
+          }}
         />
       )}
 

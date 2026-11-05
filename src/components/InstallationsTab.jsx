@@ -3,82 +3,79 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   HeartPulse, Search, X, MapPin, User, Calendar, CheckCircle2,
-  Clock, AlertTriangle,
+  Clock, AlertTriangle, PlayCircle, Plus, FileText, GraduationCap, CalendarClock, Archive,
 } from 'lucide-react'
 import { getInstallations } from '../api/installations'
+import { getInterventions } from '../api/interventions'
 import InstallationCompleteModal from './InstallationCompleteModal'
+import InstallationPlanModal from './InstallationPlanModal'
 import ListFooter from './ListFooter'
 import { useProgressiveList } from '../hooks/useInfiniteList'
 import { useAuth } from '../context/AuthContext'
 import { isAdmin } from '../lib/access'
 
-/* Le parc ne connaît que deux statuts : « à installer » et « installé ».
-   L'état « en cours » se déduit de la date de pose : une pose dont le jour est
-   arrivé (ou dépassé) est en cours de traitement chez le technicien, tant que
-   son compte rendu n'a pas été validé. */
-const BUCKETS = {
-  a_faire:  { label: 'À faire',  cls: 'iv-badge iv-badge--blue',   Icon: Clock },
-  en_cours: { label: 'En cours', cls: 'iv-badge iv-badge--orange', Icon: AlertTriangle },
-  faite:    { label: 'Faite',    cls: 'iv-badge iv-badge--green',  Icon: CheckCircle2 },
+/* Une installation est une visite (`Intervention`, type « installation ») :
+   elle se programme, se démarre, se remplit — une fiche et des photos par
+   appareil — puis se clôture, ce qui fait entrer les appareils au parc. */
+const STATUS = {
+  planifie: { label: 'À faire',  cls: 'iv-badge iv-badge--blue',   Icon: Clock },
+  en_cours: { label: 'En cours', cls: 'iv-badge iv-badge--orange', Icon: PlayCircle },
+  termine:  { label: 'Faite',    cls: 'iv-badge iv-badge--green',  Icon: CheckCircle2 },
 }
 
-function bucketOf(inst) {
-  if (inst.status === 'installe') return 'faite'
-  if (!inst.scheduledDate) return 'a_faire'
-  const day = new Date(inst.scheduledDate); day.setHours(0, 0, 0, 0)
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  return day <= today ? 'en_cours' : 'a_faire'
-}
+const FILTERS = [
+  { value: '',         label: 'Toutes' },
+  { value: 'planifie', label: 'À faire' },
+  { value: 'en_cours', label: 'En cours' },
+  { value: 'termine',  label: 'Faites' },
+  // Le parc saisi ou importé sans visite d'installation : consultable à part,
+  // il ne se mélange pas au travail à faire.
+  { value: 'reprise',  label: 'Reprises de parc' },
+]
 
 function fmt(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
+function fmtTime(d) {
+  return d ? new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''
+}
 
-function BucketBadge({ bucket }) {
-  const m = BUCKETS[bucket]
+function StatusBadge({ status }) {
+  const m = STATUS[status] || STATUS.planifie
   const { Icon } = m
   return <span className={m.cls}><Icon size={11} strokeWidth={2.5} /> {m.label}</span>
 }
 
-const FILTERS = [
-  { value: '',         label: 'Toutes' },
-  { value: 'a_faire',  label: 'À faire' },
-  { value: 'en_cours', label: 'En cours' },
-  { value: 'faite',    label: 'Faites' },
-]
-
-/* Lignes montées par lot au défilement : le parc entier est déjà chargé, seul
-   son rendu se fait progressivement. */
 const RENDER_STEP = 50
+const startOfToday = () => new Date(new Date().setHours(0, 0, 0, 0))
 
-/**
- * Le parc vu sous l'angle du travail à faire : ce qui reste à poser, ce qui est
- * en cours de pose et ce qui est en service.
- */
 export default function InstallationsTab({ embedded = false }) {
   const navigate  = useNavigate()
   const { user }  = useAuth()
-  // Le rôle Technicien ne donne plus d'accès en dur : c'est la case
-  // « Gérer les appareils » qui décide, comme partout ailleurs.
   const canReport = isAdmin(user) || !!user?.permissions?.canManageDevices
+  const canPlan   = canReport || !!user?.permissions?.canManageInterventions
 
-  const [all, setAll]         = useState([])
+  const [visits,  setVisits]  = useState([])   // visites d'installation
+  const [parc,    setParc]    = useState([])   // DEA du parc (poses en attente, reprises)
   const [loading, setLoading] = useState(true)
-  const [denied, setDenied]   = useState(false)
-  const [search, setSearch]   = useState('')
-  const [filter, setFilter]   = useState('')
-  const [posing, setPosing]   = useState(null)
+  const [denied,  setDenied]  = useState(false)
+  const [search,  setSearch]  = useState('')
+  const [filter,  setFilter]  = useState('')
+  const [posing,  setPosing]  = useState(null)
+  const [planning, setPlanning] = useState(null) // null | { client?, deas? }
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res  = await getInstallations({ limit: 1000 })
-      const list = Array.isArray(res) ? res : (res?.data || [])
-      setAll(list)
+      const [ivs, res] = await Promise.all([
+        getInterventions({ controlType: 'installation', light: '1' }),
+        getInstallations({ limit: 5000 }).catch(err => { if (err.status === 403) return { data: [] }; throw err }),
+      ])
+      setVisits(Array.isArray(ivs) ? ivs : [])
+      setParc(Array.isArray(res) ? res : (res?.data || []))
       setDenied(false)
     } catch (err) {
-      // Les profils sans droit sur le parc gardent les autres onglets.
       if (err.status === 403) setDenied(true)
       else toast.error(err.message || 'Chargement impossible.')
     } finally {
@@ -88,52 +85,69 @@ export default function InstallationsTab({ embedded = false }) {
 
   useEffect(() => { load() }, [load])
 
-  const rows = useMemo(() => all.map(i => ({ ...i, bucket: bucketOf(i) })), [all])
+  /* Poses prévues sans visite à venir : planifiées avant les visites
+     d'installation, ou appareil resté non posé lors du passage. Elles
+     attendent d'être (re)programmées. */
+  const toSchedule = useMemo(() => parc
+    .filter(d => d.status === 'a_installer' && (!d.visit || d.visit.status === 'termine'))
+    .sort((a, b) => new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)), [parc])
+
+  // Le parc entré sans visite d'installation (saisie, import du fichier).
+  const reprises = useMemo(() => parc.filter(d => d.status === 'installe' && !d.visit), [parc])
 
   const stats = useMemo(() => ({
-    total:    rows.length,
-    a_faire:  rows.filter(r => r.bucket === 'a_faire').length,
-    en_cours: rows.filter(r => r.bucket === 'en_cours').length,
-    faite:    rows.filter(r => r.bucket === 'faite').length,
-  }), [rows])
+    total:    visits.length,
+    planifie: visits.filter(v => v.status === 'planifie').length,
+    en_cours: visits.filter(v => v.status === 'en_cours').length,
+    termine:  visits.filter(v => v.status === 'termine').length,
+    reprise:  reprises.length,
+  }), [visits, reprises])
 
-  const filtered = useMemo(() => {
-    let list = rows
-    if (filter) list = list.filter(r => r.bucket === filter)
-    const q = search.trim().toLowerCase()
+  const q = search.trim().toLowerCase()
+
+  const filteredVisits = useMemo(() => {
+    let list = visits
+    if (filter && filter !== 'reprise') list = list.filter(v => v.status === filter)
     if (q) {
-      list = list.filter(r =>
-        r.clientName?.toLowerCase().includes(q) ||
-        r.address?.toLowerCase().includes(q) ||
-        r.location?.toLowerCase().includes(q) ||
-        r.deviceType?.toLowerCase().includes(q) ||
-        r.serialNumber?.toLowerCase().includes(q) ||
-        r.technicianName?.toLowerCase().includes(q)
-      )
+      list = list.filter(v =>
+        v.clientName?.toLowerCase().includes(q) ||
+        v.siteName?.toLowerCase().includes(q) ||
+        v.objet?.toLowerCase().includes(q) ||
+        v.installationSnap?.serialNumber?.toLowerCase().includes(q) ||
+        v.technicienName?.toLowerCase().includes(q))
     }
-    /* Les poses en attente d'abord, la plus urgente en tête : c'est ce qui
-       demande une action. Le parc installé suit, le plus récent d'abord. */
-    const rank = { en_cours: 0, a_faire: 1, faite: 2 }
+    // Le travail à faire d'abord (le plus proche en tête), puis l'historique.
+    const rank = { en_cours: 0, planifie: 1, termine: 2 }
     return [...list].sort((a, b) => {
-      if (rank[a.bucket] !== rank[b.bucket]) return rank[a.bucket] - rank[b.bucket]
-      if (a.bucket === 'faite') {
-        return new Date(b.installationDate || 0) - new Date(a.installationDate || 0)
-      }
+      if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status]
+      if (a.status === 'termine') return new Date(b.completedDate || 0) - new Date(a.completedDate || 0)
       return new Date(a.scheduledDate || 0) - new Date(b.scheduledDate || 0)
     })
-  }, [rows, filter, search])
+  }, [visits, filter, q])
 
-  // Nouveaux critères : le rendu repart du premier lot.
-  const progressive = useProgressiveList(filtered, { step: RENDER_STEP, resetKey: `${search}|${filter}` })
+  const filteredReprises = useMemo(() => {
+    if (filter !== 'reprise') return []
+    const list = q ? reprises.filter(r =>
+      r.clientName?.toLowerCase().includes(q) ||
+      r.address?.toLowerCase().includes(q) ||
+      r.deviceType?.toLowerCase().includes(q) ||
+      r.serialNumber?.toLowerCase().includes(q)) : reprises
+    return [...list].sort((a, b) => new Date(b.installationDate || 0) - new Date(a.installationDate || 0))
+  }, [reprises, filter, q])
+
+  const rows = filter === 'reprise' ? filteredReprises : filteredVisits
+  const progressive = useProgressiveList(rows, { step: RENDER_STEP, resetKey: `${search}|${filter}` })
 
   if (denied) {
     return (
       <div className="ctrl-empty">
         <HeartPulse size={40} color="var(--gray-300)" />
-        <p>Vous n'avez pas accès au parc des DAE.</p>
+        <p>Vous n'avez pas accès aux installations.</p>
       </div>
     )
   }
+
+  const pendingCount = stats.planifie + stats.en_cours
 
   return (
     <div className={embedded ? 'mt-tab-panel' : 'page-content'}>
@@ -141,11 +155,16 @@ export default function InstallationsTab({ embedded = false }) {
         <div>
           {!embedded && <h1 className="page-title"><HeartPulse size={20} /> Installations</h1>}
           <p className="page-subtitle">
-            {stats.total} pose{stats.total !== 1 ? 's' : ''} au parc
-            {stats.a_faire + stats.en_cours > 0 &&
-              ` · ${stats.a_faire + stats.en_cours} en attente de mise en service`}
+            {stats.total} installation{stats.total !== 1 ? 's' : ''} programmée{stats.total !== 1 ? 's' : ''}
+            {pendingCount > 0 && ` · ${pendingCount} à réaliser`}
+            {toSchedule.length > 0 && ` · ${toSchedule.length} pose${toSchedule.length > 1 ? 's' : ''} à programmer`}
           </p>
         </div>
+        {canPlan && (
+          <button className="btn btn--primary" onClick={() => setPlanning({})}>
+            <Plus size={14} /> Programmer une installation
+          </button>
+        )}
       </div>
 
       <div className="inst-stats">
@@ -154,7 +173,7 @@ export default function InstallationsTab({ embedded = false }) {
           <div className="inst-stat-label">Total</div>
         </div>
         <div className="inst-stat-card inst-stat-card--blue">
-          <div className="inst-stat-num">{stats.a_faire}</div>
+          <div className="inst-stat-num">{stats.planifie}</div>
           <div className="inst-stat-label">À faire</div>
         </div>
         <div className="inst-stat-card inst-stat-card--amber">
@@ -162,10 +181,45 @@ export default function InstallationsTab({ embedded = false }) {
           <div className="inst-stat-label">En cours</div>
         </div>
         <div className="inst-stat-card inst-stat-card--green">
-          <div className="inst-stat-num">{stats.faite}</div>
+          <div className="inst-stat-num">{stats.termine}</div>
           <div className="inst-stat-label">Faites</div>
         </div>
       </div>
+
+      {/* Poses en attente de programmation : c'est du matériel promis au
+          client qui n'a pas encore de date de passage. */}
+      {!loading && toSchedule.length > 0 && (
+        <div className="inst-toschedule">
+          <div className="inst-toschedule-title">
+            <AlertTriangle size={14} /> Poses à programmer ({toSchedule.length})
+          </div>
+          <div className="inst-toschedule-list">
+            {toSchedule.map(d => (
+              <div key={d._id} className="inst-toschedule-row">
+                <span className="inst-toschedule-main" onClick={() => navigate(`/devices/${d._id}`)}>
+                  <strong>{d.clientName || '—'}</strong>
+                  <span>{[d.site?.name, d.deviceType, d.serialNumber].filter(Boolean).join(' · ')}</span>
+                  {d.visit?.nonPose && <em>non posé lors de la visite du {fmt(d.visit.completedDate || d.visit.scheduledDate)}</em>}
+                  {!d.visit && d.scheduledDate && <em>prévue le {fmt(d.scheduledDate)}, sans visite</em>}
+                </span>
+                {canPlan && (
+                  <button className="btn btn--ghost btn--sm" onClick={() => setPlanning({
+                    client: { id: d.client?._id || d.client, name: d.clientName }, deas: [d], site: d.site,
+                  })}>
+                    <CalendarClock size={13} /> Programmer
+                  </button>
+                )}
+                {canReport && (
+                  <button className="btn btn--ghost btn--sm" title="Valider la pose sans visite (régularisation)"
+                    onClick={() => setPosing(d)}>
+                    <CheckCircle2 size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="table-toolbar">
         <div className="search-wrap">
@@ -187,6 +241,7 @@ export default function InstallationsTab({ embedded = false }) {
               className={`inst-filter-btn${filter === f.value ? ' inst-filter-btn--active' : ''}`}
               onClick={() => setFilter(f.value)}
             >
+              {f.value === 'reprise' && <Archive size={11} style={{ marginRight: 4 }} />}
               {f.label}
               {f.value && <span className="inst-filter-count">{stats[f.value] ?? 0}</span>}
             </button>
@@ -196,94 +251,135 @@ export default function InstallationsTab({ embedded = false }) {
 
       {loading ? (
         <div className="table-loading"><span className="spinner" /></div>
+      ) : filter === 'reprise' ? (
+        <div className="table-wrap">
+          <p className="form-hint" style={{ margin: '0 0 8px' }}>
+            Appareils entrés au parc sans visite d'installation (saisie manuelle, import du fichier).
+          </p>
+          <table className="table">
+            <thead>
+              <tr><th>Client / Site</th><th>DAE</th><th>Posé le</th></tr>
+            </thead>
+            <tbody>
+              {progressive.visible.map(inst => (
+                <tr key={inst._id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/devices/${inst._id}`)}>
+                  <td>
+                    <div className="inst-site-cell">
+                      <div className="inst-site-client">{inst.clientName || '—'}</div>
+                      {(inst.address || inst.location) && (
+                        <div className="inst-site-loc">
+                          <MapPin size={11} strokeWidth={1.8} />
+                          {inst.address}{inst.location ? ` · ${inst.location}` : ''}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="inst-device-cell">
+                      {inst.deviceType   && <span className="inst-device-type">{inst.deviceType}</span>}
+                      {inst.serialNumber && <span className="inst-device-sn">{inst.serialNumber}</span>}
+                    </div>
+                  </td>
+                  <td>{inst.installationDate ? fmt(inst.installationDate) : <span className="text-muted">—</span>}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={3} className="table-empty">Aucun appareil repris pour ces critères.</td></tr>
+              )}
+            </tbody>
+          </table>
+          {rows.length > 0 && (
+            <ListFooter sentinelRef={progressive.sentinelRef} shown={progressive.shown} total={rows.length}
+              hasMore={progressive.hasMore} noun={['appareil', 'appareils']} />
+          )}
+        </div>
       ) : (
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
                 <th>Client / Site</th>
-                <th>DAE</th>
+                <th>Appareils</th>
                 <th>Technicien</th>
                 <th>Prévue</th>
-                <th>Posée</th>
+                <th>Faite</th>
                 <th>Statut</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {progressive.visible.map(inst => {
-                const late = inst.bucket === 'en_cours' && inst.scheduledDate &&
-                  new Date(inst.scheduledDate) < new Date(new Date().setHours(0, 0, 0, 0))
+              {progressive.visible.map(v => {
+                const late = v.status !== 'termine' && v.scheduledDate && new Date(v.scheduledDate) < startOfToday()
+                const n = v.targets?.length || 1
                 return (
-                  <tr key={inst._id} style={{ cursor: 'pointer' }}
-                    onClick={() => navigate(`/devices/${inst._id}`)}>
+                  <tr key={v._id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/interventions/${v._id}`)}>
                     <td>
                       <div className="inst-site-cell">
-                        <div className="inst-site-client">{inst.clientName || '—'}</div>
-                        {(inst.address || inst.location) && (
-                          <div className="inst-site-loc">
-                            <MapPin size={11} strokeWidth={1.8} />
-                            {inst.address}{inst.location ? ` · ${inst.location}` : ''}
-                          </div>
+                        <div className="inst-site-client">{v.clientName || '—'}</div>
+                        {v.siteName && (
+                          <div className="inst-site-loc"><MapPin size={11} strokeWidth={1.8} /> {v.siteName}</div>
                         )}
                       </div>
                     </td>
                     <td>
                       <div className="inst-device-cell">
-                        {inst.deviceType   && <span className="inst-device-type">{inst.deviceType}</span>}
-                        {inst.serialNumber && <span className="inst-device-sn">{inst.serialNumber}</span>}
-                        {!inst.deviceType && !inst.serialNumber && <span className="text-muted">—</span>}
+                        <span className="inst-device-type">
+                          {n > 1 ? `${n} DAE` : (v.installationSnap?.deviceType || 'DAE')}
+                        </span>
+                        {n === 1 && v.installationSnap?.serialNumber && (
+                          <span className="inst-device-sn">{v.installationSnap.serialNumber}</span>
+                        )}
+                        {v.formation?.formation && (
+                          <span className="inst-device-sn" title="Formation des agents liée">
+                            <GraduationCap size={11} /> + formation
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>
                       <div className="iv-tech-cell">
                         <User size={12} strokeWidth={1.8} />
-                        {inst.technicianName || inst.technician?.fullName
-                          || <em className="text-muted">Non assigné</em>}
+                        {v.technicienName || v.technicien?.fullName || <em className="text-muted">Non assigné</em>}
                       </div>
                     </td>
                     <td>
-                      {inst.scheduledDate ? (
+                      {v.scheduledDate ? (
                         <div className={`iv-date-cell${late ? ' iv-card-date--late' : ''}`}>
                           <Calendar size={12} strokeWidth={1.8} />
-                          {fmt(inst.scheduledDate)}
+                          {fmt(v.scheduledDate)} {fmtTime(v.scheduledDate)}
                         </div>
                       ) : <span className="text-muted">—</span>}
                     </td>
                     <td>
-                      {inst.installationDate ? (
-                        <div className="iv-date-cell">
-                          <CheckCircle2 size={12} strokeWidth={1.8} />
-                          {fmt(inst.installationDate)}
-                        </div>
+                      {v.completedDate ? (
+                        <div className="iv-date-cell"><CheckCircle2 size={12} strokeWidth={1.8} /> {fmt(v.completedDate)}</div>
                       ) : <span className="text-muted">—</span>}
                     </td>
-                    <td><BucketBadge bucket={inst.bucket} /></td>
+                    <td><StatusBadge status={v.status} /></td>
                     <td onClick={e => e.stopPropagation()}>
-                      {inst.bucket !== 'faite' && canReport && (
-                        <button className="btn btn--primary btn--sm" onClick={() => setPosing(inst)}>
-                          <CheckCircle2 size={13} /> Compte rendu
-                        </button>
-                      )}
+                      <button className="btn btn--ghost btn--sm" title="Bon d'intervention"
+                        onClick={() => window.open(`/interventions/${v._id}/bon`, '_blank')}>
+                        <FileText size={13} /> Bon
+                      </button>
                     </td>
                   </tr>
                 )
               })}
-              {filtered.length === 0 && (
+              {rows.length === 0 && (
                 <tr><td colSpan={7} className="table-empty">
                   {search || filter
                     ? 'Aucune installation pour ces critères.'
-                    : 'Aucune installation enregistrée.'}
+                    : 'Aucune installation programmée. Programmez-en une depuis cet onglet, le planning ou la fiche client.'}
                 </td></tr>
               )}
             </tbody>
           </table>
 
-          {filtered.length > 0 && (
+          {rows.length > 0 && (
             <ListFooter
               sentinelRef={progressive.sentinelRef}
               shown={progressive.shown}
-              total={filtered.length}
+              total={rows.length}
               hasMore={progressive.hasMore}
               noun={['installation', 'installations']}
             />
@@ -296,6 +392,21 @@ export default function InstallationsTab({ embedded = false }) {
           installation={posing}
           onClose={() => setPosing(null)}
           onDone={() => { setPosing(null); load() }}
+        />
+      )}
+
+      {planning && (
+        <InstallationPlanModal
+          clientId={planning.client?.id}
+          clientName={planning.client?.name}
+          site={planning.site}
+          presetDeas={planning.deas || []}
+          onClose={() => setPlanning(null)}
+          onDone={created => {
+            setPlanning(null)
+            load()
+            if (created?._id) navigate(`/interventions/${created._id}`)
+          }}
         />
       )}
     </div>

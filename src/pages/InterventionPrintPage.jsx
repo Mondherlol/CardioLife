@@ -121,7 +121,11 @@ export function RapportDocument({ iv }) {
 
   /* Une visite couvre plusieurs appareils : le rapport les liste tous. Les
      interventions d'avant les visites multi-DAE n'ont qu'une fiche unique. */
-  const fiches = (iv.fiches?.length ? iv.fiches : [iv.fiche || {}])
+  /* Installation : un appareil finalement pas posé ne figure pas au rapport
+     comme posé — il reste listé à part (voir `nonPoses`). */
+  const allFiches = (iv.fiches?.length ? iv.fiches : [iv.fiche || {}])
+  const fiches = allFiches.filter(f => !f.nonPose)
+  const nonPoses = allFiches.filter(f => f.nonPose)
   const visite = iv.visite || iv.fiche || {}
   const photos = fiches.flatMap(f => (f.photos || []).map(fn => ({ fn, f })))
 
@@ -183,7 +187,7 @@ export function RapportDocument({ iv }) {
               onError={e => { e.target.style.display = 'none' }} />
             <span className="pr-logo-text">CardioTrack</span>
           </div>
-          <div className="pr-header-sub">Rapport d'intervention</div>
+          <div className="pr-header-sub">{iv.controlType === 'installation' ? "Rapport d'installation" : "Rapport d'intervention"}</div>
         </div>
         <div className="pr-header-right">
           <div className="pr-ref">Réf. #{id.slice(-8).toUpperCase()}</div>
@@ -357,6 +361,19 @@ export function RapportDocument({ iv }) {
           </tbody>
         </table>
       </Section>
+
+      {nonPoses.length > 0 && (
+        <Section title="Appareils non posés">
+          <div className="pr-note-box">
+            {nonPoses.map((f, i) => (
+              <div key={i} className="pr-note-text">
+                {deviceLabelOf(f)}{serialOf(f) ? ` · n° ${serialOf(f)}` : ''}
+                {f.nonPoseMotif ? ` — ${f.nonPoseMotif}` : ''}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
 
       {visite.observationGenerale && (
         <Section title="Observation générale">

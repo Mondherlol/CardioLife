@@ -19,7 +19,7 @@ const INSTALL_STATUS = {
   a_installer: { label: 'À installer', cls: 'ct-inst-badge ct-inst-badge--todo' },
   installe:    { label: 'Installé',    cls: 'ct-inst-badge ct-inst-badge--done' },
 }
-const CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention' }
+const CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention', installation: 'Installation' }
 const INTERV_STATUS = {
   planifie: { label: 'Planifié', cls: 'iv-badge iv-badge--blue' },
   en_cours: { label: 'En cours', cls: 'iv-badge iv-badge--orange' },

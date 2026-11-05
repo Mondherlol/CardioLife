@@ -9,7 +9,8 @@ import {
 import { toast } from 'react-toastify'
 import { armoireStatus } from '../components/siteHelpers'
 import { useAuth } from '../context/AuthContext'
-import { getInstallation, deleteInstallation, updateInstallation, completeInstallation } from '../api/installations'
+import { getInstallation, deleteInstallation, completeInstallation } from '../api/installations'
+import InstallationPlanModal from '../components/InstallationPlanModal'
 import { getInterventions, createIntervention, deleteIntervention } from '../api/interventions'
 import { getUsers } from '../api/users'
 
@@ -19,6 +20,7 @@ const CONTROL_TYPE_LABELS = {
   annuel:       'Annuel',
   hors_contrat: 'Hors contrat',
   intervention: 'Intervention',
+  installation: 'Installation',
 }
 const INTERVENTION_STATUS = {
   planifie: { label: 'Planifié', cls: 'iv-badge iv-badge--blue' },
@@ -359,80 +361,70 @@ function DeleteModal({ inst, onClose, onConfirm }) {
 /* ─── PAGE ───────────────────────────────────────────────────── */
 
 /* ─── Section « Planifier l'installation » (pose en attente) ─── */
-function PlanificationSection({ inst, users, canManage, onSaved, onInstalled }) {
-  const techniciens = users.filter(u => u.role === 'technicien')
-  const [date, setDate] = useState(inst.scheduledDate ? toDateInput(inst.scheduledDate) : todayStr())
-  const [time, setTime] = useState(inst.scheduledDate
-    ? new Date(inst.scheduledDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-    : '09:00')
-  const [tech, setTech] = useState(inst.technician?._id || (typeof inst.technician === 'string' ? inst.technician : '') || '')
-  const [saving,  setSaving]  = useState(false)
+/**
+ * Pose en attente. Elle se fait au cours d'une visite d'installation : c'est
+ * là que le technicien démarre, remplit la fiche et les photos, fait signer
+ * le bon. Si la visite existe, on y renvoie ; sinon on la programme.
+ * « Marquer installée » reste pour régulariser une pose faite hors appli.
+ */
+function PlanificationSection({ inst, canManage, canPlan, onInstalled, onPlan }) {
+  const navigate = useNavigate()
   const [marking, setMarking] = useState(false)
-
-  async function save() {
-    setSaving(true)
-    try {
-      const start = new Date(`${date}T${time || '09:00'}`)
-      const t = techniciens.find(u => u._id === tech)
-      await updateInstallation(inst._id, {
-        scheduledDate:  isNaN(start.getTime()) ? undefined : start.toISOString(),
-        technician:     tech || undefined,
-        technicianName: t ? (t.fullName || t.username) : undefined,
-      })
-      toast.success('Planification enregistrée.')
-      onSaved()
-    } catch (err) { toast.error(err.message || 'Erreur.') } finally { setSaving(false) }
-  }
+  const visit = inst.visit && inst.visit.status !== 'termine' ? inst.visit : null
 
   async function markInstalled() {
-    if (!window.confirm('Marquer cette installation comme posée sur site ?')) return
+    if (!window.confirm('Marquer cet appareil comme posé sur site, sans visite d\'installation ?')) return
     setMarking(true)
     try {
       await completeInstallation(inst._id, {})
-      toast.success('Installation marquée comme installée.')
+      toast.success('Appareil marqué comme installé.')
       onInstalled()
     } catch (err) { toast.error(err.message || 'Erreur.') } finally { setMarking(false) }
   }
+
+  const when = visit?.scheduledDate
+    ? `${new Date(visit.scheduledDate).toLocaleDateString('fr-FR')} à ${new Date(visit.scheduledDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+    : null
 
   return (
     <div className="inst-plan-section">
       <div className="inst-plan-head">
         <span className="inst-plan-icon"><CalendarClock size={16} /></span>
         <div>
-          <div className="inst-plan-title">Planifier l'installation</div>
-          <div className="inst-plan-sub">Pose en attente — définissez la date, l'heure et l'intervenant.</div>
+          <div className="inst-plan-title">
+            {visit ? (visit.status === 'en_cours' ? 'Installation en cours' : 'Installation programmée') : 'Pose à programmer'}
+          </div>
+          <div className="inst-plan-sub">
+            {visit
+              ? <>Le {when}{visit.technicienName ? ` · ${visit.technicienName}` : ' · technicien non assigné'} — l'appareil entrera au parc à la clôture de la visite.</>
+              : inst.visit?.nonPose
+                ? "Non posé lors de la dernière visite : programmez un nouveau passage."
+                : "Aucune visite d'installation : programmez-la pour qu'elle apparaisse au planning."}
+          </div>
         </div>
       </div>
-      <div className="inst-plan-grid">
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label">Date de pose</label>
-          <input type="date" className="form-input form-input--plain" value={date}
-            onChange={e => setDate(e.target.value)} disabled={!canManage} />
-        </div>
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label">Heure</label>
-          <input type="time" className="form-input form-input--plain" value={time}
-            onChange={e => setTime(e.target.value)} disabled={!canManage} />
-        </div>
-        <div className="form-group" style={{ margin: 0 }}>
-          <label className="form-label">Intervenant / installateur</label>
-          <select className="form-input form-input--plain" value={tech}
-            onChange={e => setTech(e.target.value)} disabled={!canManage}>
-            <option value="">— En attente d'affectation</option>
-            {techniciens.map(t => <option key={t._id} value={t._id}>{t.fullName || t.username}</option>)}
-          </select>
-        </div>
-      </div>
-      {canManage && (
-        <div className="inst-plan-actions">
-          <button className="btn btn--ghost" onClick={save} disabled={saving || marking}>
-            {saving ? <span className="login-btn-spinner" /> : <Save size={14} />} Enregistrer la planification
+      <div className="inst-plan-actions">
+        {visit ? (
+          <>
+            <button className="btn btn--primary" onClick={() => navigate(`/interventions/${visit._id}`)}>
+              <ClipboardList size={14} /> Ouvrir l'installation
+            </button>
+            <button className="btn btn--ghost" onClick={() => window.open(`/interventions/${visit._id}/bon`, '_blank')}>
+              <FileText size={14} /> Bon d'intervention
+            </button>
+          </>
+        ) : canPlan && (
+          <button className="btn btn--primary" onClick={onPlan}>
+            <CalendarClock size={14} /> Programmer l'installation
           </button>
-          <button className="btn btn--primary" onClick={markInstalled} disabled={saving || marking}>
+        )}
+        {canManage && (
+          <button className="btn btn--ghost" onClick={markInstalled} disabled={marking}
+            title="Régularisation : pose faite hors application">
             {marking ? <span className="login-btn-spinner" /> : <CheckCircle2 size={14} />} Marquer installée
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
@@ -455,6 +447,8 @@ export default function InstallationDetailPage() {
 
   const canManage = user?.role === 'superadmin' || user?.role === 'admin'
     || user?.permissions?.canManageDevices
+  const canPlan = canManage || !!user?.permissions?.canManageInterventions
+  const [planOpen, setPlanOpen] = useState(false)
 
   const reload = useCallback(() => getInstallation(id).then(setInst).catch(() => {}), [id])
 
@@ -467,8 +461,8 @@ export default function InstallationDetailPage() {
   }, [id, navigate])
 
   async function handleDelete() {
-    await deleteInstallation(id)
-    toast.success('Installation supprimée.')
+    const r = await deleteInstallation(id)
+    toast.success(r?.message || 'Installation supprimée.')
     navigate(-1)
   }
 
@@ -544,8 +538,8 @@ export default function InstallationDetailPage() {
       {/* Pose en attente : planification — sinon métriques de suivi */}
       {isPending ? (
         <PlanificationSection
-          inst={inst} users={users} canManage={canManage}
-          onSaved={reload} onInstalled={reload}
+          inst={inst} canManage={canManage} canPlan={canPlan}
+          onInstalled={reload} onPlan={() => setPlanOpen(true)}
         />
       ) : (
         <div className="inst-metrics">
@@ -686,6 +680,17 @@ export default function InstallationDetailPage() {
 
       {deleteOpen && (
         <DeleteModal inst={inst} onClose={() => setDel(false)} onConfirm={handleDelete} />
+      )}
+
+      {planOpen && (
+        <InstallationPlanModal
+          clientId={inst.client?._id || inst.client}
+          clientName={inst.client?.name || inst.clientName}
+          site={inst.site}
+          presetDeas={[inst]}
+          onClose={() => setPlanOpen(false)}
+          onDone={created => { setPlanOpen(false); if (created?._id) navigate(`/interventions/${created._id}`) }}
+        />
       )}
     </div>
   )

@@ -50,6 +50,10 @@ export function suggestNature(iv) {
   if (iv?.controlType === 'annuel')     return ['controle_annuel']
   // Une intervention ponctuelle est, presque toujours, un remplacement.
   if (iv?.controlType === 'intervention') return ['remplacement_consommables']
+  // Une pose se double souvent de la formation des agents : elle suit si liée.
+  if (iv?.controlType === 'installation') {
+    return iv.formation?.formation ? ['installation', 'formation'] : ['installation']
+  }
   return []
 }
 
@@ -82,12 +86,26 @@ function Lines({ text, className }) {
 export function bonLines(iv, natures, custom = {}, removed = []) {
   const snap = iv.installationSnap || {}
   const siteDeas = iv.siteDeas || []
-  const targets = iv.installation
-    ? siteDeas.filter(d => String(d._id) === String(iv.installation))
-    : siteDeas
-  const fiches = iv.fiches?.length
-    ? iv.fiches
-    : targets.length
+  // Installation : les appareils de la pose, pas tout le parc du site.
+  const targetIds = iv.targets?.length ? iv.targets.map(String) : null
+  const targets = targetIds
+    ? siteDeas.filter(d => targetIds.includes(String(d._id)))
+    : iv.installation
+      ? siteDeas.filter(d => String(d._id) === String(iv.installation))
+      : siteDeas
+  /* Un appareil finalement pas posé n'a rien à faire sur le bon. Une
+     installation dont les fiches ne couvrent pas tous les appareils prévus
+     les reprend tous : par défaut, un appareil prévu est posé. */
+  const saved  = (iv.fiches || []).filter(f => !f.nonPose)
+  const pending = targetIds
+    ? targets.filter(d => !(iv.fiches || []).some(f => String(f.dea || '') === String(d._id)))
+      .map(d => ({ dea: d._id }))
+    : []
+  const fiches = targetIds
+    ? [...saved, ...pending]
+    : saved.length
+      ? saved
+      : targets.length
       ? targets.map(d => ({ dea: d._id }))
       : [iv.fiche || {}]
 

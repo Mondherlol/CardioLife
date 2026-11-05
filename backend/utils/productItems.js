@@ -120,7 +120,12 @@ async function syncDeaWithItem(site, dea) {
   item.status = dea.status === 'installe' ? 'installe' : 'reserve'
 
   if (item.status === 'reserve') {
-    item.reservedFor = { client: site.client, note: `Pose planifiée — ${site.name}` }
+    // Le site de pose est celui de la réservation : la fiche client s'y fie.
+    item.reservedFor = {
+      client: site.client, site: site._id,
+      contract: item.reservedFor?.contract, until: item.reservedFor?.until,
+      note: `Pose planifiée — ${site.name}`,
+    }
   } else {
     item.reservedFor = undefined
   }

@@ -398,18 +398,25 @@ const FORMATION_ETATS = [
 ]
 
 /* ─── CloseConfirm ─── */
-function CloseConfirm({ onClose, onConfirm, loading, onBehalf }) {
+function CloseConfirm({ onClose, onConfirm, loading, onBehalf, pose }) {
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal--sm">
         <div className="modal-header">
-          <h2 className="modal-title"><CheckCircle2 size={16} /> Clôturer l'intervention</h2>
+          <h2 className="modal-title"><CheckCircle2 size={16} /> {pose ? "Clôturer l'installation" : "Clôturer l'intervention"}</h2>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body">
           <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            En clôturant l'intervention, le statut passera à <strong>Terminé</strong> et la fiche ne sera plus modifiable tant qu'elle n'est pas rouverte.
+            En clôturant {pose ? "l'installation" : "l'intervention"}, le statut passera à <strong>Terminé</strong> et la fiche ne sera plus modifiable tant qu'elle n'est pas rouverte.
           </p>
+          {pose && (
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginTop: 10 }}>
+              <strong>{pose.posed} appareil{pose.posed > 1 ? 's' : ''}</strong> entrer{pose.posed > 1 ? 'ont' : 'a'} au parc du site
+              {pose.posed ? " (sortie du stock, date d'installation = date de la visite)" : ''}.
+              {pose.skipped > 0 && <> {pose.skipped} non posé{pose.skipped > 1 ? 's' : ''} : il{pose.skipped > 1 ? 's' : ''} reste{pose.skipped > 1 ? 'nt' : ''} à installer et réservé{pose.skipped > 1 ? 's' : ''}.</>}
+            </p>
+          )}
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 10 }}>
             Les relevés de la checklist — péremptions, niveau de batterie, n° de série,
             emplacement — seront reportés sur la fiche client, et la date de prochain
@@ -483,12 +490,49 @@ function ReopenConfirm({ onClose, onConfirm, loading }) {
   )
 }
 
+/* ─── Pose d'un appareil (visite d'installation) ───
+   Par défaut, tout appareil de la visite est posé à la clôture. Le technicien
+   ne signale que l'exception : appareil non posé, qui reste réservé et à
+   reprogrammer. */
+function PoseBar({ dea, fiche, readOnly, onToggle, motifProps }) {
+  const installed = dea.status === 'installe'
+  const nonPose   = Boolean(fiche.nonPose)
+  return (
+    <div className={`fiche-pose-bar${nonPose ? ' fiche-pose-bar--off' : ''}${installed ? ' fiche-pose-bar--done' : ''}`}>
+      <div className="fiche-pose-state">
+        <HeartPulse size={15} />
+        <span>
+          {installed
+            ? <><strong>Posé</strong>{dea.installationDate ? ` le ${fmt(dea.installationDate)}` : ''} — l'appareil est au parc du site.</>
+            : nonPose
+              ? <><strong>Non posé</strong> — il restera à installer, toujours réservé pour ce client.</>
+              : <><strong>À poser</strong> — il entrera au parc à la clôture de l'installation.</>}
+        </span>
+      </div>
+      {!installed && !readOnly && (
+        <div className="ct-type-choice fiche-pose-choice">
+          <label className={`bi-nature${!nonPose ? ' bi-nature--on' : ''}`}>
+            <input type="radio" checked={!nonPose} onChange={() => onToggle(false)} /> Posé
+          </label>
+          <label className={`bi-nature${nonPose ? ' bi-nature--on' : ''}`}>
+            <input type="radio" checked={nonPose} onChange={() => onToggle(true)} /> Non posé
+          </label>
+        </div>
+      )}
+      {nonPose && !installed && (
+        <input {...motifProps} />
+      )}
+    </div>
+  )
+}
+
 /* ─── Contexte du contrôle (type + installation + contrat) ─── */
 const CTRL_CTX = {
   semestriel:   { label: 'Semestriel (contrat)', cls: 'ct-type-badge ct-type-badge--semestriel' },
   annuel:       { label: 'Annuel (contrat)',     cls: 'ct-type-badge ct-type-badge--annuel' },
   hors_contrat: { label: 'Contrôle hors contrat', cls: 'ct-type-badge ct-type-badge--hors' },
   intervention: { label: 'Intervention ponctuelle', cls: 'ct-type-badge ct-type-badge--intervention' },
+  installation: { label: 'Installation (pose de DAE)', cls: 'ct-type-badge ct-type-badge--installation' },
 }
 function ControlContextSection({ iv, navigate, onEditType }) {
   const ct       = CTRL_CTX[iv.controlType] || CTRL_CTX.hors_contrat
@@ -505,12 +549,13 @@ function ControlContextSection({ iv, navigate, onEditType }) {
   return (
     <div className="fiche-page-section">
       <div className="fiche-page-section-title">
-        <ClipboardList size={14} /> {iv.controlType === 'intervention' ? "Contexte de l'intervention" : 'Contexte du contrôle'}
+        <ClipboardList size={14} /> {iv.controlType === 'intervention' ? "Contexte de l'intervention"
+          : iv.controlType === 'installation' ? "Contexte de l'installation" : 'Contexte du contrôle'}
       </div>
       <div className="fiche-page-body">
         <div className="ctx-grid">
           {/* Le titre d'une intervention ponctuelle est déjà son objet, en tête de page. */}
-          {iv.objet && iv.controlType !== 'intervention' && (
+          {iv.objet && !['intervention', 'installation'].includes(iv.controlType) && (
             <div className="ctx-item ctx-item--wide">
               <span className="ctx-label">Titre</span>
               <span className="ctx-value ctx-value--title">{iv.objet}</span>
@@ -540,9 +585,11 @@ function ControlContextSection({ iv, navigate, onEditType }) {
           </div>
           <div className="ctx-item">
             <span className="ctx-label">Appareil</span>
-            {device
-              ? <span className="ctx-value"><Zap size={12} /> {device}</span>
-              : <span className="ctx-muted">Tout le site</span>}
+            {iv.controlType === 'installation' && (iv.targets?.length || 0) > 1
+              ? <span className="ctx-value"><Zap size={12} /> {iv.targets.length} DAE à poser</span>
+              : device
+                ? <span className="ctx-value"><Zap size={12} /> {device}</span>
+                : <span className="ctx-muted">Tout le site</span>}
           </div>
           <div className="ctx-item">
             <span className="ctx-label">Contrat</span>
@@ -649,9 +696,14 @@ export default function InterventionFichePage() {
          parc du site — une visite de contrat les couvre tous. Le technicien
          peut en retirer ou en ajouter, mais il n'a rien à composer d'avance. */
       const siteDeas = data.siteDeas || []
-      const targets  = data.installation
-        ? siteDeas.filter(d => String(d._id) === String(data.installation))
-        : siteDeas
+      /* Une installation vise ses appareils à poser (`targets`) : le reste du
+         parc du site n'est pas concerné par la pose. */
+      const targetIds = data.targets?.length ? data.targets.map(String) : null
+      const targets  = targetIds
+        ? siteDeas.filter(d => targetIds.includes(String(d._id)))
+        : data.installation
+          ? siteDeas.filter(d => String(d._id) === String(data.installation))
+          : siteDeas
 
       const saved = Array.isArray(data.fiches) ? data.fiches : []
       const byKey = new Map(saved.map(f => [String(f.dea || ''), f]))
@@ -710,6 +762,10 @@ export default function InterventionFichePage() {
         dernierControle:  f.dernierControle,
         prochainControle: f.prochainControle,
         observation:      f.observation ?? '',
+
+        // Installation : appareil finalement pas posé.
+        nonPose:      f.nonPose,
+        nonPoseMotif: f.nonPoseMotif ?? '',
       })
 
       setFormationEtat(data.formation?.etat || '')
@@ -1123,9 +1179,11 @@ export default function InterventionFichePage() {
         return
       }
       const updated = await closeIntervention(id)
-      mergeIv(updated)
+      // Installation : le parc vient de changer (appareils posés).
+      const pose = iv?.controlType === 'installation'
+      mergeIv(updated, { parc: pose && Array.isArray(updated.siteDeas) })
       setShowClose(false)
-      toast.success('Intervention clôturée.')
+      toast.success(pose ? 'Installation clôturée — les appareils posés sont au parc.' : 'Intervention clôturée.')
       archiveRapport()
     } catch (err) {
       toast.error(err.message)
@@ -1175,6 +1233,10 @@ export default function InterventionFichePage() {
   const snap          = iv.installationSnap || {}
   // Intervention ponctuelle : même checklist, sans effet sur le prochain contrôle.
   const isIntervention = iv.controlType === 'intervention'
+  // Installation : pose de DAE réservés — même circuit, clôture = entrée au parc.
+  const isInstallation = iv.controlType === 'installation'
+  const visitWord     = isInstallation ? "l'installation" : "l'intervention"
+  const VisitWord     = isInstallation ? 'Installation' : 'Intervention'
   const isTermine     = iv.status === 'termine'
   const fiche         = activeFiche
   // Les photos vivent côté serveur : c'est la fiche enregistrée qui fait foi.
@@ -1336,7 +1398,16 @@ export default function InterventionFichePage() {
               {isIntervention && (
                 <span className="ct-type-badge ct-type-badge--intervention">Intervention</span>
               )}
+              {isInstallation && (
+                <span className="ct-type-badge ct-type-badge--installation">Installation</span>
+              )}
             </h1>
+            {isInstallation && (
+              <p className="fiche-intv-objet">
+                <strong>{iv.objet || 'Pose de DAE'}</strong>
+                <span> — à la clôture, les appareils posés entrent au parc du site à la date de la visite.</span>
+              </p>
+            )}
             {isIntervention && (
               <p className="fiche-intv-objet">
                 <strong>{iv.objet || 'Intervention ponctuelle'}</strong>
@@ -1392,17 +1463,17 @@ export default function InterventionFichePage() {
           {canFill && notStarted && (
             <button className="btn btn--primary" onClick={handleStart} disabled={starting}>
               {starting ? <span className="spinner spinner--sm" /> : <PlayCircle size={14} />}
-              Démarrer l'intervention
+              Démarrer {visitWord}
             </button>
           )}
           {canFill && !isTermine && !notStarted && (
             <button className="btn btn--primary" onClick={() => setShowClose(true)}>
-              <CheckCircle2 size={14} /> Clôturer l'intervention
+              <CheckCircle2 size={14} /> Clôturer {visitWord}
             </button>
           )}
           {/* Un contrôle du contrat ne se supprime pas : il reste dû. Il se
               met en attente de RDV quand le client ne veut pas le caler. */}
-          {isAdmin && notStarted && iv.controlType !== 'intervention' && !iv.enAttente && (
+          {isAdmin && notStarted && !isIntervention && !isInstallation && !iv.enAttente && (
             <button className="btn btn--ghost" onClick={() => setShowAttente(true)}>
               <Clock size={14} /> Mettre en attente
             </button>
@@ -1410,7 +1481,7 @@ export default function InterventionFichePage() {
           {/* Supprimer : intervention ponctuelle ou contrôle hors contrat,
               rôles admin et superadmin seulement. */}
           {['admin', 'superadmin'].includes(user?.role)
-            && ['intervention', 'hors_contrat'].includes(iv.controlType) && (
+            && ['intervention', 'hors_contrat', 'installation'].includes(iv.controlType) && (
             <button className="btn btn--ghost fiche-delete-btn" onClick={() => setShowDelete(true)}>
               <Trash2 size={14} /> Supprimer
             </button>
@@ -1666,10 +1737,10 @@ export default function InterventionFichePage() {
           {notStarted && canFill && (
             <div className="fiche-start-bar">
               <div className="fiche-start-text">
-                <strong>Intervention non démarrée</strong>
+                <strong>{VisitWord} non démarrée</strong>
                 <p>
                   La checklist est consultable mais verrouillée. Démarrez
-                  l'intervention à votre arrivée sur site pour pouvoir la saisir.
+                  {' '}{visitWord} à votre arrivée sur site pour pouvoir la saisir.
                 </p>
               </div>
               <Countdown date={iv.scheduledDate} />
@@ -1681,7 +1752,7 @@ export default function InterventionFichePage() {
                   disabled={starting}
                 >
                   {starting ? <span className="spinner spinner--sm" /> : <PlayCircle size={15} />}
-                  Démarrer l'intervention
+                  Démarrer {visitWord}
                 </button>
               </div>
             </div>
@@ -1690,8 +1761,8 @@ export default function InterventionFichePage() {
             <div className="fiche-admin-notes">
               <Clock size={13} />
               <span>
-                Intervention non démarrée : le technicien n'est pas encore
-                intervenu. La checklist affichée reprend le parc du site.
+                {VisitWord} non démarrée : le technicien n'est pas encore
+                intervenu. La checklist affichée reprend {isInstallation ? 'les appareils réservés pour la pose' : 'le parc du site'}.
               </span>
               {closePastBtn && <span style={{ marginLeft: 'auto' }}>{closePastBtn}</span>}
             </div>
@@ -1730,9 +1801,26 @@ export default function InterventionFichePage() {
             onSelect={setActiveKey}
             onAdd={addDea}
             onRemove={dropDea}
-            addable={addableDeas}
+            addable={isInstallation
+              ? addableDeas.filter(d => (iv.targets || []).map(String).includes(String(d._id)))
+              : addableDeas}
             readOnly={readOnly}
           />
+
+          {/* ── Pose de l'appareil (installation) ── */}
+          {isInstallation && activeDea && (
+            <PoseBar
+              dea={activeDea}
+              fiche={fiche}
+              readOnly={readOnly}
+              onToggle={nonPose => {
+                set('nonPose', nonPose || undefined)
+                if (!nonPose) set('nonPoseMotif', '')
+                saveFields({ nonPose: nonPose ? true : null, ...(nonPose ? {} : { nonPoseMotif: '' }) })
+              }}
+              motifProps={field('nonPoseMotif', fiche.nonPoseMotif, 'Site pas prêt, appareil défectueux…')}
+            />
+          )}
 
           {/* ── Section appareil ── */}
           <div className="fiche-page-section">
@@ -1782,7 +1870,9 @@ export default function InterventionFichePage() {
                   <div className="fiche-input fiche-input--ro fiche-readonly-value">
                     {activeDea?.installationDate
                       ? fmt(activeDea.installationDate)
-                      : <span className="fiche-readonly-empty">Non renseignée sur la fiche client</span>}
+                      : isInstallation && activeDea?.status === 'a_installer'
+                        ? <span className="fiche-readonly-empty">Date de cette visite (fixée à la clôture)</span>
+                        : <span className="fiche-readonly-empty">Non renseignée sur la fiche client</span>}
                   </div>
                 </AutoField>
 
@@ -2310,6 +2400,10 @@ export default function InterventionFichePage() {
           onConfirm={handleClose}
           loading={closing}
           onBehalf={!isTech}
+          pose={isInstallation ? {
+            posed:   fiches.filter(f => f.dea && !f.nonPose && siteDeas.find(d => String(d._id) === f.key)?.status === 'a_installer').length,
+            skipped: fiches.filter(f => f.nonPose).length,
+          } : null}
         />
       )}
 

@@ -17,6 +17,7 @@ const TYPE_LABELS = {
   annuel:       'Contrôle annuel',
   hors_contrat: 'Contrôle hors contrat',
   intervention: 'Intervention',
+  installation: 'Installation',
 }
 
 async function systemFolder(name, parent, userId) {
