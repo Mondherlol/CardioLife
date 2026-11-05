@@ -1,5 +1,6 @@
 const Product = require('../models/Product')
 const mongoose = require('mongoose')
+const { searchRegex: accentRegex } = require('../utils/textSearch')
 
 const PUBLIC_PRODUCT_FIELDS = [
   'name',
@@ -21,13 +22,12 @@ async function getAll(req, res) {
 
   const filter = { isActive: true, listedOnWebsite: { $ne: false } }
   if (category) filter.category = category
-  if (brand) filter.brand = { $regex: brand, $options: 'i' }
-  if (supplier) filter.supplier = { $regex: supplier, $options: 'i' }
+  if (brand?.trim()) filter.brand = accentRegex(brand)
+  if (supplier?.trim()) filter.supplier = accentRegex(supplier)
 
   const q = search?.trim() || ''
   if (q) {
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = { $regex: escaped, $options: 'i' }
+    const re = accentRegex(q)
     filter.$or = [
       { name: re },
       { reference: re },

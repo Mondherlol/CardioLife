@@ -1,3 +1,4 @@
+const { searchRegex: accentRegex } = require('./textSearch')
 /**
  * Découpage d'une liste paginée.
  *
@@ -25,11 +26,10 @@ function pageResult(data, total, { skip, limit, page }) {
   }
 }
 
-/** Texte de recherche → regex insensible à la casse, caractères spéciaux neutralisés. */
+/** Texte de recherche → regex insensible à la casse et aux accents
+    (« lycee » trouve « LYCÉE »), caractères spéciaux neutralisés. */
 function searchRegex(text) {
-  const q = String(text || '').trim()
-  if (!q) return null
-  return { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+  return accentRegex(text)
 }
 
 module.exports = { pageParams, pageResult, searchRegex }

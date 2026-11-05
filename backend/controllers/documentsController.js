@@ -8,6 +8,7 @@ const Document    = require('../models/Document')
 const AppSettings = require('../models/AppSettings')
 const Client      = require('../models/Client')
 const { getOrCreateClientFolder } = require('../utils/clientDocsFolder')
+const { searchRegex: accentRegex } = require('../utils/textSearch')
 
 const UPLOAD_DIR = path.join(__dirname, '../uploads/documents')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
@@ -54,7 +55,7 @@ async function canAccess(user, doc) {
 async function getContents(req, res) {
   const { parent, search } = req.query
   const filter = { isDeleted: false, parent: parent || null }
-  if (search) filter.name = { $regex: search, $options: 'i' }
+  if (search?.trim()) filter.name = accentRegex(search)
 
   /* Les rapports d'intervention commencent par leur date : dans leurs dossiers,
      le plus récent passe en tête, années comme fichiers. */

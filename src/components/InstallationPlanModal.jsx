@@ -379,8 +379,8 @@ export default function InstallationPlanModal({
 
                   {deas.length === 0 && sitePending.length === 0 && siteDeclared.length === 0 && (
                     <p className="cd-empty-hint">
-                      Aucun défibrillateur réservé pour ce client. Choisissez-en un dans le stock ci-dessous :
-                      il sera réservé pour cette pose.
+                      Aucun DAE sur ce site (ni déjà déclaré au parc, ni réservé pour ce client).
+                      Choisissez-en un dans le stock ci-dessous : il sera réservé pour cette pose.
                     </p>
                   )}
 

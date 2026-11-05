@@ -7,6 +7,7 @@ import {
 import { toast } from 'react-toastify'
 import { createProduct, updateProduct, getSuppliers, getBrands } from '../api/products'
 import { getProductCategories } from '../api/productCategories'
+import { fold } from '../lib/text'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -26,8 +27,8 @@ function AutocompleteInput({ value, onChange, suggestions, placeholder, icon: Ic
     return () => document.removeEventListener('mousedown', onDown)
   }, [])
 
-  const q        = value.trim().toLowerCase()
-  const filtered = suggestions.filter(s => s.toLowerCase().includes(q) && s !== value).slice(0, 7)
+  const q        = fold(value.trim())
+  const filtered = suggestions.filter(s => fold(s).includes(q) && s !== value).slice(0, 7)
   const canCreate = q && !suggestions.some(s => s.toLowerCase() === q)
 
   return (

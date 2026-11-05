@@ -13,6 +13,7 @@ import ListFooter from './ListFooter'
 import { useProgressiveList } from '../hooks/useInfiniteList'
 import { useAuth } from '../context/AuthContext'
 import { isAdmin } from '../lib/access'
+import { fold } from '../lib/text'
 
 /* Une installation est une visite (`Intervention`, type « installation ») :
    elle se programme, se démarre, se remplit — une fiche et des photos par
@@ -103,18 +104,18 @@ export default function InstallationsTab({ embedded = false }) {
     reprise:  reprises.length,
   }), [visits, reprises])
 
-  const q = search.trim().toLowerCase()
+  const q = fold(search.trim())
 
   const filteredVisits = useMemo(() => {
     let list = visits
     if (filter && filter !== 'reprise') list = list.filter(v => v.status === filter)
     if (q) {
       list = list.filter(v =>
-        v.clientName?.toLowerCase().includes(q) ||
-        v.siteName?.toLowerCase().includes(q) ||
-        v.objet?.toLowerCase().includes(q) ||
-        v.installationSnap?.serialNumber?.toLowerCase().includes(q) ||
-        v.technicienName?.toLowerCase().includes(q))
+        fold(v.clientName).includes(q) ||
+        fold(v.siteName).includes(q) ||
+        fold(v.objet).includes(q) ||
+        fold(v.installationSnap?.serialNumber).includes(q) ||
+        fold(v.technicienName).includes(q))
     }
     // Le travail à faire d'abord (le plus proche en tête), puis l'historique.
     const rank = { en_cours: 0, planifie: 1, termine: 2 }
@@ -128,10 +129,10 @@ export default function InstallationsTab({ embedded = false }) {
   const filteredReprises = useMemo(() => {
     if (filter !== 'reprise') return []
     const list = q ? reprises.filter(r =>
-      r.clientName?.toLowerCase().includes(q) ||
-      r.address?.toLowerCase().includes(q) ||
-      r.deviceType?.toLowerCase().includes(q) ||
-      r.serialNumber?.toLowerCase().includes(q)) : reprises
+      fold(r.clientName).includes(q) ||
+      fold(r.address).includes(q) ||
+      fold(r.deviceType).includes(q) ||
+      fold(r.serialNumber).includes(q)) : reprises
     return [...list].sort((a, b) => new Date(b.installationDate || 0) - new Date(a.installationDate || 0))
   }, [reprises, filter, q])
 

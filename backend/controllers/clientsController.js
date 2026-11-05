@@ -6,6 +6,7 @@ const Site     = require('../models/Site')
 const Document = require('../models/Document')
 const { getOrCreateClientFolder } = require('../utils/clientDocsFolder')
 const { pageParams, pageResult, searchRegex } = require('../utils/paging')
+const { searchRegex: accentRegex } = require('../utils/textSearch')
 
 /* Aplatit un tableau de tableaux (un par site, un par DEA…). */
 const flatten = input => ({
@@ -131,7 +132,7 @@ async function getAll(req, res) {
 async function lookup(req, res) {
   const { q, limit = 20 } = req.query
   const filter = { isActive: true }
-  if (q) filter.name = { $regex: q, $options: 'i' }
+  if (q) filter.name = accentRegex(q)
   const clients = await Client.find(filter)
     .select('name address.city')
     .limit(Number(limit))

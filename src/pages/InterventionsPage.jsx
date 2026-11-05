@@ -15,6 +15,7 @@ import InstallationCompleteModal from '../components/InstallationCompleteModal'
 import { getInstallations } from '../api/installations'
 import { useProgressiveList } from '../hooks/useInfiniteList'
 import ListFooter from '../components/ListFooter'
+import { fold } from '../lib/text'
 
 /* ─── Constants ─────────────────────────────────────────────── */
 
@@ -438,14 +439,14 @@ export default function InterventionsPage({ embedded = false, kind = 'controle' 
     let list = all
     if (statusFilter) list = list.filter(i => i.status === statusFilter)
     if (search.trim()) {
-      const q = search.toLowerCase()
+      const q = fold(search)
       list = list.filter(i =>
-        i.clientName?.toLowerCase().includes(q) ||
-        i.objet?.toLowerCase().includes(q) ||
-        i.technicienName?.toLowerCase().includes(q) ||
-        i.installationSnap?.deviceType?.toLowerCase().includes(q) ||
-        i.installationSnap?.serialNumber?.toLowerCase().includes(q) ||
-        i.installationSnap?.address?.toLowerCase().includes(q)
+        fold(i.clientName).includes(q) ||
+        fold(i.objet).includes(q) ||
+        fold(i.technicienName).includes(q) ||
+        fold(i.installationSnap?.deviceType).includes(q) ||
+        fold(i.installationSnap?.serialNumber).includes(q) ||
+        fold(i.installationSnap?.address).includes(q)
       )
     }
     return list

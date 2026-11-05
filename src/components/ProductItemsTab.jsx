@@ -9,6 +9,7 @@ import {
 } from '../api/productItems'
 import { assignSerials } from '../api/products'
 import ItemDrawer, { ItemStatusChip, expiryLevel, formatDate } from './ItemDrawer'
+import { fold } from '../lib/text'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -270,10 +271,10 @@ export default function ProductItemsTab({ product, category, onStockChanged }) {
 
   // Le filtrage est local : la liste tient en mémoire et la frappe reste fluide.
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = fold(search.trim())
     return items.filter(it => {
       if (q && ![it.serialNumber, it.reference, it.lotNumber, it.supplier, it.client?.name]
-        .some(v => v?.toLowerCase().includes(q))) return false
+        .some(v => fold(v).includes(q))) return false
       if (statusFilter && it.status !== statusFilter) return false
       if (expiryFilter) {
         const exp = expiryLevel(it.expirationDate)

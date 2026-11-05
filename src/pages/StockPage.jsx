@@ -23,6 +23,7 @@ import ParcExpiryTab from '../components/ParcExpiryTab'
 import { categoryIcon } from '../constants/categoryIcons'
 import { useAuth } from '../context/AuthContext'
 import { stockRights } from '../lib/access'
+import { fold } from '../lib/text'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -1031,10 +1032,10 @@ export default function StockPage() {
   }, [search, activeCat])
 
   const visibleModels = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const bySerial = serialHits.q.toLowerCase() === q ? serialHits.productIds : new Set()
+    const q = fold(search.trim())
+    const bySerial = fold(serialHits.q) === q ? serialHits.productIds : new Set()
     return models.filter(m => {
-      if (q && ![m.name, m.reference, m.brand, m.supplier].some(v => v?.toLowerCase().includes(q))
+      if (q && ![m.name, m.reference, m.brand, m.supplier].some(v => fold(v).includes(q))
           && !bySerial.has(String(m._id))) return false
       if (brandFilter    && m.brand    !== brandFilter)    return false
       if (supplierFilter && m.supplier !== supplierFilter) return false

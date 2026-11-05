@@ -1,5 +1,6 @@
 const mongoose = require('mongoose')
 const Site = require('../models/Site')
+const { fold } = require('./textSearch')
 
 /**
  * Le parc des DAE vit dans `Site.deas`. Ce module présente ces sous-documents
@@ -117,13 +118,11 @@ async function listInstallations(filter = {}) {
   }
 
   if (filter.search) {
-    const q = String(filter.search).toLowerCase()
+    // Sans accents ni casse : « lycee » trouve « LYCÉE ».
+    const q = fold(filter.search)
     rows = rows.filter(r =>
-      r.clientName?.toLowerCase().includes(q) ||
-      r.address?.toLowerCase().includes(q) ||
-      r.location?.toLowerCase().includes(q) ||
-      r.serialNumber?.toLowerCase().includes(q) ||
-      r.deviceType?.toLowerCase().includes(q)
+      [r.clientName, r.address, r.location, r.serialNumber, r.deviceType]
+        .some(v => fold(v).includes(q))
     )
   }
 

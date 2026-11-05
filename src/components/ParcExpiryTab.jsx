@@ -5,6 +5,7 @@ import {
   Users, MapPin, ExternalLink, HeartPulse,
 } from 'lucide-react'
 import { getInstallations } from '../api/installations'
+import { fold } from '../lib/text'
 
 /**
  * Échéances du parc : les consommables posés chez les clients — batteries et
@@ -120,11 +121,11 @@ export default function ParcExpiryTab({ initialType = '' }) {
   }, [rows])
 
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = fold(search.trim())
     return rows.filter(r => {
       if (type && r.kind !== type) return false
       if (q && ![r.client, r.place, r.serial, r.ident, r.label, r.deviceType]
-        .some(v => v?.toLowerCase().includes(q))) return false
+        .some(v => fold(v).includes(q))) return false
       if (horizon) {
         const d = daysUntil(r.expiry)
         if (d == null) return false

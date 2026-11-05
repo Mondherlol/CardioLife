@@ -17,6 +17,7 @@ const { mergeDuplicateFiches, withInterventionLock } = require('../utils/ficheLo
 const { linkFormation, unlinkFormation, createLinkedFormation, followVisitDate } = require('../utils/formationLink')
 const { completePose, cancelPose } = require('../utils/pose')
 const { syncSiteControls } = require('../utils/controls')
+const { searchRegex: accentRegex } = require('../utils/textSearch')
 
 const ADMIN_ROLES = ['superadmin', 'admin']
 
@@ -584,8 +585,8 @@ async function getAll(req, res) {
       if (to)   query.scheduledDate.$lte = new Date(to)
     }
 
-    if (search) {
-      const re = { $regex: search, $options: 'i' }
+    if (search?.trim()) {
+      const re = accentRegex(search)
       query.$or = [
         { clientName: re },
         { 'installationSnap.deviceType':   re },

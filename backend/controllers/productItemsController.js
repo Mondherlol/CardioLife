@@ -5,6 +5,7 @@ const StockMovement   = require('../models/StockMovement')
 const Site            = require('../models/Site')
 const Intervention  = require('../models/Intervention')
 const { summarize, syncProductStock, logHistory, detachItemFromParc } = require('../utils/productItems')
+const { searchRegex: accentRegex, searchRegExp } = require('../utils/textSearch')
 
 const { IN_STOCK_STATUSES, OUT_STATUSES, STATUS_LABELS } = ProductItem
 
@@ -42,7 +43,7 @@ function buildFilter(query) {
 
   const q = String(query.search || '').trim()
   if (q) {
-    const re = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+    const re = accentRegex(q)
     filter.$or = [{ serialNumber: re }, { reference: re }, { lotNumber: re }, { supplier: re }]
   }
   return filter
@@ -108,7 +109,7 @@ async function serialSearch(req, res) {
   const q = String(req.query.q || '').trim()
   const { category } = req.query
   if (q.length < 3) return res.json({ productIds: [], matches: [] })
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+  const re = searchRegExp(q)
 
   const items = await ProductItem.find({
     $or: [{ serialNumber: re }, { lotNumber: re }],

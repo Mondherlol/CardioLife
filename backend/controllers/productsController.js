@@ -7,6 +7,7 @@ const ProductItem   = require('../models/ProductItem')
 const StockMovement = require('../models/StockMovement')
 const Site          = require('../models/Site')
 const { syncProductStock, IN_STOCK_STATUSES } = require('../utils/productItems')
+const { searchRegex: accentRegex, accentPattern } = require('../utils/textSearch')
 
 async function getAll(req, res) {
   const { category, brand, supplier, search, page = 1, limit = 20, archived = 'false', lowStock, expiringSoon, expired } = req.query
@@ -16,12 +17,11 @@ async function getAll(req, res) {
 
   const filter = { isActive: archived === 'true' ? false : true }
   if (category)               filter.category = category
-  if (brand)                  filter.brand    = { $regex: brand,    $options: 'i' }
-  if (supplier)               filter.supplier = { $regex: supplier, $options: 'i' }
+  if (brand?.trim())          filter.brand    = accentRegex(brand)
+  if (supplier?.trim())       filter.supplier = accentRegex(supplier)
   const q = search?.trim() || ''
   if (q) {
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = { $regex: escaped, $options: 'i' }
+    const re = accentRegex(q)
 
     /* Un numéro de série ou de lot est lu sur l'appareil, pas dans le
        catalogue : celui qui le cherche veut retrouver le modèle qui le porte.
@@ -54,7 +54,7 @@ async function getAll(req, res) {
         { $match: filter },
         { $addFields: {
           _score: { $cond: [
-            { $regexMatch: { input: { $ifNull: ['$name', ''] }, regex: `^${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, options: 'i' } },
+            { $regexMatch: { input: { $ifNull: ['$name', ''] }, regex: `^${accentPattern(q)}`, options: 'i' } },
             0, 1
           ]}
         }},

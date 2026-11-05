@@ -1,6 +1,7 @@
 const path = require('path')
 const fs   = require('fs')
 const Todo = require('../models/Todo')
+const { searchRegExp } = require('../utils/textSearch')
 
 const STATUSES = ['todo', 'doing', 'done']
 
@@ -83,7 +84,7 @@ async function getAll(req, res) {
     if (q) {
       // Échappe les métacaractères : une recherche « c++ » ne doit pas faire
       // exploser le moteur d'expressions régulières.
-      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      const rx = searchRegExp(q)
       query.$or = [{ title: rx }, { notes: rx }, { category: rx }, { response: rx }, { feedback: rx }]
     }
 

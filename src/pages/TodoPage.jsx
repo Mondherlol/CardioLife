@@ -6,6 +6,7 @@ import {
   uploadTodoImage, todoImageUrl,
 } from '../api/todos'
 import { useLoadingBar } from '../hooks/useLoadingBar'
+import { fold } from '../lib/text'
 
 /**
  * Suivi partagé des demandes, présenté comme une feuille de calcul.
@@ -277,7 +278,7 @@ export default function TodoPage() {
   /* Les plus récentes en tête. Le serveur trie déjà ainsi ; on le refait ici
      pour qu'une ligne créée à l'instant se place au bon endroit sans recharger. */
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = fold(search.trim())
     const rang = t => new Date(t.requestedAt || t.createdAt || 0).getTime()
     return todos
       .filter(t => {
@@ -285,7 +286,7 @@ export default function TodoPage() {
         if (filter === 'open' && t.status === 'done') return false
         if (!q) return true
         return [t.title, t.notes, t.category, t.response, t.feedback]
-          .filter(Boolean).join(' ').toLowerCase().includes(q)
+          .filter(Boolean).map(fold).join(' ').includes(q)
       })
       .sort((a, b) => rang(b) - rang(a))
   }, [todos, filter, search])

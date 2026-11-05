@@ -19,6 +19,7 @@ import {
 } from '../lib/formations'
 import { StageChip } from '../components/FormationRow'
 import FormationModal from '../components/FormationModal'
+import { fold } from '../lib/text'
 
 const FILTERS = [
   { id: 'a_traiter', label: 'À traiter' },
@@ -77,14 +78,14 @@ export default function FormationsPage({ embedded = false }) {
     if (filter === 'a_traiter') list = list.filter(f => ['programme', 'termine'].includes(stageOf(f).id))
     else if (filter !== 'toutes') list = list.filter(f => stageOf(f).id === filter)
 
-    const q = search.trim().toLowerCase()
+    const q = fold(search.trim())
     if (q) {
       list = list.filter(f =>
-        f.title?.toLowerCase().includes(q) ||
-        f.clientName?.toLowerCase().includes(q) ||
-        (f.site?.name || f.siteName || '').toLowerCase().includes(q) ||
-        (f.participants || []).some(p => p.name?.toLowerCase().includes(q)) ||
-        (f.attestationContact?.name || '').toLowerCase().includes(q)
+        fold(f.title).includes(q) ||
+        fold(f.clientName).includes(q) ||
+        fold((f.site?.name || f.siteName || '')).includes(q) ||
+        (f.participants || []).some(p => fold(p.name).includes(q)) ||
+        fold((f.attestationContact?.name || '')).includes(q)
       )
     }
 

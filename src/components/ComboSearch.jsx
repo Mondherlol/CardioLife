@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, Plus, X, Check } from 'lucide-react'
+import { fold } from '../lib/text'
 
 /**
  * Generic searchable combobox.
@@ -47,9 +48,10 @@ export default function ComboSearch({
 
   const filtered = query
     ? items.filter(item => {
-        const main = (displayFn(item) || '').toLowerCase()
-        const sub  = subtextFn ? (subtextFn(item) || '').toLowerCase() : ''
-        const q    = query.toLowerCase()
+        // Accents et casse ignorés : « lycee » trouve « LYCÉE ».
+        const main = fold(displayFn(item))
+        const sub  = subtextFn ? fold(subtextFn(item)) : ''
+        const q    = fold(query)
         return main.includes(q) || sub.includes(q)
       })
     : items
