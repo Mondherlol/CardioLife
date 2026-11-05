@@ -585,8 +585,8 @@ function ControlContextSection({ iv, navigate, onEditType }) {
           </div>
           <div className="ctx-item">
             <span className="ctx-label">Appareil</span>
-            {iv.controlType === 'installation' && (iv.targets?.length || 0) > 1
-              ? <span className="ctx-value"><Zap size={12} /> {iv.targets.length} DAE à poser</span>
+            {(iv.targets?.length || 0) > 1
+              ? <span className="ctx-value"><Zap size={12} /> {iv.targets.length} DAE{iv.controlType === 'installation' ? ' à poser' : ' du site'}</span>
               : device
                 ? <span className="ctx-value"><Zap size={12} /> {device}</span>
                 : <span className="ctx-muted">Tout le site</span>}

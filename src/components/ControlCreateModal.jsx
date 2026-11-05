@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Plus, X, Zap, ChevronDown, Building2, MapPin, User, Calendar,
-  StickyNote, AlertTriangle, Info, HeartPulse, Wrench,
+  StickyNote, AlertTriangle, Info, HeartPulse, Wrench, Check,
 } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { createIntervention, updateIntervention } from '../api/interventions'
@@ -52,7 +52,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
     clientId:       null,
     clientName:     '',
     siteId:         '',
-    installation:   '',      // DAE précis, vide = tout le site
+    deaIds:         [],      // DAE visés ; aucun = tout le site
     technicien:     '',
     technicienName: '',
     scheduledDate:  presetDate ? localDateStr(presetDate) : '',
@@ -99,7 +99,14 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
 
   const site = sites.find(s => String(s._id) === String(form.siteId)) || null
   const deas = site?.deas || []
-  const dea  = deas.find(d => String(d._id) === String(form.installation)) || null
+  const pickedDeas = deas.filter(d => form.deaIds.includes(String(d._id)))
+  // Tous cochés = tout le site : inutile de figer la liste.
+  const allPicked  = pickedDeas.length > 0 && pickedDeas.length === deas.filter(d => d._id).length
+  const dea  = pickedDeas.length === 1 ? pickedDeas[0] : null
+  function toggleDea(id) {
+    const k = String(id)
+    setForm(p => ({ ...p, deaIds: p.deaIds.includes(k) ? p.deaIds.filter(x => x !== k) : [...p.deaIds, k] }))
+  }
 
   // Un site unique n'appelle pas de choix : on le retient d'office.
   useEffect(() => {
@@ -112,7 +119,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
       clientId:   sel ? sel.id : null,
       clientName: sel ? sel.name : '',
       siteId:     '',
-      installation: '',
+      deaIds:     [],
     }))
   }
 
@@ -170,7 +177,9 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
         clientName: form.clientName,
         site:       form.siteId,
         siteName:   site?.name || '',
-        installation: form.installation || undefined,
+        // Un appareil : `installation` ; plusieurs : `targets` ; aucun ou tous : le site.
+        installation: dea?._id || undefined,
+        targets: !allPicked && pickedDeas.length > 1 ? pickedDeas.map(d => d._id) : undefined,
         // Le snapshot fige ce que le technicien verra sur sa liste, même si le
         // parc change entre la programmation et la visite.
         installationSnap: {
@@ -280,7 +289,7 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
                   return (
                     <button key={s._id} type="button"
                       className={`ctrl-site${on ? ' ctrl-site--on' : ''}`}
-                      onClick={() => setForm(p => ({ ...p, siteId: s._id, installation: '' }))}>
+                      onClick={() => setForm(p => ({ ...p, siteId: s._id, deaIds: [] }))}>
                       <span className="ctrl-site-main">
                         <span className="ctrl-site-name">{s.name}</span>
                         {siteAddress(s) && <span className="ctrl-site-addr">{siteAddress(s)}</span>}
@@ -299,29 +308,34 @@ export default function ControlCreateModal({ kind = 'controle', presetDate, pres
           {site && (
             <div className="form-group">
               <label className="form-label">
-                <Zap size={12} /> Appareil <span className="form-label-opt">(facultatif)</span>
+                <Zap size={12} /> Appareils <span className="form-label-opt">(facultatif — aucun coché = tout le site)</span>
               </label>
-              <div className="fiche-select-wrap">
-                <select
-                  className="form-input form-input--plain"
-                  value={form.installation}
-                  onChange={e => setF('installation', e.target.value)}
-                >
-                  <option value="">Tout le site — une fiche par DAE</option>
-                  {/* `value` explicite, jamais `undefined` : sinon le select
-                      devient non contrôlé et soumet le libellé de l'option. */}
-                  {deas.filter(d => d._id).map(d => (
-                    <option key={d._id} value={String(d._id)}>
-                      {[d.deviceType || 'DAE', d.serialNumber, d.location].filter(Boolean).join(' · ')}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} className="fiche-select-chevron" />
+              {/* Un, plusieurs ou tous : on coche ceux que la visite concerne. */}
+              <div className="inst-pick-list">
+                {deas.filter(d => d._id).map(d => {
+                  const on = form.deaIds.includes(String(d._id))
+                  return (
+                    <button type="button" key={d._id}
+                      className={`inst-pick${on ? ' inst-pick--on' : ''}`}
+                      onClick={() => toggleDea(d._id)}>
+                      <span className="inst-pick-check">{on && <Check size={12} />}</span>
+                      <HeartPulse size={14} className="inst-pick-icon" />
+                      <span className="inst-pick-main">
+                        <span className="inst-pick-name">{d.deviceType || 'DAE'}</span>
+                        <span className="inst-pick-sub">
+                          {[d.serialNumber || 'sans numéro', d.location].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
               <p className="form-hint">
-                {form.installation
-                  ? `${isIntv ? "L'intervention" : 'Le contrôle'} ne portera que sur cet appareil.`
-                  : `Le technicien contrôlera les ${deas.length} appareil${deas.length > 1 ? 's' : ''} du site.`}
+                {pickedDeas.length === 0 || allPicked
+                  ? `Le technicien ${isIntv ? 'interviendra sur' : 'contrôlera'} les ${deas.length} appareil${deas.length > 1 ? 's' : ''} du site — une fiche par DAE.`
+                  : pickedDeas.length === 1
+                    ? `${isIntv ? "L'intervention" : 'Le contrôle'} ne portera que sur cet appareil.`
+                    : `${isIntv ? "L'intervention" : 'Le contrôle'} portera sur ces ${pickedDeas.length} appareils — une fiche par DAE.`}
               </p>
             </div>
           )}

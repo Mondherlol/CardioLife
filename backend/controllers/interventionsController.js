@@ -687,7 +687,7 @@ async function create(req, res) {
       installation, installationSnap,
       technicien, technicienName,
       scheduledDate, notes, objet,
-      controlType, contract,
+      controlType, contract, targets,
     } = req.body
 
     const CONTROL_TYPES = ['semestriel', 'annuel', 'hors_contrat', 'intervention']
@@ -703,12 +703,19 @@ async function create(req, res) {
       }
     }
 
+    /* Plusieurs appareils précis du site (ni un seul, ni tout le site) : la
+       visite les vise par `targets`, une fiche par DAE. */
+    const targetIds = Array.isArray(targets)
+      ? [...new Set(targets.map(String))].filter(t => mongoose.Types.ObjectId.isValid(t))
+      : []
+
     const intervention = await Intervention.create({
       client, clientName,
       // Le site porte le contexte du contrôle (adresse, parc) : sans lui, la
       // fiche ne sait plus où la visite a lieu.
       site: site || undefined, siteName,
       installation, installationSnap,
+      targets: targetIds.length > 1 ? targetIds : undefined,
       technicien, technicienName,
       scheduledDate, notes, objet,
       controlType: CONTROL_TYPES.includes(controlType) ? controlType : 'hors_contrat',
