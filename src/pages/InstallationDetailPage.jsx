@@ -498,6 +498,14 @@ export default function InstallationDetailPage() {
         </div>
         {canManage && (
           <div className="inst-detail-actions">
+            {/* Déclaré « installé » à la saisie mais pas encore posé : la pose
+                se programme d'ici, l'appareil repasse « à installer ». */}
+            {!isPending && canPlan && !(inst.visit?.status === 'termine' && !inst.visit.nonPose) && (
+              <button className="btn btn--ghost btn--sm" onClick={() => setPlanOpen(true)}
+                title="L'appareil n'est pas encore posé : programmer sa visite d'installation">
+                <CalendarClock size={14} /> Programmer la pose
+              </button>
+            )}
             <button className="btn btn--ghost btn--sm" onClick={() => navigate(`/devices/${id}/edit`)}>
               <Pencil size={14} /> Modifier
             </button>

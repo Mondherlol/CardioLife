@@ -7,7 +7,7 @@ const ProductItem  = require('../models/ProductItem')
 const Intervention = require('../models/Intervention')
 const User         = require('../models/User')
 const { toInstallation, findDea, listInstallations } = require('../utils/deaParc')
-const { syncDeaWithItem } = require('../utils/productItems')
+const { syncDeaWithItem, findItemForDea, syncProductStock } = require('../utils/productItems')
 const { applySerialTracking, completePose, cancelPose, createPoseVisit } = require('../utils/pose')
 const { createLinkedFormation } = require('../utils/formationLink')
 
@@ -329,12 +329,25 @@ async function plan(req, res) {
       })
       targets.push({ dea: site.deas[site.deas.length - 1], item: it })
     }
-    // DEA déjà prévus (reprogrammation d'une pose restée en suspens).
+    /* DEA déjà au parc du site : pose restée en suspens, ou appareil déclaré
+       « installé » à la saisie alors qu'il n'est pas encore posé (« Ajouter un
+       DEA » consigne par défaut une pose faite). Ce dernier repasse « à
+       installer » jusqu'à la clôture de la visite. Seul un appareil posé par
+       une visite d'installation de l'appli est refusé : lui l'est vraiment. */
+    const known = await visitsByDea(existingDeas)
+    const reverted = []
     for (const id of existingDeas) {
       const dea = site.deas.id(id)
-      if (!dea) return res.status(404).json({ message: "Un des DAE à reprogrammer n'est pas sur ce site." })
-      if (dea.status !== 'a_installer') {
-        return res.status(409).json({ message: `${dea.serialNumber || dea.deviceType || 'DAE'} est déjà posé.` })
+      if (!dea) return res.status(404).json({ message: "Un des DAE à programmer n'est pas sur ce site." })
+      const label = dea.serialNumber || dea.deviceType || 'DAE'
+      if (dea.status === 'installe') {
+        const v = known[String(dea._id)]
+        if (v && v.status === 'termine' && !v.nonPose) {
+          return res.status(409).json({ message: `${label} a déjà été posé lors d'une installation.` })
+        }
+        dea.status = 'a_installer'
+        dea.installationDate = undefined
+        reverted.push(dea)
       }
       dea.scheduledDate  = when
       dea.technician     = tech?._id || dea.technician
@@ -351,6 +364,14 @@ async function plan(req, res) {
         await item.save()
         await syncDeaWithItem(site, dea)
       } catch (e) { console.error('Lien stock (plan):', e.message) }
+    }
+    // Appareil repassé « à installer » : son exemplaire redevient une réservation.
+    for (const dea of reverted) {
+      try {
+        const item = await findItemForDea(dea._id, { product: dea.product, serialNumber: dea.serialNumber })
+        await syncDeaWithItem(site, dea)
+        if (item) await syncProductStock(item.product)
+      } catch (e) { console.error('Lien stock (plan, retour à installer):', e.message) }
     }
 
     /* 2. La visite. */

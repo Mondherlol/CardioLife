@@ -58,6 +58,9 @@ export default function InstallationPlanModal({
 
   const [items,    setItems]    = useState([])     // matériel réservé au client
   const [pending,  setPending]  = useState([])     // DEA déjà prévus, sans visite
+  // DEA déclarés « installés » au parc sans être passés par une installation de
+  // l'appli : « Ajouter un DEA » consigne par défaut une pose déjà faite.
+  const [declared, setDeclared] = useState([])
   const [extra,    setExtra]    = useState([])     // appareils pris au stock ici
   const [picked,   setPicked]   = useState([])     // ids d'articles retenus
   const [pickedDeas, setPickedDeas] = useState(presetDeas.map(d => String(d._id)))
@@ -118,13 +121,16 @@ export default function InstallationPlanModal({
     setLoading(true)
     Promise.all([
       getProductItems({ client: clientId, status: 'reserve' }).catch(() => ({ data: [] })),
-      getInstallations({ client: clientId, status: 'a_installer' }).catch(() => ({ data: [] })),
+      getInstallations({ client: clientId }).catch(() => ({ data: [] })),
     ]).then(([res, inst]) => {
       if (!alive) return
       setItems(Array.isArray(res?.data) ? res.data : [])
       const rows = Array.isArray(inst) ? inst : (inst?.data || [])
-      setPending(rows.filter(d => !d.visit || d.visit.status === 'termine'
-        || presetDeas.some(p => String(p._id) === String(d._id))))
+      setPending(rows.filter(d => d.status === 'a_installer' && (!d.visit || d.visit.status === 'termine'
+        || presetDeas.some(p => String(p._id) === String(d._id)))))
+      // Posé par une visite d'installation de l'appli : celui-là l'est vraiment.
+      setDeclared(rows.filter(d => d.status === 'installe'
+        && !(d.visit && d.visit.status === 'termine' && !d.visit.nonPose)))
     }).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -139,10 +145,14 @@ export default function InstallationPlanModal({
   const deas   = [...freeItems.filter(isDea), ...extra.filter(e => !freeItems.some(i => i._id === e._id))]
   const others = freeItems.filter(it => !isDea(it))
   const sitePending = pending.filter(d => !realSite || String(d.site?._id || '') === realSite)
+  const siteDeclared = declared.filter(d => !realSite || String(d.site?._id || '') === realSite)
+  // Sans date de pose, ou une date à venir : très probablement pas encore posé.
+  const notYetPosed = d => !d.installationDate || new Date(d.installationDate) > new Date()
 
   const pickedDeaItems = deas.filter(it => picked.includes(it._id))
   const pickedOthers   = others.filter(it => picked.includes(it._id))
-  const pickedPending  = sitePending.filter(d => pickedDeas.includes(String(d._id)))
+  const pickedPending  = [...sitePending, ...siteDeclared].filter(d => pickedDeas.includes(String(d._id)))
+  const pickedDeclared = siteDeclared.filter(d => pickedDeas.includes(String(d._id)))
   const total = pickedDeaItems.length + pickedPending.length
 
   function toggle(id) {
@@ -331,7 +341,43 @@ export default function InstallationPlanModal({
                     </>
                   )}
 
-                  {deas.length === 0 && sitePending.length === 0 && (
+                  {siteDeclared.length > 0 && (
+                    <>
+                      <span className="form-label-opt">
+                        <HeartPulse size={11} /> Déjà au parc de ce site — à choisir s'ils ne sont pas encore posés
+                      </span>
+                      <div className="inst-pick-list">
+                        {[...siteDeclared].sort((a, b) => notYetPosed(b) - notYetPosed(a)).map(d => {
+                          const on = pickedDeas.includes(String(d._id))
+                          return (
+                            <button type="button" key={d._id}
+                              className={`inst-pick${on ? ' inst-pick--on' : ''}`}
+                              onClick={() => toggleDea(d._id)}>
+                              <span className="inst-pick-check">{on && <Check size={12} />}</span>
+                              <HeartPulse size={14} className="inst-pick-icon" />
+                              <span className="inst-pick-main">
+                                <span className="inst-pick-name">{d.deviceType || 'DAE'}</span>
+                                <span className="inst-pick-sub">
+                                  {d.serialNumber || 'sans numéro'}{d.site?.name && <> · {d.site.name}</>}
+                                  {' · '}{d.installationDate
+                                    ? `pose déclarée le ${new Date(d.installationDate).toLocaleDateString('fr-FR')}`
+                                    : 'sans date de pose'}
+                                </span>
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {pickedDeclared.length > 0 && (
+                        <p className="form-hint">
+                          <AlertTriangle size={11} /> {pickedDeclared.length > 1 ? 'Ces appareils repasseront' : 'Cet appareil repassera'}
+                          {' '}« à installer » jusqu'à la clôture de l'installation, qui fixera la vraie date de pose.
+                        </p>
+                      )}
+                    </>
+                  )}
+
+                  {deas.length === 0 && sitePending.length === 0 && siteDeclared.length === 0 && (
                     <p className="cd-empty-hint">
                       Aucun défibrillateur réservé pour ce client. Choisissez-en un dans le stock ci-dessous :
                       il sera réservé pour cette pose.
