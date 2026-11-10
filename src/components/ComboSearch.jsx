@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, Plus, X, Check } from 'lucide-react'
 import { fold } from '../lib/text'
+import { useListKeyboard } from '../hooks/useListKeyboard'
 
 /**
  * Generic searchable combobox.
@@ -67,6 +68,14 @@ export default function ComboSearch({
     setSearch('')
   }
 
+  // ↑ ↓ pour parcourir, Entrée pour choisir, Échap pour fermer.
+  const shown = filtered.slice(0, 8)
+  const kb = useListKeyboard({
+    count: shown.length, open, resetKey: query,
+    onPick: i => shown[i] && select(shown[i]),
+    onClose: () => setOpen(false),
+  })
+
   /* ── Selected state ── */
   if (value) {
     return (
@@ -97,6 +106,7 @@ export default function ComboSearch({
             value={query}
             onChange={e => { setSearch(e.target.value); setOpen(true) }}
             onFocus={() => setOpen(true)}
+            onKeyDown={kb.onKeyDown}
             disabled={disabled}
             autoComplete="off"
           />
@@ -114,7 +124,7 @@ export default function ComboSearch({
       </div>
 
       {open && (
-        <div className="combo-dropdown">
+        <div className="combo-dropdown" ref={kb.listRef}>
           {filtered.length === 0 ? (
             <div className="combo-empty">
               <span>{emptyText}</span>
@@ -129,8 +139,11 @@ export default function ComboSearch({
               )}
             </div>
           ) : (
-            filtered.slice(0, 8).map((item, i) => (
-              <button key={i} type="button" className="combo-option" onClick={() => select(item)}>
+            shown.map((item, i) => (
+              <button key={i} type="button" data-kb-option
+                className={`combo-option${kb.active === i ? ' combo-option--active' : ''}`}
+                onMouseEnter={() => kb.setActive(i)}
+                onClick={() => select(item)}>
                 <span className="combo-option-main">{displayFn(item)}</span>
                 {subtextFn?.(item) && (
                   <span className="combo-option-sub">{subtextFn(item)}</span>

@@ -17,9 +17,16 @@ function toDateInput(value) {
   return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
 }
 
+/* Date du jour au format des champs, en heure locale (toISOString passerait
+   en UTC et donnerait la veille juste après minuit). */
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function addMonthsStr(dateStr, months = 12) {
-  const d = dateStr ? new Date(dateStr) : new Date()
-  d.setMonth(d.getMonth() + Number(months || 12))
+  const d = new Date(dateStr || todayStr())
+  d.setUTCMonth(d.getUTCMonth() + Number(months || 12))
   return d.toISOString().slice(0, 10)
 }
 
@@ -42,8 +49,11 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
   const deaCount = site?.deas?.length ?? null
 
   const [number, setNumber] = useState(contract?.contractNumber || '')
-  const [start,  setStart]  = useState(toDateInput(contract?.startDate) || new Date().toISOString().slice(0, 10))
-  const [end,    setEnd]    = useState(toDateInput(contract?.endDate)   || addMonthsStr())
+  /* Dates proposées d'office en création seulement. Un contrat existant sans
+     dates (repris par l'import) les garde vides : modifier son prix ne doit
+     pas lui donner la date du jour à son insu. */
+  const [start,  setStart]  = useState(toDateInput(contract?.startDate) || (isEdit ? '' : todayStr()))
+  const [end,    setEnd]    = useState(toDateInput(contract?.endDate)   || (isEdit ? '' : addMonthsStr()))
   const [status, setStatus] = useState(contract?.status || 'actif')
   const [notes,  setNotes]  = useState(contract?.notes || '')
   const [price,  setPrice]  = useState(contract?.price ?? '')
@@ -176,7 +186,7 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
                 onChange={e => {
                   setStart(e.target.value)
                   // La fin suit le début tant qu'elle n'a pas été fixée à la main.
-                  if (!isEdit) setEnd(addMonthsStr(e.target.value, renewalMonths))
+                  if (e.target.value && (!isEdit || !end)) setEnd(addMonthsStr(e.target.value, renewalMonths))
                 }} />
             </div>
             <div className="form-group">
@@ -185,6 +195,11 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
                 value={end} onChange={e => setEnd(e.target.value)} />
             </div>
           </div>
+          {isEdit && (!start || !end) && (
+            <p className="form-hint">
+              Dates non renseignées : les visites du contrat seront planifiées une fois le début et l'échéance saisis.
+            </p>
+          )}
 
           <div className="form-group">
             <label className="form-label">Prix du contrat (DT) <span className="form-label-opt">(optionnel)</span></label>

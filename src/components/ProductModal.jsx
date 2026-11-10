@@ -8,6 +8,7 @@ import { toast } from 'react-toastify'
 import { createProduct, updateProduct, getSuppliers, getBrands } from '../api/products'
 import { getProductCategories } from '../api/productCategories'
 import { fold } from '../lib/text'
+import { useListKeyboard } from '../hooks/useListKeyboard'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -29,7 +30,14 @@ function AutocompleteInput({ value, onChange, suggestions, placeholder, icon: Ic
 
   const q        = fold(value.trim())
   const filtered = suggestions.filter(s => fold(s).includes(q) && s !== value).slice(0, 7)
-  const canCreate = q && !suggestions.some(s => s.toLowerCase() === q)
+  const canCreate = q && !suggestions.some(s => fold(s) === q)
+
+  // ↑ ↓ pour parcourir, Entrée pour choisir, Échap pour fermer.
+  const kb = useListKeyboard({
+    count: filtered.length, open: open && filtered.length > 0, resetKey: value,
+    onPick: i => { if (filtered[i]) { onChange(filtered[i]); setOpen(false) } },
+    onClose: () => setOpen(false),
+  })
 
   return (
     <div className="ac-wrap" ref={wrapRef}>
@@ -39,12 +47,15 @@ function AutocompleteInput({ value, onChange, suggestions, placeholder, icon: Ic
         placeholder={placeholder}
         onChange={e => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
+        onKeyDown={kb.onKeyDown}
         autoComplete="off"
       />
       {open && (filtered.length > 0 || canCreate) && (
-        <div className="pmodal-supplier-dropdown">
-          {filtered.map(s => (
-            <button key={s} type="button" className="pmodal-supplier-option"
+        <div className="pmodal-supplier-dropdown" ref={kb.listRef}>
+          {filtered.map((s, i) => (
+            <button key={s} type="button" data-kb-option
+              className={`pmodal-supplier-option${kb.active === i ? ' pmodal-supplier-option--active' : ''}`}
+              onMouseEnter={() => kb.setActive(i)}
               onClick={() => { onChange(s); setOpen(false) }}
             >
               {Icon && <Icon size={12} />} {s}

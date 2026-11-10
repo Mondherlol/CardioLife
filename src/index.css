@@ -22170,3 +22170,11 @@ div.att-main { cursor: default; }
 }
 .inst-toschedule-main span { color: var(--text-secondary); }
 .inst-toschedule-main em { color: #c2410c; font-size: 12px; }
+
+/* Suggestion en surbrillance au clavier (↑ ↓ Entrée). */
+.plan-client-option--active,
+.combo-option--active,
+.pmodal-supplier-option--active {
+  background: var(--orange-50);
+  box-shadow: inset 3px 0 0 var(--orange-500);
+}

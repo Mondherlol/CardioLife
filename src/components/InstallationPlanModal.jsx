@@ -11,6 +11,7 @@ import { getClient } from '../api/clients'
 import { ClientSearchInput } from './PlanningInputs'
 import FormationLinkFields, { emptyFormationLink, formationLinkError, applyFormationLink } from './FormationLinkFields'
 import { localDateStr, localTimeStr } from '../lib/appointmentConstants'
+import { useListKeyboard } from '../hooks/useListKeyboard'
 
 function formatApiError(err) {
   if (err.errors?.length) return err.errors.map(e => e.msg).join(' · ')
@@ -489,6 +490,14 @@ function StockPicker({ exclude = [], onPick }) {
     return () => clearTimeout(timer.current)
   }, [open, query])
 
+  const list = results.filter(r => !excluded.has(String(r._id))).slice(0, 8)
+  function pick(it) { onPick(it); setOpen(false); setQuery('') }
+  const kb = useListKeyboard({
+    count: busy ? 0 : list.length, open, resetKey: query,
+    onPick: i => list[i] && pick(list[i]),
+    onClose: () => setOpen(false),
+  })
+
   if (!open) {
     return (
       <button type="button" className="btn btn--ghost btn--sm" style={{ marginBottom: 10 }} onClick={() => setOpen(true)}>
@@ -497,13 +506,12 @@ function StockPicker({ exclude = [], onPick }) {
     )
   }
 
-  const list = results.filter(r => !excluded.has(String(r._id)))
   return (
     <div className="inst-stock">
       <div className="inst-stock-search">
         <Search size={13} />
         <input autoFocus className="form-input form-input--plain" value={query}
-          onChange={e => setQuery(e.target.value)} placeholder="N° de série ou modèle…" />
+          onChange={e => setQuery(e.target.value)} onKeyDown={kb.onKeyDown} placeholder="N° de série ou modèle…" />
         <button type="button" className="modal-close" onClick={() => setOpen(false)}><X size={14} /></button>
       </div>
       {busy ? (
@@ -511,9 +519,11 @@ function StockPicker({ exclude = [], onPick }) {
       ) : list.length === 0 ? (
         <p className="form-hint">Aucun défibrillateur disponible{query ? ' pour cette recherche' : ''}.</p>
       ) : (
-        <div className="inst-pick-list">
-          {list.slice(0, 8).map(it => (
-            <button type="button" key={it._id} className="inst-pick" onClick={() => { onPick(it); setOpen(false); setQuery('') }}>
+        <div className="inst-pick-list" ref={kb.listRef}>
+          {list.map((it, i) => (
+            <button type="button" key={it._id} data-kb-option
+              className={`inst-pick${kb.active === i ? ' inst-pick--on' : ''}`}
+              onMouseEnter={() => kb.setActive(i)} onClick={() => pick(it)}>
               <span className="inst-pick-check"><Plus size={12} style={{ color: 'var(--text-secondary)' }} /></span>
               <HeartPulse size={14} className="inst-pick-icon" />
               <span className="inst-pick-main">

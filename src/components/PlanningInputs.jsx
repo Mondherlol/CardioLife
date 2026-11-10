@@ -4,6 +4,7 @@ import { Search, X, ChevronDown, Check } from 'lucide-react'
 // contrôle) ne suppose pas le droit de gérer les fiches clients.
 import { lookupClients } from '../api/clients'
 import { ROLE_LABELS, avatarColor, initials } from '../lib/appointmentConstants'
+import { useListKeyboard } from '../hooks/useListKeyboard'
 
 /* ── Client search autocomplete ─────────────────────────────── */
 
@@ -54,6 +55,13 @@ export function ClientSearchInput({ clientId, clientName, onChange }) {
     setOpen(false)
   }
 
+  // ↑ ↓ pour parcourir, Entrée pour choisir, Échap pour fermer.
+  const kb = useListKeyboard({
+    count: loading ? 0 : results.length, open, resetKey: query,
+    onPick: i => results[i] && handleSelect(results[i]),
+    onClose: () => setOpen(false),
+  })
+
   return (
     <div className="plan-client-wrap" ref={wrapRef}>
       <div className="plan-client-field">
@@ -63,6 +71,7 @@ export function ClientSearchInput({ clientId, clientName, onChange }) {
           value={query}
           onChange={handleChange}
           onFocus={() => { if (query.trim() && !clientId) setOpen(true) }}
+          onKeyDown={kb.onKeyDown}
           placeholder="Rechercher un client…"
           autoComplete="off"
         />
@@ -78,13 +87,15 @@ export function ClientSearchInput({ clientId, clientName, onChange }) {
         </div>
       )}
       {open && (
-        <div className="plan-client-dropdown">
+        <div className="plan-client-dropdown" ref={kb.listRef}>
           {loading && <div className="plan-client-msg">Recherche…</div>}
           {!loading && results.length === 0 && query.trim() && (
             <div className="plan-client-msg">Aucun résultat</div>
           )}
-          {results.map(c => (
-            <button key={c._id} type="button" className="plan-client-option"
+          {!loading && results.map((c, i) => (
+            <button key={c._id} type="button" data-kb-option
+              className={`plan-client-option${kb.active === i ? ' plan-client-option--active' : ''}`}
+              onMouseEnter={() => kb.setActive(i)}
               onClick={() => handleSelect(c)}>
               <span className="plan-client-opt-name">{c.name}</span>
               {c.address?.city && <span className="plan-client-opt-sub">{c.address.city}</span>}
