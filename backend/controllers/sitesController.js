@@ -383,13 +383,19 @@ async function updateDea(req, res) {
       } },
     )
   }
-  // Batterie ou électrodes déclarées depuis la fiche client : même pont vers le
-  // stock que depuis la checklist du technicien.
+  /* Batterie, électrodes ou armoire déclarées depuis la fiche client : posées
+     par nous, elles sortent du stock ; « déjà chez le client », il ne bouge
+     pas. Le choix est fait dans la fenêtre de saisie. */
+  const source   = req.body.partsSource === 'client' ? 'client' : 'stock'
+  const opts     = { source, userId: req.user._id }
+  const warnings = []
   for (const kind of ['batteries', 'electrodes']) {
-    if (req.body[kind] !== undefined) await syncDeaConsumables(site, dea, kind)
+    if (req.body[kind] !== undefined) warnings.push(...await syncDeaConsumables(site, dea, kind, opts))
   }
-  if (req.body.armoire !== undefined) await syncDeaArmoire(site, dea, { userId: req.user._id })
-  res.json(await refreshSchedule(site, req.user._id))
+  if (req.body.armoire !== undefined) warnings.push(...await syncDeaArmoire(site, dea, opts))
+
+  const fresh = await refreshSchedule(site, req.user._id)
+  res.json(warnings.length ? { ...fresh.toObject(), warnings } : fresh)
 }
 
 /**

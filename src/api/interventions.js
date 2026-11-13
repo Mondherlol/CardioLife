@@ -32,8 +32,8 @@ export const reopenIntervention = (id, motif) => patch(`/interventions/${id}/reo
 
 /* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist :
    elles vont au parc du site, pas dans la fiche d'intervention. */
-export const saveDeaItems = (id, kind, dea, items) =>
-  put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items })
+export const saveDeaItems = (id, kind, dea, items, partsSource) =>
+  put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items, partsSource })
 
 /* Sort de la formation des agents : `etat` vaut 'effectuee', 'reportee' ou
    'non_prevue'. La séance concernée suit — date déplacée, statut confirmé. */

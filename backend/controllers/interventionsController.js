@@ -1402,7 +1402,10 @@ async function saveDeaItems(req, res) {
     // L'exemplaire du stock suit l'appareil sur lequel il est monté : la pièce
     // déclarée ici est chez le client, elle n'est plus à l'entrepôt.
     await syncDeaWithItem(site, dea)
-    await syncDeaConsumables(site, dea, kind)
+    /* Posée pendant la visite → elle sort du stock ; simplement identifiée sur
+       l'appareil (« déjà chez le client ») → le stock ne bouge pas. */
+    const source = req.body.partsSource === 'client' ? 'client' : 'stock'
+    const warnings = await syncDeaConsumables(site, dea, kind, { source, userId: req.user._id })
 
     const listed = dea[kind]
       .map(it => [it.productName, it.serialNumber || it.lotNumber].filter(Boolean).join(' · '))
@@ -1420,6 +1423,7 @@ async function saveDeaItems(req, res) {
     const { deviceProduct, siteDeas } = await parcOf(intervention)
     json.deviceProduct = deviceProduct
     json.siteDeas      = siteDeas
+    if (warnings.length) json.warnings = warnings
     res.json(json)
   } catch (err) {
     res.status(500).json({ message: err.message })

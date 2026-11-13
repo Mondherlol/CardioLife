@@ -9,6 +9,35 @@ export function formatApiError(err) {
   return err.message || 'Une erreur est survenue.'
 }
 
+/**
+ * D'où vient une pièce déclarée sur un DAE (armoire, batterie, électrodes).
+ * « Notre stock » la sort du stock — l'article réservé pour ce site d'abord ;
+ * « Déjà chez le client » l'enregistre sans toucher au stock (achetée
+ * ailleurs, simplement constatée). Ne concerne que les pièces nouvelles.
+ */
+export function PartsSourceChoice({ value, onChange }) {
+  return (
+    <div className="form-group">
+      <label className="form-label">Provenance des nouvelles pièces</label>
+      <div className="dea-chips">
+        <button type="button" className={`dea-chip${value === 'stock' ? ' dea-chip--on' : ''}`}
+          onClick={() => onChange('stock')}>
+          Posée par nous (sort du stock)
+        </button>
+        <button type="button" className={`dea-chip${value === 'client' ? ' dea-chip--on' : ''}`}
+          onClick={() => onChange('client')}>
+          Déjà chez le client
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* Messages du serveur sur ce qui n'a pas pu sortir du stock. */
+export function toastWarnings(toast, res) {
+  (res?.warnings || []).forEach(w => toast.warning(w, { autoClose: 10000 }))
+}
+
 /* Brouillon d'un nouveau site copié sur `site` : même lieu, mêmes
    responsables, mais ni parc ni contrat. Sert à scinder un site dont les DAE
    relèvent de contrats différents. Sans `_id`, SiteModal le crée. */

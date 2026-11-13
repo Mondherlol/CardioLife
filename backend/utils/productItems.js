@@ -217,6 +217,102 @@ async function takeOneUnit(item) {
 }
 
 /**
+ * Prend au stock la pièce montée sur un DAE.
+ *
+ * Ce qui a été réservé pour ce site, puis pour ce client, part d'abord ; à
+ * défaut, l'article disponible le plus proche de sa péremption. Une pièce
+ * réservée pour un autre client n'est jamais prise. Quand la ligne porte un
+ * numéro, seul l'article de ce numéro convient.
+ *
+ * La sortie laisse un mouvement de stock, comme une sortie faite depuis la
+ * fiche article : sans lui, la page Mouvements ignorait la pose. Rend
+ * l'article monté, ou null s'il n'y a rien à prendre.
+ */
+async function takeFromStock(site, dea, { product, line = {}, userId, note }) {
+  const base = { product, dea: null }
+  if (line.serialNumber)   base.serialNumber = line.serialNumber
+  else if (line.lotNumber) base.lotNumber    = line.lotNumber
+
+  const order = { expirationDate: 1, entryDate: 1, _id: 1 }
+  const found =
+    await ProductItem.findOne({ ...base, status: 'reserve', 'reservedFor.site': site._id }).sort(order) ||
+    await ProductItem.findOne({
+      ...base, status: 'reserve', 'reservedFor.client': site.client,
+      'reservedFor.site': null,   // null couvre aussi le champ absent
+    }).sort(order) ||
+    await ProductItem.findOne({ ...base, status: 'disponible' }).sort(order)
+  if (!found) return null
+
+  const unit = await takeOneUnit(found)
+  const from = unit.status
+  unit.dea    = dea._id
+  unit.site   = site._id
+  unit.client = site.client
+  unit.status = 'installe'
+  unit.reservedFor = undefined
+  // Ce que le terrain a relevé sur la pièce posée fait foi.
+  if (line.activationDate) unit.activationDate = line.activationDate
+  if (line.expiryDate)     unit.expirationDate = line.expiryDate
+  await logHistory(unit, {
+    action: 'Montée sur un DAE', from, to: 'installe', user: userId,
+    note: note || [site.name, dea.deviceType, dea.serialNumber].filter(Boolean).join(' · '),
+  })
+
+  const Product       = require('../models/Product')
+  const StockMovement = require('../models/StockMovement')
+  const prod = await Product.findById(product).select('stock name')
+  await StockMovement.create({
+    product, type: 'sortie', quantity: unit.quantity ?? 1,
+    previousStock: prod?.stock, newStock: prod ? prod.stock - (unit.quantity ?? 1) : undefined,
+    reason: `Montée sur un DAE — ${site.name}${dea.serialNumber ? ` (${dea.serialNumber})` : ''}`,
+    serialNumbers: unit.serialNumber ? [unit.serialNumber] : [],
+    lotNumber: unit.lotNumber || undefined,
+    createdBy: userId,
+  })
+  await syncProductStock(product)
+  return unit
+}
+
+/**
+ * Article d'une pièce qui était déjà chez le client — achetée ailleurs, parc
+ * repris : elle naît « installée » sans passer par le stock, pour que la fiche
+ * produit la compte parmi les pièces chez les clients.
+ */
+async function declareMounted(site, dea, { product, kind, line = {}, userId, note }) {
+  const Product = require('../models/Product')
+  const p = await Product.findById(product).select('category reference').lean()
+  if (!p) return null
+  const item = await ProductItem.create({
+    product,
+    category:       p.category || kind,
+    reference:      p.reference || '',
+    serialNumber:   line.serialNumber || undefined,
+    lotNumber:      line.lotNumber || undefined,
+    expirationDate: line.expiryDate || undefined,
+    activationDate: line.activationDate || undefined,
+    quantity:       1,
+    status:         'installe',
+    entryDate:      line.activationDate || dea.installationDate || new Date(),
+    client:         site.client,
+    site:           site._id,
+    dea:            dea._id,
+    notes:          note,
+    history: [{ action: note, to: 'installe', note: site.name, user: userId, date: new Date() }],
+    createdBy:      userId,
+  })
+  await syncProductStock(product)
+  return item
+}
+
+/* D'où vient une pièce déclarée sur un DAE :
+   - 'stock'  : posée par nous, elle sort du stock (à défaut d'article, elle
+                est enregistrée comme déjà chez le client et on le signale) ;
+   - 'client' : elle était déjà chez le client, le stock ne bouge pas ;
+   - 'match'  : simple constat (checklist) — seul un article portant le même
+                numéro est rattaché, rien n'est créé. */
+const SOURCES = ['stock', 'client', 'match']
+
+/**
  * Aligne le stock sur les consommables déclarés d'un DAE.
  *
  * Déclarer la batterie montée sur un appareil, c'est la sortir du stock : elle
@@ -231,7 +327,9 @@ async function takeOneUnit(item) {
  * `kind` vaut 'batteries' ou 'electrodes' — c'est aussi le slug de la catégorie
  * du catalogue, qui distingue ces articles de l'appareil lui-même.
  */
-async function syncDeaConsumables(site, dea, kind) {
+async function syncDeaConsumables(site, dea, kind, { source = 'match', userId } = {}) {
+  if (!SOURCES.includes(source)) source = 'match'
+  const warnings = []
   const lines    = (dea[kind] || []).filter(l => l.product)
   const attached = await ProductItem.find({ dea: dea._id, category: kind })
   const { pairs, free } = pairPieces(lines, attached)
@@ -249,7 +347,8 @@ async function syncDeaConsumables(site, dea, kind) {
   // 2. Ce qui vient d'être déclaré sort du stock, une unité par ligne.
   for (const line of lines) {
     const already = pairs.find(p => p.line === line)?.item
-    if (!already && !numbered(line)) continue   // pièce sans n° : rien à prendre au stock
+    // Simple constat : une pièce sans n° ne désigne aucun article précis.
+    if (!already && source === 'match' && !numbered(line)) continue
     if (already) {
       /* La pièce montée et sa fiche article sont le même objet : ce que le
          terrain corrige sur le DAE — péremption relevée sur l'étiquette, date
@@ -273,33 +372,40 @@ async function syncDeaConsumables(site, dea, kind) {
       continue
     }
 
-    const query = {
-      product:  line.product,
-      status:   { $in: IN_STOCK_STATUSES },
-      dea:      null,
-      ...(line.serialNumber ? { serialNumber: line.serialNumber } : { lotNumber: line.lotNumber }),
+    const label = line.productName || 'Pièce'
+    if (source === 'client') {
+      // Un numéro présent dans notre stock désigne notre pièce, quoi qu'on ait coché.
+      if (numbered(line) && await takeFromStock(site, dea, { product: line.product, line, userId })) continue
+      try {
+        await declareMounted(site, dea, {
+          product: line.product, kind, line, userId, note: 'Déjà chez le client (hors de notre stock)',
+        })
+      } catch (err) {
+        if (err.code !== 11000) throw err
+        warnings.push(`${label} (${line.serialNumber}) : ce n° existe déjà dans le stock ou chez un autre client — non rattaché.`)
+      }
+      continue
     }
-    // La DLC la plus proche part la première.
-    const found = await ProductItem.findOne(query).sort({ expirationDate: 1, entryDate: 1 })
-    if (!found) continue
 
-    const unit = await takeOneUnit(found)
-    const from = unit.status
-    unit.dea    = dea._id
-    unit.site   = site._id
-    unit.client = site.client
-    unit.status = 'installe'
-    unit.reservedFor = undefined
-    // La mise en service se saisit sur la fiche du DAE : le stock la recopie
-    // plutôt que d'inventer une date de pose.
-    if (line.activationDate) unit.activationDate = line.activationDate
-    await logHistory(unit, {
-      action: 'Montée sur un DAE',
-      from, to: 'installe',
-      note: [site.name, dea.deviceType || dea.serialNumber].filter(Boolean).join(' · '),
-    })
-    await syncProductStock(unit.product)
+    // Pièce posée (ou constat d'un numéro connu) : elle sort du stock.
+    const unit = await takeFromStock(site, dea, { product: line.product, line, userId })
+    if (unit || source === 'match') continue
+
+    /* Rien en stock : la pièce est pourtant sur l'appareil. On l'enregistre
+       chez le client, et on le dit — c'est un stock à vérifier. */
+    try {
+      await declareMounted(site, dea, {
+        product: line.product, kind, line, userId,
+        note: 'Déclarée posée — aucun article disponible en stock',
+      })
+    } catch (err) {
+      if (err.code !== 11000) throw err
+      warnings.push(`${label} (${line.serialNumber}) : ce n° est déjà utilisé ailleurs (hors service, autre client…) — non rattaché.`)
+      continue
+    }
+    warnings.push(`${label}${numbered(line) ? ` (${line.serialNumber || line.lotNumber})` : ''} : aucun article disponible en stock — enregistré chez le client sans sortie de stock.`)
   }
+  return warnings
 }
 
 /* Les catégories qui se montent sur un DAE — ce sont aussi les noms des listes
@@ -452,18 +558,32 @@ async function alignArmoireProduct(dea, fallback = null) {
  * manque, son modèle corrigé si l'armoire a changé de modèle, sorti du parc si
  * l'armoire a été retirée.
  */
-async function syncDeaArmoire(site, dea, { userId } = {}) {
+async function syncDeaArmoire(site, dea, { userId, source = 'client' } = {}) {
+  const warnings = []
   const items = await ProductItem.find({ dea: dea._id, category: ARMOIRE_CATEGORY, status: 'installe' })
   const product = dea.armoire?.product
   if (!product) {
     for (const item of items) await unmountItem(item, { action: 'Armoire retirée du DAE', note: site.name })
-    return
+    return warnings
   }
   const [current, ...extra] = items
   for (const item of extra) await unmountItem(item, { action: 'Armoire en double sur le DAE', note: site.name })
   if (!current) {
-    await attachMountedParts(site, dea, { userId, note: 'Armoire déclarée sur la fiche client' })
-    return
+    /* Seule l'armoire est concernée : déclarer l'armoire créait aussi, en
+       passant, des articles pour la batterie et les électrodes du DAE. */
+    const label = `Armoire ${dea.armoire.model || ''}`.trim()
+    if (source === 'stock') {
+      if (await takeFromStock(site, dea, { product, userId })) return warnings
+      await declareMounted(site, dea, {
+        product, kind: ARMOIRE_CATEGORY, userId, note: 'Armoire déclarée posée — aucune disponible en stock',
+      })
+      warnings.push(`${label} : aucune disponible en stock — enregistrée chez le client sans sortie de stock.`)
+      return warnings
+    }
+    await declareMounted(site, dea, {
+      product, kind: ARMOIRE_CATEGORY, userId, note: 'Armoire déjà chez le client (hors de notre stock)',
+    })
+    return warnings
   }
   if (String(current.product) !== String(product)) {
     const before = current.product
@@ -472,6 +592,7 @@ async function syncDeaArmoire(site, dea, { userId } = {}) {
     await syncProductStock(before)
     await syncProductStock(product)
   }
+  return warnings
 }
 
 /**
@@ -523,17 +644,9 @@ async function replaceDeaArmoire(site, dea, { userId, marker }) {
   const product = dea.armoire?.product
   if (!product) return true
 
-  // Seulement du disponible : une armoire réservée l'est pour quelqu'un d'autre.
-  const found = await ProductItem.findOne({ product, status: 'disponible', dea: null })
-    .sort({ entryDate: 1 })
-  if (found) {
-    const unit = await takeOneUnit(found)
-    const from = unit.status
-    unit.dea = dea._id; unit.site = site._id; unit.client = site.client
-    unit.status = 'installe'
-    unit.reservedFor = undefined
-    await logHistory(unit, { action: 'Posée en remplacement de l’armoire', from, to: 'installe', note, user: userId })
-  } else {
+  // Réservée pour ce site ou ce client, sinon disponible — jamais celle d'un autre.
+  const taken = await takeFromStock(site, dea, { product, userId, note: `Posée en remplacement de l’armoire · ${note}` })
+  if (!taken) {
     const p = await Product.findById(product).select('category reference').lean()
     if (!p) return true
     await ProductItem.create({
@@ -553,6 +666,6 @@ module.exports = {
   modelViewSlugs, summarize,
   syncProductStock, logHistory, findItemForDea, syncDeaWithItem, syncDeaConsumables,
   detachItemFromParc, attachMountedParts, syncDeaArmoire, alignArmoireProduct, unmountItem,
-  replaceDeaArmoire, armoireProductFor,
-  IN_STOCK_STATUSES,
+  replaceDeaArmoire, armoireProductFor, takeFromStock, declareMounted,
+  IN_STOCK_STATUSES, PART_SOURCES: SOURCES,
 }

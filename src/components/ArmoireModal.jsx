@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { X, AlertTriangle, Archive, CheckCircle2, BatteryWarning, HelpCircle, Wrench } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { updateDea } from '../api/sites'
-import { ARMOIRE_MODELS, toDateInput, formatApiError } from './siteHelpers'
+import { ARMOIRE_MODELS, toDateInput, formatApiError, PartsSourceChoice, toastWarnings } from './siteHelpers'
 
 const today = () => toDateInput(new Date())
 
@@ -31,8 +31,14 @@ export default function ArmoireModal({ site, dea, onClose, onSaved }) {
   })
   const [error,   setError]   = useState('')
   const [loading, setLoading] = useState(false)
+  const [source,  setSource]  = useState('stock')
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  /* Une armoire qui apparaît est une nouvelle pièce : on demande d'où elle
+     vient. Changer le modèle corrige l'existante, et corriger les piles ne
+     pose pas la question. */
+  const isNewArmoire = !!form.model.trim() && !String(arm.model || '').trim()
 
   /* Un état choisi se date du jour s'il ne l'était pas : sans date, la fiche
      ne dirait pas de quand date le constat. */
@@ -61,8 +67,9 @@ export default function ArmoireModal({ site, dea, onClose, onSaved }) {
         pilesReplacedAt: form.pilesReplacedAt || null,
         notes:           form.notes.trim(),
       }
-      const updated = await updateDea(site._id, dea._id, { armoire })
+      const updated = await updateDea(site._id, dea._id, { armoire, partsSource: isNewArmoire ? source : 'client' })
       toast.success('Armoire mise à jour.')
+      toastWarnings(toast, updated)
       onSaved(updated)
     } catch (err) {
       setError(formatApiError(err))
@@ -99,6 +106,8 @@ export default function ArmoireModal({ site, dea, onClose, onSaved }) {
               ))}
             </div>
           </div>
+
+          {isNewArmoire && <PartsSourceChoice value={source} onChange={setSource} />}
 
           <div className="form-group">
             <label className="form-label">Piles de l'alarme</label>

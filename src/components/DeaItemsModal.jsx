@@ -3,7 +3,7 @@ import { X, AlertTriangle, Plus, Trash2, Zap, BatteryMedium } from 'lucide-react
 import { toast } from 'react-toastify'
 import { updateDea } from '../api/sites'
 import { getProductCategories } from '../api/productCategories'
-import { expiryHint } from './siteHelpers'
+import { expiryHint, PartsSourceChoice, toastWarnings } from './siteHelpers'
 import {
   useCatalogStock, stockOptionsFor, ProductPicker, StockPicker, ConfirmUnknown,
   formatApiError,
@@ -71,13 +71,15 @@ const CONFIG = {
  *  kind    - 'electrodes' | 'batteries'
  *  onClose - () => void
  *  onSaved - (résultat de `save`) => void
- *  save    - (items) => Promise, optionnel. La fiche d'intervention passe le
- *            sien : le technicien identifie la pièce sans avoir le droit de
- *            gestion des clients que demande la route des sites.
+ *  save    - (items, source) => Promise, optionnel. La fiche d'intervention
+ *            passe le sien : le technicien identifie la pièce sans avoir le
+ *            droit de gestion des clients que demande la route des sites.
+ *  defaultSource - 'stock' | 'client' : provenance proposée des nouvelles pièces
  */
-export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save }) {
+export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save, defaultSource = 'stock' }) {
   const cfg   = CONFIG[kind]
   const Icon  = cfg.icon
+  const [source, setSource] = useState(defaultSource)
 
   const { products, stock, addProduct, addStockItem } = useCatalogStock(cfg.category)
 
@@ -263,10 +265,13 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save 
           : { ...base, ...number, kind: it.kind }
       })
 
+      // Sans ligne ajoutée, rien n'a été posé : rien ne doit sortir du stock.
+      const partsSource = items.some(it => !it.savedProductId) ? source : 'client'
       const updated = save
-        ? await save(payload)
-        : await updateDea(site._id, dea._id, { [kind]: payload })
+        ? await save(payload, partsSource)
+        : await updateDea(site._id, dea._id, { [kind]: payload, partsSource })
       toast.success(`${cfg.title} mises à jour.`)
+      toastWarnings(toast, updated)
       onSaved(updated)
     } catch (err) {
       setError(formatApiError(err))
@@ -391,6 +396,12 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save 
               )}
             </div>
           ))}
+
+          {/* Seules les lignes ajoutées sont concernées : celles déjà en place
+              ont leur article. */}
+          {items.some(it => !it.savedProductId) && (
+            <PartsSourceChoice value={source} onChange={setSource} />
+          )}
 
           {error && <div className="login-error"><AlertTriangle size={13} /> {error}</div>}
 

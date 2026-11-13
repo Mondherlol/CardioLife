@@ -2423,8 +2423,11 @@ export default function InterventionFichePage() {
           site={siteRef}
           dea={activeDea}
           kind={itemsKind}
+          /* Une intervention ou une pose apporte ses pièces ; un contrôle
+             identifie surtout celles déjà en place. Modifiable dans la fenêtre. */
+          defaultSource={['intervention', 'installation'].includes(iv.controlType) ? 'stock' : 'client'}
           onClose={() => setItemsKind(null)}
-          save={items => saveDeaItems(id, itemsKind, activeDea._id, items)}
+          save={(items, source) => saveDeaItems(id, itemsKind, activeDea._id, items, source)}
           onSaved={updated => handleItemsSaved(itemsKind, updated)}
         />
       )}
