@@ -6,7 +6,7 @@ import {
   HeartPulse, GraduationCap, ClipboardList, FileText, History,
   Package, User, Clock, CheckCircle2, CalendarDays, Hash,
   BatteryMedium, Zap, AlertTriangle, Users, UserPlus,
-  MoreVertical, Trash2, Eye, MinusCircle, ChevronRight, Archive, FileX,
+  MoreVertical, Trash2, Eye, MinusCircle, ChevronRight, Archive, FileX, Copy, ArrowRightLeft,
 } from 'lucide-react'
 import { getSiteHistory } from '../api/sites'
 import { getUsers } from '../api/users'
@@ -17,13 +17,14 @@ import DeaModal from '../components/DeaModal'
 import DeaItemsModal from '../components/DeaItemsModal'
 import ArmoireModal from '../components/ArmoireModal'
 import DeleteDeaConfirm from '../components/DeleteDeaConfirm'
+import MoveDeaModal from '../components/MoveDeaModal'
 import ContextMenu from '../components/ContextMenu'
 import ContractModal from '../components/ContractModal'
 import TerminateContractConfirm from '../components/TerminateContractConfirm'
 import FormationModal from '../components/FormationModal'
 import { FormationRow, FormationsSummary } from '../components/FormationRow'
 import { stageOf } from '../lib/formations'
-import { formatDate, daysUntil, ItemsButton, ArmoireChip } from '../components/siteHelpers'
+import { formatDate, daysUntil, ItemsButton, ArmoireChip, duplicateDraft } from '../components/siteHelpers'
 
 /* ── Libellés ─────────────────────────────────────────────────── */
 const CONTROL_TYPE_LABELS = { semestriel: 'Semestriel', annuel: 'Annuel', hors_contrat: 'Hors contrat', intervention: 'Intervention' }
@@ -567,6 +568,8 @@ export default function SiteDetailPage() {
   const [itemsModal, setItemsModal] = useState(null) // { dea, kind }
   const [armoireDea, setArmoireDea] = useState(null)
   const [deaDeleting, setDeaDeleting] = useState(null)
+  const [moving,    setMoving]    = useState(null)   // { dea, targetId? }
+  const [dupOpen,   setDupOpen]   = useState(null)   // null | { thenMove? } — copie du site
   const [menu,      setMenu]      = useState(null)   // { x, y, title, items }
   const [ctrModal,  setCtrModal]  = useState(false)  // création du contrat du site
   const [ctrEnding, setCtrEnding] = useState(false)  // retrait du contrat du site
@@ -607,6 +610,7 @@ export default function SiteDetailPage() {
     items:        (dea, kind) => setItemsModal({ dea, kind }),
     armoire:      dea => setArmoireDea(dea),
     deleteDea:    dea => setDeaDeleting(dea),
+    moveDea:      dea => setMoving({ dea }),
 
     deaMenu(e, dea) {
       e.preventDefault()
@@ -620,6 +624,7 @@ export default function SiteDetailPage() {
           { label: 'Gérer les électrodes', icon: Zap,           onClick: () => act.items(dea, 'electrodes') },
           { label: 'Armoire et piles',     icon: Archive,       onClick: () => act.armoire(dea) },
           { label: 'Voir la fiche du DAE', icon: Eye,           onClick: () => navigate(`/devices/${dea._id}`) },
+          { label: 'Changer de site',      icon: ArrowRightLeft, onClick: () => act.moveDea(dea) },
           { separator: true },
           { label: 'Ajouter un DEA sur ce site', icon: Plus,     onClick: () => act.addDea() },
           { label: 'Modifier les responsables',  icon: UserPlus, onClick: () => act.editContacts() },
@@ -695,6 +700,10 @@ export default function SiteDetailPage() {
             <FileX size={14} /> Résilier le contrat
           </button>
         )}
+        <button className="cd-edit-btn" onClick={() => setDupOpen({})}
+          title="Créer un autre site du même client à partir de celui-ci">
+          <Copy size={14} /> Dupliquer
+        </button>
         <button className="cd-edit-btn" onClick={() => setEditOpen(true)}>
           <Pencil size={14} /> Modifier
         </button>
@@ -754,6 +763,34 @@ export default function SiteDetailPage() {
           focus={editOpen === 'contacts' ? 'contacts' : undefined}
           onClose={() => setEditOpen(false)}
           onSaved={() => { setEditOpen(false); load() }}
+        />
+      )}
+
+      {dupOpen && (
+        <SiteModal
+          clientId={clientId}
+          site={duplicateDraft(site)}
+          duplicateOf={site.name}
+          onClose={() => setDupOpen(null)}
+          onSaved={saved => {
+            const thenMove = dupOpen.thenMove
+            setDupOpen(null)
+            // Créé pour y déplacer un DEA : on y revient, sinon on ouvre le nouveau site.
+            if (thenMove) setMoving({ ...thenMove, targetId: saved._id })
+            else navigate(`/sites/${saved._id}`)
+          }}
+        />
+      )}
+
+      {moving && (
+        <MoveDeaModal
+          site={site}
+          dea={moving.dea}
+          clientId={clientId}
+          initialTargetId={moving.targetId}
+          onCreateSite={() => { const { dea } = moving; setMoving(null); setDupOpen({ thenMove: { dea } }) }}
+          onClose={() => setMoving(null)}
+          onDone={() => { setMoving(null); load() }}
         />
       )}
 

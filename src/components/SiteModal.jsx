@@ -14,12 +14,13 @@ function formatApiError(err) {
  * Création / édition d'un site client.
  * Props :
  *  clientId - id du client propriétaire (requis en création)
- *  site     - site existant (null → création)
+ *  site     - site existant (null → création ; sans _id → création pré-remplie)
+ *  duplicateOf - nom du site copié, quand `site` en est la copie
  *  focus    - 'contacts' pour ouvrir directement sur les responsables
  *  onClose  - () => void
  *  onSaved  - (site) => void
  */
-export default function SiteModal({ clientId, site, focus, onClose, onSaved }) {
+export default function SiteModal({ clientId, site, duplicateOf, focus, onClose, onSaved }) {
   const isEdit = !!site?._id
   const contactsRef = useRef(null)
 
@@ -83,10 +84,18 @@ export default function SiteModal({ clientId, site, focus, onClose, onSaved }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <h2 className="modal-title">{isEdit ? 'Modifier le site' : 'Nouveau site'}</h2>
+          <h2 className="modal-title">
+            {isEdit ? 'Modifier le site' : duplicateOf ? 'Dupliquer le site' : 'Nouveau site'}
+          </h2>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <form onSubmit={handleSubmit} className="modal-body">
+          {duplicateOf && (
+            <p className="cd-empty-hint" style={{ padding: 0, margin: 0 }}>
+              Copie de « {duplicateOf} » : adresse, responsables, pack et notes sont
+              repris, sans les DEA ni le contrat. Modifiez ce qui diffère avant d'enregistrer.
+            </p>
+          )}
 
           <div className="form-group">
             <label className="form-label">Nom du site *</label>

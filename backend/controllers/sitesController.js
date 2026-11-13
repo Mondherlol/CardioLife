@@ -14,6 +14,7 @@ const Contract     = require('../models/Contract')
 const Replacement  = require('../models/Replacement')
 const {
   syncDeaWithItem, syncDeaConsumables, syncDeaArmoire, alignArmoireProduct, unmountItem,
+  logHistory,
 } = require('../utils/productItems')
 const { getOrCreateSiteFolder } = require('../utils/siteDocsFolder')
 const { trainingQuota } = require('../utils/training')
@@ -511,7 +512,124 @@ async function removeDea(req, res) {
   res.json(await refreshSchedule(site, req.user._id))
 }
 
+/**
+ * POST /api/sites/:id/deas/:deaId/move — { site }
+ *
+ * Déplace un DEA vers un autre site du même client, avec tout ce qui le
+ * suit : il garde son `_id`, si bien que contrôles, rendez-vous et fiches des
+ * visites passées continuent de le désigner. Sert notamment à scinder un site
+ * en deux quand ses appareils relèvent de contrats différents.
+ *
+ * Les visites déjà faites restent au site d'origine : elles y ont eu lieu.
+ */
+async function moveDea(req, res) {
+  const source = await findSite(req, res)
+  if (!source) return
+  const dea = source.deas.id(req.params.deaId)
+  if (!dea) return res.status(404).json({ message: 'DEA introuvable.' })
+
+  const targetId = req.body?.site
+  if (!targetId || !mongoose.isValidObjectId(targetId)) {
+    return res.status(422).json({ message: 'Choisissez le site de destination.' })
+  }
+  if (String(targetId) === String(source._id)) {
+    return res.status(422).json({ message: 'Le DEA est déjà sur ce site.' })
+  }
+  const target = await Site.findById(targetId)
+  if (!target) return res.status(404).json({ message: 'Site de destination introuvable.' })
+  if (String(target.client) !== String(source.client)) {
+    return res.status(422).json({ message: 'Le site de destination appartient à un autre client.' })
+  }
+
+  /* Une pose planifiée a sa visite d'installation, rattachée au site d'origine :
+     la déplacer en silence enverrait le technicien au mauvais endroit. */
+  if (dea.status === 'a_installer') {
+    return res.status(409).json({
+      message: "Ce DEA n'est pas encore posé : annulez sa pose puis reprogrammez-la sur le bon site.",
+    })
+  }
+  // Une visite démarrée attend la fiche de cet appareil sur ce site.
+  const running = await Intervention.findOne({ site: source._id, status: 'en_cours' })
+    .select('scheduledDate').lean()
+  if (running) {
+    return res.status(409).json({
+      message: `Une visite est en cours sur « ${source.name} » : clôturez-la avant de déplacer ce DEA.`,
+    })
+  }
+
+  const deaId = dea._id
+  const label = [dea.deviceType, dea.serialNumber].filter(Boolean).join(' · ') || 'DEA'
+  const notes = []
+
+  /* L'échéance suit le site d'arrivée : une visite couvre le site entier. Si
+     ses appareils ont une date posée à la main, le nouveau venu la partage. */
+  const moved = dea.toObject()
+  const manual = target.deas.find(d => d.nextControlManual)
+  moved.nextControlManual = Boolean(manual)
+  moved.nextControlDate   = manual ? manual.nextControlDate : undefined
+
+  // Arrivée d'abord : un échec entre les deux écritures laisse un doublon
+  // visible plutôt qu'un appareil perdu.
+  target.deas.push(moved)
+  await target.save()
+  dea.deleteOne()
+  await source.save()
+
+  // Le stock suit : l'appareil et ses pièces montées changent de site.
+  const items = await ProductItem.find({ dea: deaId })
+  for (const item of items) {
+    item.site = target._id
+    await logHistory(item, {
+      action: `Déplacé vers le site ${target.name}`, from: item.status, to: item.status,
+      note: `Depuis ${source.name}`, user: req.user._id,
+    })
+  }
+
+  // Ce qui reste à faire sur l'appareil se fera là où il est désormais.
+  await Replacement.updateMany({ dea: deaId, status: 'a_remplacer' }, { $set: { site: target._id } })
+  await Intervention.updateMany(
+    { installation: deaId, status: 'planifie', controlType: { $ne: 'installation' } },
+    { $set: { site: target._id, siteName: target.name } },
+  )
+
+  /* Tarif au DAE : la ligne quitte le contrat d'origine, qui se recalcule. Le
+     contrat d'arrivée, lui, ne s'invente pas un prix. */
+  const [fromContract, toContract] = await Promise.all([
+    Contract.findOne({ site: source._id, isActive: true, status: 'actif' }),
+    Contract.findOne({ site: target._id, isActive: true, status: 'actif' }),
+  ])
+  const priced = fromContract?.deaPrices?.find(r => String(r.dea) === String(deaId))
+  if (priced) {
+    fromContract.deaPrices = fromContract.deaPrices.filter(r => String(r.dea) !== String(deaId))
+    if (fromContract.deaPrices.length) {
+      fromContract.price = Math.round(fromContract.deaPrices.reduce((s, r) => s + r.price, 0) * 1000) / 1000
+    }
+    await fromContract.save()
+    notes.push(fromContract.deaPrices.length
+      ? `Contrat ${fromContract.contractNumber || 'de ' + source.name} recalculé sans ce DEA.`
+      : `Le contrat de « ${source.name} » n'a plus de DEA tarifé : vérifiez son prix.`)
+  } else if (fromContract && !source.deas.length) {
+    notes.push(`« ${source.name} » n'a plus de DEA mais garde son contrat : résiliez-le si besoin.`)
+  }
+  if (toContract?.deaPrices?.length) {
+    notes.push(`Saisissez le tarif de ce DEA sur le contrat de « ${target.name} ».`)
+  } else if (!toContract && fromContract) {
+    notes.push(`« ${target.name} » n'a pas de contrat : créez-le si ce DEA doit être contrôlé.`)
+  }
+
+  // Les deux calendriers changent : le parc de chacun a bougé.
+  await syncSiteControls(source._id, req.user._id)
+  await syncSiteControls(target._id, req.user._id)
+
+  res.json({
+    message: `${label} déplacé vers « ${target.name} ».`,
+    notes,
+    source: await Site.findById(source._id),
+    target: await Site.findById(target._id),
+  })
+}
+
 module.exports = {
   getAll, lookup, listDeas, getById, getHistory, getDocumentsFolder,
-  create, update, remove, addDea, updateDea, removeDea, setNextControl,
+  create, update, remove, addDea, updateDea, removeDea, setNextControl, moveDea,
 }

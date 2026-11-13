@@ -9,6 +9,19 @@ export function formatApiError(err) {
   return err.message || 'Une erreur est survenue.'
 }
 
+/* Brouillon d'un nouveau site copié sur `site` : même lieu, mêmes
+   responsables, mais ni parc ni contrat. Sert à scinder un site dont les DAE
+   relèvent de contrats différents. Sans `_id`, SiteModal le crée. */
+export function duplicateDraft(site) {
+  return {
+    name:     `${site.name} (2)`,
+    address:  { street: site.address?.street || '', city: site.address?.city || '' },
+    contacts: (site.contacts || []).map(({ name, role, phone, email }) => ({ name, role, phone, email })),
+    hasPack:  Boolean(site.hasPack),
+    notes:    site.notes || '',
+  }
+}
+
 export function formatDate(value) {
   if (!value) return null
   return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })

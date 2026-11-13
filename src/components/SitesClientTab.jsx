@@ -3,7 +3,7 @@ import {
   Plus, Pencil, Trash2, X, AlertTriangle, ChevronRight,
   Zap, BatteryMedium, Building2, UserPlus, Settings2,
   Table2, LayoutGrid, ArrowUpRight, HeartPulse, FileText,
-  CalendarClock, Package, Archive, FileX,
+  CalendarClock, Package, Archive, FileX, Copy, ArrowRightLeft,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -23,7 +23,8 @@ import InstallationPlanModal from './InstallationPlanModal'
 import { getProductItems, itemStatus } from '../api/productItems'
 import { productImageUrl } from '../api/products'
 import SitesCardsView from './SitesCardsView'
-import { formatApiError, expiryHint } from './siteHelpers'
+import { formatApiError, expiryHint, duplicateDraft } from './siteHelpers'
+import MoveDeaModal from './MoveDeaModal'
 
 const VIEW_KEY = 'cardiotrack.sites.view'
 
@@ -139,7 +140,8 @@ export default function SitesClientTab({ clientId, onCountChange }) {
   const [error,   setError]   = useState('')
   const [view,    setView]    = useState(() => localStorage.getItem(VIEW_KEY) || 'cards')
 
-  const [siteModal,  setSiteModal]  = useState(null)   // null | { site, focus, chainDea }
+  const [siteModal,  setSiteModal]  = useState(null)   // null | { site, focus, chainDea, duplicateOf, thenMove }
+  const [moving,     setMoving]     = useState(null)   // null | { site, dea, targetId }
   const [deaModal,   setDeaModal]   = useState(null)   // null | { site, dea }
   const [itemsModal, setItemsModal] = useState(null)   // null | { site, dea, kind }
   const [armoireModal, setArmoireModal] = useState(null) // null | { site, dea }
@@ -215,10 +217,12 @@ export default function SitesClientTab({ clientId, onCountChange }) {
   }, [])
 
   /* Le site créé depuis le sélecteur enchaîne directement sur l'ajout du DEA. */
-  function handleSiteSaved(saved, chainDea) {
+  function handleSiteSaved(saved, { chainDea, thenMove } = {}) {
     replaceSite(saved)
     setSiteModal(null)
     if (chainDea) setDeaModal({ site: saved, dea: null })
+    // Site d'arrivée créé depuis « Changer de site » : on y revient, présélectionné.
+    if (thenMove) setMoving({ ...thenMove, targetId: saved._id })
   }
 
   /* ── Actions partagées par les deux vues ───────────── */
@@ -229,6 +233,8 @@ export default function SitesClientTab({ clientId, onCountChange }) {
     editSite:     site => setSiteModal({ site }),
     editContacts: site => setSiteModal({ site, focus: 'contacts' }),
     deleteSite:   site => setDeleting(site),
+    duplicateSite: site => setSiteModal({ site: duplicateDraft(site), duplicateOf: site.name }),
+    moveDea:      (site, dea) => setMoving({ site, dea }),
     addDea:       site => setDeaModal({ site, dea: null }),
     editDea:      (site, dea) => setDeaModal({ site, dea }),
     editControl:  (site, dea) => setCtrlModal({ site, dea }),
@@ -272,6 +278,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
         { label: 'Ajouter un DEA',            icon: Plus,      onClick: () => act.addDea(site) },
         { label: 'Modifier les responsables', icon: UserPlus,  onClick: () => act.editContacts(site) },
         { label: 'Modifier le site',          icon: Settings2, onClick: () => act.editSite(site) },
+        { label: 'Dupliquer le site',         icon: Copy,      onClick: () => act.duplicateSite(site) },
         { separator: true },
         { label: 'Supprimer le site', icon: Trash2, danger: true, onClick: () => act.deleteSite(site) },
       ]
@@ -289,6 +296,7 @@ export default function SitesClientTab({ clientId, onCountChange }) {
           { label: 'Gérer les batteries',  icon: BatteryMedium, onClick: () => act.items(site, dea, 'batteries') },
           { label: 'Gérer les électrodes', icon: Zap,           onClick: () => act.items(site, dea, 'electrodes') },
           { label: 'Armoire et piles',     icon: Archive,       onClick: () => act.armoire(site, dea) },
+          { label: 'Changer de site',      icon: ArrowRightLeft, onClick: () => act.moveDea(site, dea) },
           { label: 'Retirer ce DEA', icon: Trash2, danger: true, onClick: () => act.deleteDea(site, dea) },
           { separator: true },
           ...act.siteItems(site),
@@ -454,9 +462,28 @@ export default function SitesClientTab({ clientId, onCountChange }) {
         <SiteModal
           clientId={clientId}
           site={siteModal.site}
+          duplicateOf={siteModal.duplicateOf}
           focus={siteModal.focus}
           onClose={() => setSiteModal(null)}
-          onSaved={saved => handleSiteSaved(saved, siteModal.chainDea)}
+          onSaved={saved => handleSiteSaved(saved, siteModal)}
+        />
+      )}
+
+      {moving && (
+        <MoveDeaModal
+          site={moving.site}
+          dea={moving.dea}
+          clientId={clientId}
+          initialTargetId={moving.targetId}
+          onCreateSite={() => {
+            const { site, dea } = moving
+            setMoving(null)
+            setSiteModal({
+              site: duplicateDraft(site), duplicateOf: site.name, thenMove: { site, dea },
+            })
+          }}
+          onClose={() => setMoving(null)}
+          onDone={() => { setMoving(null); load(); loadReserved() }}
         />
       )}
 

@@ -15620,6 +15620,17 @@ button {
   color: var(--orange-600);
 }
 
+/* Site retenu (changement de site d'un DEA : on choisit, puis on confirme). */
+.pick-site-item--on {
+  border-color: var(--orange-500);
+  background: var(--orange-50);
+  box-shadow: 0 0 0 2px var(--orange-500) inset;
+}
+
+.pick-site-item--on > svg {
+  color: var(--orange-600);
+}
+
 .pick-site-item-main {
   display: flex;
   flex-direction: column;
