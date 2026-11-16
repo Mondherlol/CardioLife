@@ -15,6 +15,7 @@ import {
   startIntervention,
   uploadFichePhoto, deleteFichePhoto, fichePhotoUrl,
   updateIntervention, saveDeaItems, saveFormationOutcome,
+  getAPoser, applySiteReplacement,
 } from '../api/interventions'
 import { get, STATIC_BASE } from '../api/http'
 import { archiveRapportPdf } from '../lib/rapportPdf'
@@ -388,6 +389,118 @@ function ParcItemsBar({ kind, items, readOnly, onEdit }) {
   )
 }
 
+/* ─── À poser pendant la visite ─── */
+/**
+ * Pièces réservées pour ce client et remplacements restés ouverts sur le site.
+ *
+ * Préparées au magasin, elles ne se voyaient que depuis le stock : le jour du
+ * contrôle, le technicien ne savait pas qu'une paire d'électrodes l'attendait,
+ * et la réservation restait en suspens. Elles s'affichent donc en tête de
+ * fiche, avec le geste qui les solde.
+ */
+const POSABLE = { batteries: 'batteries', electrodes: 'electrodes' }
+const pieceNumber = it => it?.serialNumber || it?.lotNumber || ''
+
+function APoserPanel({ data, readOnly, canPose, onPose, onApply }) {
+  const [open,  setOpen]  = useState(null)   // _id du remplacement en cours de solde
+  const [form,  setForm]  = useState({ serial: '', expiry: '' })
+  const [busy,  setBusy]  = useState(false)
+
+  const { reserved = [], replacements = [] } = data || {}
+  if (!reserved.length && !replacements.length) return null
+
+  function startApply(r) {
+    setOpen(r._id)
+    setForm({ serial: pieceNumber(r.replacementItem) || r.replacementSerial || '', expiry: '' })
+  }
+  async function confirmApply(r) {
+    setBusy(true)
+    try {
+      await onApply(r, { replacementSerial: form.serial, replacementExpiry: form.expiry || undefined })
+      setOpen(null)
+    } catch {
+      // Le refus est déjà affiché ; le formulaire reste ouvert pour corriger.
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fiche-page-section fiche-aposer">
+      <div className="fiche-page-section-title">
+        <Package size={14} /> À poser pendant cette visite ({reserved.length + replacements.length})
+      </div>
+      <div className="fiche-page-body">
+        <div className="rep-mini-list">
+          {replacements.map(r => (
+            <div key={r._id} className="rep-mini fiche-aposer-row">
+              <span className={`rep-badge rep-badge--${replacementStatus(r.status).tone}`}>
+                {replacementStatus(r.status).label}
+              </span>
+              <span className="rep-mini-main">
+                {replacementKind(r.kind).label}
+                {r.deaLabel && <> · {r.deaLabel}</>}
+                {pieceNumber(r) && <> · déposer {pieceNumber(r)}</>}
+              </span>
+              <span className="rep-mini-sub">
+                {replacementReason(r.reason).label}
+                {r.replacementItem
+                  ? <> · pièce réservée : <strong>{r.product?.name || ''} {pieceNumber(r.replacementItem)}</strong></>
+                  : <> · aucune pièce réservée en stock</>}
+              </span>
+              {!readOnly && open !== r._id && (
+                <button type="button" className="btn btn--primary btn--sm" onClick={() => startApply(r)}>
+                  <Check size={13} /> Marquer remplacé
+                </button>
+              )}
+              {!readOnly && open === r._id && (
+                <div className="fiche-aposer-form">
+                  <input className="fiche-input" placeholder="N° de la pièce posée"
+                    value={form.serial} onChange={e => setForm(f => ({ ...f, serial: e.target.value }))} />
+                  <input type="date" className="fiche-input" title="Péremption de la pièce posée"
+                    value={form.expiry} onChange={e => setForm(f => ({ ...f, expiry: e.target.value }))} />
+                  <button type="button" className="btn btn--primary btn--sm" disabled={busy}
+                    onClick={() => confirmApply(r)}>
+                    {busy ? <span className="spinner spinner--sm" /> : 'Confirmer'}
+                  </button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setOpen(null)}>
+                    Annuler
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {reserved.map(it => {
+            const kind = POSABLE[it.category]
+            return (
+              <div key={it._id} className="rep-mini fiche-aposer-row">
+                <span className="rep-badge rep-badge--sky">Réservée</span>
+                <span className="rep-mini-main">
+                  {it.product?.name || 'Pièce'}
+                  {pieceNumber(it) && <> · {pieceNumber(it)}</>}
+                  {it.quantity > 1 && <> · ×{it.quantity}</>}
+                </span>
+                <span className="rep-mini-sub">
+                  {it.expirationDate ? `exp. ${fmtShort(it.expirationDate)}` : 'Réservée pour ce client'}
+                  {it.reservedFor?.note && <> · {it.reservedFor.note}</>}
+                </span>
+                {!readOnly && kind && (
+                  <button type="button" className="btn btn--primary btn--sm"
+                    disabled={!canPose} title={canPose ? '' : 'Choisissez d\'abord l\'appareil concerné'}
+                    onClick={() => onPose(kind, it)}>
+                    <Check size={13} /> Poser sur ce DAE
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Formation des agents ─── */
 /* Deux issues, et rien d'autre : la séance a eu lieu, ou elle est repoussée.
    Le lien avec la liste des formations se fait côté serveur, sur la séance
@@ -655,6 +768,10 @@ export default function InterventionFichePage() {
   const [unlocked,       setUnlocked]       = useState(false)
   // Identification de la pièce montée : 'batteries' | 'electrodes' | null.
   const [itemsKind,      setItemsKind]      = useState(null)
+  // Pièces réservées à pré-remplir dans la fenêtre batterie / électrodes.
+  const [itemsPreset,    setItemsPreset]    = useState([])
+  // Réservations et remplacements ouverts du site : { reserved, replacements }.
+  const [aPoser,         setAPoser]         = useState(null)
   const [savingFormation, setSavingFormation] = useState(false)
   const [formationEtat,  setFormationEtat]  = useState('')
   const [closing,        setClosing]        = useState(false)
@@ -806,6 +923,12 @@ export default function InterventionFichePage() {
       .then(res => setReplacements(res.data || []))
       .catch(() => {})
   }, [id])
+
+  /* Ce qui attend d'être posé sur le site : relu après chaque pose. */
+  const loadAPoser = useCallback(() => {
+    getAPoser(id).then(setAPoser).catch(() => {})
+  }, [id])
+  useEffect(() => { loadAPoser() }, [loadAPoser])
 
   // Sync adminForm from iv
   useEffect(() => {
@@ -1097,6 +1220,9 @@ export default function InterventionFichePage() {
    */
   async function handleItemsSaved(kind, updated) {
     setItemsKind(null)
+    setItemsPreset([])
+    // Une pièce réservée vient peut-être d'être posée : elle quitte la liste.
+    loadAPoser()
     /* Parc d'avant la modification : une péremption de fiche qui n'en est que
        la copie (pré-remplissage) suit la nouvelle pièce, sans quoi elle
        repousserait l'ancienne date sur le parc au prochain enregistrement. */
@@ -1611,6 +1737,25 @@ export default function InterventionFichePage() {
               <span>{iv.notes}</span>
             </div>
           )}
+
+          {/* Préparé au magasin pour ce client : à poser pendant la visite. */}
+          <APoserPanel
+            data={aPoser}
+            readOnly={readOnly}
+            canPose={Boolean(siteRef && activeDea)}
+            onPose={(kind, item) => { setItemsPreset([item]); setItemsKind(kind) }}
+            onApply={async (r, data) => {
+              try {
+                const res = await applySiteReplacement(id, r._id, data)
+                if (res?.intervention) mergeIv(res.intervention, { parc: true })
+                toast.success(`${replacementKind(r.kind).label} : remplacement enregistré.`)
+                loadAPoser()
+              } catch (err) {
+                toast.error(err.message)
+                throw err
+              }
+            }}
+          />
 
           {/* Une panne se signale au moment où on la constate : les boutons
               suivent la fiche, pas son statut. Une visite clôturée puis
@@ -2441,7 +2586,7 @@ export default function InterventionFichePage() {
           dea={activeDea || (iv.installation ? siteDeas.find(d => String(d._id) === String(iv.installation)) : null)}
           intervention={iv}
           onClose={() => setReplaceOpen(false)}
-          onSaved={saved => { setReplacements(l => [saved, ...l]); setReplaceOpen(false) }}
+          onSaved={saved => { setReplacements(l => [saved, ...l]); setReplaceOpen(false); loadAPoser() }}
         />
       )}
 

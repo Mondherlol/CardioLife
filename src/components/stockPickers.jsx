@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { AlertTriangle, X, PackagePlus, Tag } from 'lucide-react'
-import { getProducts, createProduct } from '../api/products'
+import { getProducts, createProduct, createProductFromField } from '../api/products'
 import { getProductItems, createProductItems, itemStatus } from '../api/productItems'
 import ComboSearch from './ComboSearch'
 
@@ -49,8 +49,10 @@ export function useCatalogStock(categories) {
   useEffect(() => { reloadStock() }, [reloadStock])
 
   /* Crée un modèle au catalogue et le rend disponible sans recharger la liste. */
-  const addProduct = useCallback(async (name, category) => {
-    const created = await createProduct({ name, category })
+  /* `fromField` : création minimale depuis une intervention, ouverte au
+     technicien sans droit sur le stock. */
+  const addProduct = useCallback(async (name, category, { fromField = false } = {}) => {
+    const created = await (fromField ? createProductFromField : createProduct)({ name, category })
     const product = created?.data || created
     setProducts(l => [...l, product])
     return product
@@ -93,13 +95,18 @@ export function stockOptionsFor(stock, { product, field, client }) {
     if (held && String(held) !== String(client || '')) return false
     return true
   })
+    /* Ce qui a été réservé pour ce client passe en tête, et se signale : c'est
+       la pièce préparée pour lui, celle qu'on vient poser. */
+    .map(it => (it.status === 'reserve' && client ? { ...it, reservedHere: true } : it))
+    .sort((a, b) => Number(Boolean(b.reservedHere)) - Number(Boolean(a.reservedHere)))
 
   // Un numéro de série ne désigne qu'une pièce : rien à regrouper.
   if (field !== 'lotNumber') return usable
 
   const groups = new Map()
   usable.forEach(it => {
-    const key = `${String(it.product?._id || it.product || '')}|${it.lotNumber}`
+    // Les pièces réservées d'un lot restent à part des disponibles du même lot.
+    const key = `${String(it.product?._id || it.product || '')}|${it.lotNumber}|${it.reservedHere ? 'r' : ''}`
     const found = groups.get(key)
     const units = it.quantity ?? 1
     if (!found) {
@@ -191,7 +198,10 @@ export function StockPicker({
       }}
       subtextFn={it => it.existing
         ? 'Déjà en place'
-        : [it.product?.name, itemStatus(it.status).label].filter(Boolean).join(' · ')}
+        : it.declared
+          ? 'Saisi sur place — hors de notre stock'
+          : [it.product?.name, it.reservedHere ? 'Réservée pour ce client' : itemStatus(it.status).label]
+            .filter(Boolean).join(' · ')}
       placeholder={placeholder || `Rechercher un ${noun} en stock…`}
       onQueryChange={q => { setQuery(q); onQueryChange?.(q) }}
       onCreateNew={onUnknown}

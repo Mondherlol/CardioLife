@@ -5,7 +5,7 @@ const importCtrl = require('../controllers/productImportController')
 const imagesCtrl = require('../controllers/productImagesController')
 const upload    = require('../middleware/upload')
 const { protect }                  = require('../middleware/auth')
-const { stockGuard } = require('../middleware/access')
+const { stockGuard, fieldReadGuard } = require('../middleware/access')
 
 const productValidation = [
   body('name').trim().notEmpty().withMessage('Le nom du produit est requis.'),
@@ -17,6 +17,10 @@ const productValidation = [
 ]
 
 router.use(protect)
+// Liste du catalogue : lue aussi depuis le terrain (voir fieldReadGuard).
+router.get('/', fieldReadGuard(), ctrl.getAll)
+// Modèle de batterie / électrodes inconnu, trouvé sur place : création minimale.
+router.post('/terrain', fieldReadGuard(), ctrl.createFromField)
 // Le catalogue est consultable par tous : la pose d'un DEA en dépend. Seules
 // les modifications restent réservées à la gestion du stock.
 router.use(stockGuard())

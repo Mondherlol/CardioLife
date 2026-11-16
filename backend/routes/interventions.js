@@ -43,6 +43,9 @@ router.patch('/:id/close-past', ctrl.closePast)
 router.patch('/:id/reopen',  ctrl.reopenIntervention)
 /* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist. */
 router.put('/:id/dea-items/:kind', lockedById(ctrl.saveDeaItems))
+/* Pièces réservées et remplacements ouverts du site : à poser pendant la visite. */
+router.get('/:id/a-poser', ctrl.getAPoser)
+router.patch('/:id/replacements/:repId', lockedById(ctrl.applySiteReplacement))
 /* Formation des agents : effectuée ou reportée, tranché pendant la visite. */
 router.patch('/:id/formation', ctrl.saveFormation)
 /* Formation liée à la visite (nouvelle, existante, aucune) et ses agents. */

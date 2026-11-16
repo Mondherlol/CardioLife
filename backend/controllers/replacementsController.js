@@ -373,4 +373,8 @@ async function remove(req, res) {
   res.json({ message: 'Demande supprimée.' })
 }
 
-module.exports = { getAll, getById, create, update, remove }
+module.exports = {
+  getAll, getById, create, update, remove,
+  // Soldé aussi depuis la visite, par le technicien (voir interventionsController).
+  applyReplacement, POPULATE,
+}

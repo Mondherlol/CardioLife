@@ -2,9 +2,11 @@ const router = require('express').Router()
 const { body } = require('express-validator')
 const ctrl = require('../controllers/productItemsController')
 const { protect }                  = require('../middleware/auth')
-const { stockGuard } = require('../middleware/access')
+const { stockGuard, fieldReadGuard } = require('../middleware/access')
 
 router.use(protect)
+// Articles en stock : lus aussi depuis le terrain (voir fieldReadGuard).
+router.get('/', fieldReadGuard(), ctrl.getAll)
 // Lecture ouverte : le choix d'un numéro de série au moment de poser un DEA
 // suppose de voir le stock. L'entrée en stock, elle, reste protégée.
 router.use(stockGuard())

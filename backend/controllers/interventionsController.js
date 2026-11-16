@@ -1869,6 +1869,107 @@ async function setAttente(req, res) {
   }
 }
 
+/* ─── Ce qui attend d'être posé sur le site ───────────────── */
+/**
+ * GET /interventions/:id/a-poser
+ *
+ * Une pièce réservée pour un client, ou une demande de remplacement restée
+ * ouverte, ne se voyait que depuis le stock. Le jour du contrôle, le technicien
+ * — qui n'a pas forcément l'onglet Stock — repartait sans savoir qu'une paire
+ * d'électrodes l'attendait, et la réservation restait en suspens. La visite
+ * les présente donc : réservations du site (ou du client sans site précis) et
+ * remplacements encore « à remplacer » sur ce site.
+ */
+async function getAPoser(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id).select('site client technicien')
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (req.user.role === 'technicien'
+        && String(intervention.technicien || '') !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    if (!intervention.site) return res.json({ reserved: [], replacements: [] })
+
+    const ProductItem = require('../models/ProductItem')
+    const { POPULATE: REPL_POPULATE } = require('./replacementsController')
+
+    const replacements = await Replacement.find({ site: intervention.site, status: 'a_remplacer' })
+      .populate(REPL_POPULATE).sort({ createdAt: -1 })
+
+    const site = await Site.findById(intervention.site).select('client').lean()
+    const clientId = site?.client || intervention.client
+    const or = [{ 'reservedFor.site': intervention.site }]
+    if (clientId) or.push({ 'reservedFor.client': clientId, 'reservedFor.site': null })
+    const reservedAll = await ProductItem.find({ status: 'reserve', dea: null, $or: or })
+      .populate('product', 'name category images')
+      .sort({ expirationDate: 1 })
+      .lean()
+
+    // La pièce prévue pour un remplacement ouvert se présente avec lui.
+    const held = new Set(replacements.map(r => String(r.replacementItem?._id || r.replacementItem || '')))
+    const reserved = reservedAll
+      .filter(it => !held.has(String(it._id)))
+      .map(it => ({
+        _id: it._id, product: it.product, category: it.category,
+        serialNumber: it.serialNumber, lotNumber: it.lotNumber, quantity: it.quantity,
+        expirationDate: it.expirationDate, status: it.status, reservedFor: it.reservedFor,
+      }))
+
+    res.json({ reserved, replacements })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
+/**
+ * PATCH /interventions/:id/replacements/:repId
+ *
+ * Solder pendant la visite une demande de remplacement du site : la pièce
+ * réservée (ou celle dont on donne le n°) est posée, la défectueuse quitte la
+ * fiche du DAE. Traiter une demande depuis la page Remplacements reste au
+ * magasin ; ici c'est le technicien de la visite qui constate la pose.
+ */
+async function applySiteReplacement(req, res) {
+  try {
+    const intervention = await Intervention.findById(req.params.id)
+    if (!intervention) return res.status(404).json({ message: 'Intervention introuvable.' })
+    if (!canWriteFiche(req.user, intervention)) {
+      return res.status(403).json({ message: 'Accès refusé.' })
+    }
+    if (!ensureStarted(intervention, res)) return
+
+    const doc = await Replacement.findById(req.params.repId)
+    if (!doc || String(doc.site) !== String(intervention.site)) {
+      return res.status(404).json({ message: 'Demande introuvable sur ce site.' })
+    }
+    if (doc.status !== 'a_remplacer') {
+      return res.status(409).json({ message: 'Cette demande est déjà traitée.' })
+    }
+
+    const { applyReplacement, POPULATE: REPL_POPULATE } = require('./replacementsController')
+    const { replacementSerial, replacementExpiry } = req.body
+    await applyReplacement(doc, {
+      replacementSerial: String(replacementSerial || '').trim() || undefined,
+      replacementExpiry: replacementExpiry || undefined,
+    }, req)
+
+    intervention.history.push({
+      action:   'remplacement',
+      user:     req.user._id,
+      userName: req.user.fullName || req.user.username,
+      details:  `${Replacement.KIND_LABELS?.[doc.kind] || doc.kind} remplacé(e)`
+                + (doc.deaLabel ? ` — ${doc.deaLabel}` : '')
+                + (doc.replacementSerial ? ` · posé : ${doc.replacementSerial}` : ''),
+    })
+    await intervention.save()
+
+    const saved = await Replacement.findById(doc._id).populate(REPL_POPULATE)
+    res.json({ replacement: saved, intervention: await withParc(intervention) })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+}
+
 /* ─── Search installations (no canManageDevices needed) ────── */
 async function searchInstallations(req, res) {
   try {
@@ -1890,4 +1991,5 @@ module.exports = {
   saveDeaItems, saveFormation, saveBon,
   saveRapportPdf, saveBonPdf, getDeleted, setAttente, setControlType, closePast,
   setFormationLink, saveFormationCounts,
+  getAPoser, applySiteReplacement,
 }

@@ -35,6 +35,12 @@ export const reopenIntervention = (id, motif) => patch(`/interventions/${id}/reo
 export const saveDeaItems = (id, kind, dea, items, partsSource) =>
   put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items, partsSource })
 
+/* Pièces réservées pour le client et remplacements ouverts du site. */
+export const getAPoser = (id) => get(`/interventions/${id}/a-poser`)
+/* Solder un remplacement ouvert pendant la visite. */
+export const applySiteReplacement = (id, repId, data) =>
+  patch(`/interventions/${id}/replacements/${repId}`, data)
+
 /* Sort de la formation des agents : `etat` vaut 'effectuee', 'reportee' ou
    'non_prevue'. La séance concernée suit — date déplacée, statut confirmé. */
 export const saveFormationOutcome = (id, data) =>

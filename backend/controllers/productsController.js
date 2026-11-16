@@ -144,6 +144,35 @@ async function create(req, res) {
   res.status(201).json(product)
 }
 
+/**
+ * POST /api/products/terrain — modèle créé depuis une intervention.
+ *
+ * Le technicien sur place trouve parfois une batterie ou des électrodes dont
+ * le modèle n'est pas au catalogue. Sans droit sur le stock il restait bloqué,
+ * la fiche ne pouvant identifier la pièce. On ouvre ici une création minimale :
+ * un nom, une catégorie de consommable, sans prix ni stock initial — le
+ * magasin complètera la fiche. Un modèle du même nom existant est renvoyé tel
+ * quel plutôt que dupliqué.
+ */
+const FIELD_CATEGORIES = ['batteries', 'electrodes']
+async function createFromField(req, res) {
+  const name     = String(req.body.name || '').trim()
+  const category = String(req.body.category || '').trim()
+  if (!name) return res.status(422).json({ message: 'Le nom du modèle est requis.' })
+  if (!FIELD_CATEGORIES.includes(category)) {
+    return res.status(422).json({ message: 'Catégorie non autorisée depuis une intervention.' })
+  }
+  const escaped  = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const existing = await Product.findOne({ category, name: new RegExp(`^${escaped}$`, 'i') })
+  if (existing) return res.json(existing)
+
+  const product = await Product.create({
+    name, category, createdBy: req.user._id,
+    notes: `Créé depuis une intervention par ${req.user.fullName || req.user.username}`,
+  })
+  res.status(201).json(product)
+}
+
 async function update(req, res) {
   const errors = validationResult(req)
   if (!errors.isEmpty()) return res.status(422).json({ errors: errors.array() })
@@ -522,7 +551,7 @@ async function getBrands(req, res) {
 }
 
 module.exports = {
-  getAll, getStats, getById, create, update,
+  getAll, getStats, getById, create, createFromField, update,
   adjustStock, assignSerials, getMovements, getClientStock,
   uploadImage, deleteImage,
   archive, restore, permanentDelete,

@@ -190,8 +190,12 @@ export default function DeaModal({ site, dea, contract, onClose, onSaved }) {
 
   /* Choisir un type d'abord restreint les numéros proposés à ce modèle. */
   const stockOptions = useMemo(
-    () => stockOptionsFor(stock, { product, field: 'serialNumber' }),
-    [stock, product]
+    /* Sans le client, un appareil réservé pour lui était écarté de la liste
+       comme s'il était promis à un autre. */
+    () => stockOptionsFor(stock, {
+      product, field: 'serialNumber', client: site?.client?._id || site?.client,
+    }),
+    [stock, product, site]
   )
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }

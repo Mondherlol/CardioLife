@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, AlertTriangle, Plus, Trash2, Zap, BatteryMedium } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { updateDea } from '../api/sites'
+import { useAuth } from '../context/AuthContext'
 import { getProductCategories } from '../api/productCategories'
 import { expiryHint, PartsSourceChoice, toastWarnings } from './siteHelpers'
 import {
@@ -75,11 +76,21 @@ const CONFIG = {
  *            passe le sien : le technicien identifie la pièce sans avoir le
  *            droit de gestion des clients que demande la route des sites.
  *  defaultSource - 'stock' | 'client' : provenance proposée des nouvelles pièces
+ *  preset  - articles du stock réservés pour ce client, à poser : ils arrivent
+ *            pré-remplis, le technicien n'a plus qu'à confirmer.
  */
-export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save, defaultSource = 'stock' }) {
+export default function DeaItemsModal({
+  site, dea, kind, onClose, onSaved, save, defaultSource = 'stock', preset = [],
+}) {
   const cfg   = CONFIG[kind]
   const Icon  = cfg.icon
-  const [source, setSource] = useState(defaultSource)
+  const { user } = useAuth()
+  const clientId = site?.client?._id || site?.client
+  /* Entrer un article en stock reste l'affaire du magasin. Sans ce droit, un
+     n° inconnu est simplement relevé sur l'appareil : le serveur l'enregistre
+     chez le client et signale l'écart de stock. */
+  const canStock = ['admin', 'superadmin'].includes(user?.role) || Boolean(user?.permissions?.canManageStock)
+  const [source, setSource] = useState(preset.length ? 'stock' : defaultSource)
 
   const { products, stock, addProduct, addStockItem } = useCatalogStock(cfg.category)
 
@@ -112,8 +123,17 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
 
   /* Ouvrir sur une liste vide obligerait à cliquer « Ajouter » avant de
      pouvoir saisir quoi que ce soit : on ouvre la ligne pour lui. */
-  const [items, setItems] = useState(() =>
-    ((dea[kind] || []).length ? dea[kind] : [null]).map(it => (it === null ? newRow() : {
+  /* Pièce réservée à poser : modèle, numéro et péremption viennent de l'article. */
+  const presetRow = it => ({
+    ...cfg.empty,
+    product:     it.product?._id ? it.product : null,
+    productName: it.product?.name || '',
+    expiryDate:  toDateInput(it.expirationDate),
+    stockItem:   { ...it, reservedHere: true },
+    query:       '',
+  })
+  const [items, setItems] = useState(() => [
+    ...((dea[kind] || []).length || preset.length ? (dea[kind] || []) : [null]).map(it => (it === null ? newRow() : {
       ...cfg.empty,
       ...it,
       expiryDate:     toDateInput(it.expiryDate),
@@ -129,8 +149,9 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
         ? { _id: null, serialNumber: it.serialNumber, lotNumber: it.lotNumber, existing: true }
         : null,
       query: '',
-    }))
-  )
+    })),
+    ...preset.map(presetRow),
+  ])
 
   // Confirmation en cours : { row, mode: 'product' | 'stock', label }
   const [confirm,     setConfirm]     = useState(null)
@@ -194,9 +215,18 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
 
   /* ── Confirmations ── */
 
+  /* Pièce déjà chez le client, ou pas de droit sur le stock : le n° saisi se
+     relève tel quel, sans créer d'article au magasin. */
+  const declareOnly = source === 'client' || !canStock
+  const declared = label => ({ _id: null, [field]: label, declared: true })
+
   function ask(row, mode, label) {
     const clean = String(label || '').trim()
     if (!clean) return
+    if (mode === 'stock' && declareOnly) {
+      patch(row, { stockItem: declared(clean), [field]: clean, query: '' })
+      return
+    }
     setConfirmErr('')
     setConfirm({ row, mode, label: clean })
   }
@@ -207,7 +237,7 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
     setConfirmErr('')
     try {
       if (mode === 'product') {
-        const p = await addProduct(label, cfg.category)
+        const p = await addProduct(label, cfg.category, { fromField: !canStock })
         patch(row, { product: p, productName: p.name })
         toast.success(`Modèle « ${p.name} » créé.`)
       } else {
@@ -239,7 +269,10 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
       return
     }
     // Une saisie laissée en plan serait perdue en silence.
-    const pending = items.findIndex(it => !it.stockItem && it.query?.trim())
+    const rows = declareOnly
+      ? items.map(it => (!it.stockItem && it.query?.trim() ? { ...it, stockItem: declared(it.query.trim()) } : it))
+      : items
+    const pending = rows.findIndex(it => !it.stockItem && it.query?.trim())
     if (pending !== -1) {
       ask(pending, 'stock', items[pending].query)
       return
@@ -247,7 +280,7 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
 
     setLoading(true)
     try {
-      const payload = items.map(it => {
+      const payload = rows.map(it => {
         const base = {
           product:     it.product._id,
           productName: it.product.name,
@@ -295,6 +328,13 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
             {dea.serialNumber && <span className="inst-sn-chip">{dea.serialNumber}</span>}
           </p>
 
+          {preset.length > 0 && (
+            <p className="form-hint">
+              La pièce réservée pour ce client est ajoutée ci-dessous. Si elle en
+              remplace une, retirez l'ancienne ligne avant d'enregistrer.
+            </p>
+          )}
+
           {items.length === 0 && <p className="cd-empty-hint">{cfg.emptyHint}</p>}
 
           {items.map((it, i) => (
@@ -326,7 +366,8 @@ export default function DeaItemsModal({ site, dea, kind, onClose, onSaved, save,
                 <div className="form-group dea-item-grid-wide">
                   <label className="form-label">{numberLabel}</label>
                   <StockPicker
-                    items={stockOptionsFor(stock, { product: it.product, field })}
+                    items={stockOptionsFor(stock, { product: it.product, field, client: clientId })}
+                    createLabel={declareOnly ? (q => `Relever « ${q} » (hors de notre stock)`) : undefined}
                     value={it.stockItem}
                     onChange={picked => pickStock(i, picked)}
                     onClear={() => patch(i, { stockItem: null, [field]: '' })}

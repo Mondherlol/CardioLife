@@ -143,6 +143,19 @@ function requireAnyToWrite(readPermissions, writePermissions) {
 const stockGuard = () => requireAnyToWrite(['canViewStock', 'canManageStock'], ['canManageStock'])
 
 /**
+ * Lecture du catalogue et du stock depuis le terrain.
+ *
+ * Identifier la batterie ou les électrodes d'un DAE pendant un contrôle, ou
+ * poser un appareil, suppose de choisir un modèle au catalogue et un lot en
+ * stock. Un technicien sans l'onglet « Stock & Produits » recevait un refus
+ * silencieux : listes vides, « choisissez un modèle au catalogue », bloqué.
+ * Seules les listes servies aux sélecteurs s'ouvrent ici ; exports,
+ * statistiques et mouvements restent au stock.
+ */
+const FIELD_READ_PERMISSIONS = ['canViewStock', 'canManageStock', 'canManageInterventions', 'canManageDevices']
+const fieldReadGuard = () => requireAny(FIELD_READ_PERMISSIONS)
+
+/**
  * `requireAny`, avec une lecture ouverte à d'autres droits. La fiche client
  * affiche le parc et les contrôles du client : qui gère les clients doit
  * pouvoir les lire, sans pour autant poser un DEA ni saisir une checklist.
@@ -158,7 +171,7 @@ function requireAnyOrRead(permissions, readPermissions, roles = []) {
 
 module.exports = {
   requireAnyOrRead,
-  requireAnyToWrite, stockGuard,
+  requireAnyToWrite, stockGuard, fieldReadGuard,
   MODULES, PERMISSION_KEYS, resolvePermissions, ROLE_PERMISSION_PRESETS, defaultPermissionsForRole,
   isAdmin, canAccess,
   requireModule, requireModuleToWrite, requireAny,

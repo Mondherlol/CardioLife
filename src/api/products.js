@@ -19,6 +19,8 @@ export const getProduct       = (id)       => get(`/products/${id}`)
 export const getMovements     = (id)       => get(`/products/${id}/movements`)
 export const getProductInstallations = (id) => get(`/products/${id}/installations`)
 export const createProduct    = (data)     => post('/products', data)
+// Modèle de consommable créé depuis une intervention (nom + catégorie).
+export const createProductFromField = (data) => post('/products/terrain', data)
 export const updateProduct    = (id, data) => put(`/products/${id}`, data)
 export const patchProduct     = (id, data) => patch(`/products/${id}`, data)
 export const adjustStock      = (id, data) => post(`/products/${id}/stock`, data)
