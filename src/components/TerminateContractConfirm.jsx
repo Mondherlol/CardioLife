@@ -82,7 +82,7 @@ export default function TerminateContractConfirm({ contract, siteName, onClose, 
               <span>
                 <strong>À une date précise</strong>
                 {when === 'date' && (
-                  <input type="date" className="form-input form-input--plain" style={{ marginTop: 6, maxWidth: 180 }}
+                  <input type="date" className="form-input form-input--plain" min="2000-01-01" max="2100-12-31" style={{ marginTop: 6, maxWidth: 180 }}
                     value={date} onChange={e => setDate(e.target.value)} />
                 )}
               </span>

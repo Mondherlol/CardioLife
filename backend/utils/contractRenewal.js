@@ -16,6 +16,8 @@ const { syncContractControls, syncSiteNextControl, addMonths } = require('./cont
 
 // Garde-fou : un contrat oublié des années ne se renouvelle pas à l'infini.
 const MAX_CATCH_UP = 50
+// Échéance plus vieille que ça : ce n'est pas un contrat oublié, c'est une faute de saisie.
+const MAX_LATE_YEARS = 10
 
 /* Un client est « sous contrat » dès qu'un de ses sites l'est. Le drapeau est
    dénormalisé sur la fiche client : listes et tableau de bord le lisent
@@ -110,6 +112,16 @@ async function settleContract(contract, now = new Date()) {
     return 'resilie'
   }
   if (!contract.endDate || new Date(contract.endDate) > now) return null
+
+  /* Échéance absurde (faute de frappe sur l'année) : renouveler « jusqu'à
+     aujourd'hui » empilerait des centaines de périodes fictives — NOVO
+     NORDISK en a reçu 1 800 depuis l'an 6. On laisse le contrat tel quel ; sa
+     date se corrige à la main, et il sera réglé au passage suivant. */
+  const endYear = new Date(contract.endDate).getFullYear()
+  if (endYear < now.getFullYear() - MAX_LATE_YEARS) {
+    console.warn(`Contrat ${contract.contractNumber || contract._id} : échéance ${new Date(contract.endDate).toISOString().slice(0, 10)} invraisemblable — renouvellement suspendu.`)
+    return null
+  }
 
   if (contract.autoRenew !== false) {
     let n = 0

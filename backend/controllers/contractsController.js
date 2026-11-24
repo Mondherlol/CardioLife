@@ -20,6 +20,40 @@ const INCREASE_WINDOW_MONTHS = 2
 // Au millime près : le dinar compte trois décimales.
 const roundPrice = n => Math.round(n * 1000) / 1000
 
+/* Bornes d'une date de contrat crédible. Un champ date du navigateur accepte
+   n'importe quelle année : une faute de frappe (« 7203 » pour 2027, « 0006 »
+   pour 2026) passait telle quelle. Le contrat était alors planifié sur des
+   décennies (60 contrôles d'un coup pour SERGAZ), ou renouvelé en boucle
+   depuis l'an 6 (1 800 périodes pour NOVO NORDISK). */
+const MIN_YEAR = 2000
+const MAX_YEAR = 2100
+const MAX_CONTRACT_YEARS = 10
+
+const frDate = d => d.toLocaleDateString('fr-FR')
+
+/** Message d'erreur, ou null si les dates tiennent debout. Vide = non fourni. */
+function checkContractDates(start, end) {
+  const parsed = {}
+  for (const [key, label, v] of [['start', 'début', start], ['end', 'fin', end]]) {
+    if (v === undefined || v === null || v === '') continue
+    const d = new Date(v)
+    if (Number.isNaN(d.getTime())) return `Date de ${label} invalide.`
+    const y = d.getFullYear()
+    if (y < MIN_YEAR || y > MAX_YEAR) {
+      return `Date de ${label} invalide (${frDate(d)}) : l'année doit être comprise entre ${MIN_YEAR} et ${MAX_YEAR}. Vérifiez la saisie.`
+    }
+    parsed[key] = d
+  }
+  if (parsed.start && parsed.end) {
+    if (parsed.end <= parsed.start) return 'La date de fin doit être postérieure à la date de début.'
+    const limit = addMonths(parsed.start, MAX_CONTRACT_YEARS * 12)
+    if (parsed.end > limit) {
+      return `Le contrat irait du ${frDate(parsed.start)} au ${frDate(parsed.end)} : plus de ${MAX_CONTRACT_YEARS} ans. Vérifiez l'année saisie.`
+    }
+  }
+  return null
+}
+
 /* Prix saisi : vide l'efface, sinon un montant positif (virgule acceptée). */
 function parsePrice(v) {
   if (v === undefined) return { skip: true }
@@ -269,6 +303,8 @@ async function create(req, res) {
   // Un contrat court un an par défaut : la création ne demande que le numéro.
   const startDate = b.startDate ? new Date(b.startDate) : new Date()
   const endDate   = b.endDate ? new Date(b.endDate) : addMonths(startDate, months.value || 12)
+  const dateError = checkContractDates(startDate, endDate)
+  if (dateError) return res.status(422).json({ message: dateError })
   const contractPrice = perDea.length ? sumPrices(perDea) : price.value
 
   const contract = await Contract.create({
@@ -317,6 +353,14 @@ async function update(req, res) {
 
   const months = parseMonths(b.renewalMonths)
   if (months.error) return res.status(422).json({ message: months.error })
+
+  /* Seules les dates envoyées sont vérifiées une à une ; la cohérence début →
+     fin se juge sur les valeurs qu'aura le contrat après la modification. */
+  if (b.startDate || b.endDate) {
+    const dateError = checkContractDates(b.startDate, b.endDate)
+      || checkContractDates(b.startDate || contract.startDate, b.endDate || contract.endDate)
+    if (dateError) return res.status(422).json({ message: dateError })
+  }
 
   // Les contrats antérieurs à l'historique reçoivent leur première période
   // avant modification : elle garde ainsi les valeurs d'origine.
@@ -491,6 +535,9 @@ async function terminate(req, res) {
   const reason = String(req.body?.reason || '').trim() || undefined
   const date   = req.body?.date ? new Date(req.body.date) : new Date()
   if (isNaN(date.getTime())) return res.status(422).json({ message: 'Date de résiliation invalide.' })
+  if (date.getFullYear() < MIN_YEAR || date.getFullYear() > MAX_YEAR) {
+    return res.status(422).json({ message: `Date de résiliation invalide (${frDate(date)}) : vérifiez l'année saisie.` })
+  }
   // Fin de journée : le contrat couvre encore le jour indiqué.
   if (req.body?.date) date.setHours(23, 59, 59, 999)
 

@@ -44,6 +44,30 @@ function addMonthsStr(dateStr, months = 12) {
  *  onClose  - () => void
  *  onSaved  - (contrat) => void
  */
+/* Une faute de frappe sur l'année (« 7203 », « 0006 ») passait telle quelle :
+   le champ date du navigateur accepte n'importe quelle année. Le serveur
+   refuse aussi ces dates ; ici on prévient avant d'envoyer. */
+const DATE_MIN = '2000-01-01'
+const DATE_MAX = '2100-12-31'
+const MAX_CONTRACT_YEARS = 10
+
+function contractDatesError(start, end) {
+  for (const [label, v] of [['début', start], ['échéance', end]]) {
+    if (!v) continue
+    const y = Number(String(v).slice(0, 4))
+    if (!(y >= 2000 && y <= 2100)) {
+      return `Date de ${label} invalide (${String(v).split('-').reverse().join('/')}) : vérifiez l'année saisie.`
+    }
+  }
+  if (start && end) {
+    const s = new Date(start), e = new Date(end)
+    if (e <= s) return 'La date de fin doit suivre la date de début.'
+    const limit = new Date(s); limit.setFullYear(limit.getFullYear() + MAX_CONTRACT_YEARS)
+    if (e > limit) return `Le contrat durerait plus de ${MAX_CONTRACT_YEARS} ans : vérifiez l'année de l'échéance.`
+  }
+  return null
+}
+
 export default function ContractModal({ site, contract, onClose, onSaved }) {
   const isEdit = !!contract?._id
   const deaCount = site?.deas?.length ?? null
@@ -109,10 +133,8 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (end && start && new Date(end) <= new Date(start)) {
-      setError('La date de fin doit suivre la date de début.')
-      return
-    }
+    const dateError = contractDatesError(start, end)
+    if (dateError) { setError(dateError); return }
     setError('')
     setLoading(true)
     try {
@@ -182,6 +204,7 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
             <div className="form-group">
               <label className="form-label">Début</label>
               <input type="date" className="form-input form-input--plain"
+                min={DATE_MIN} max={DATE_MAX}
                 value={start}
                 onChange={e => {
                   setStart(e.target.value)
@@ -192,6 +215,7 @@ export default function ContractModal({ site, contract, onClose, onSaved }) {
             <div className="form-group">
               <label className="form-label">Échéance</label>
               <input type="date" className="form-input form-input--plain"
+                min={DATE_MIN} max={DATE_MAX}
                 value={end} onChange={e => setEnd(e.target.value)} />
             </div>
           </div>

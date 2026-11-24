@@ -18,6 +18,8 @@ const PERIOD_MONTHS = 6
    on ne remonte pas au-delà d'un an avant son début. */
 const BACKFILL_YEARS = 1
 const MAX_OCCURRENCES = 60
+// Aligné sur la durée maximale d'un contrat acceptée à la saisie (10 ans).
+const MAX_HORIZON_YEARS = 10
 
 /** Ajoute des mois en restant dans le mois cible (31 août + 6 → 28/29 févr.). */
 function addMonths(date, n) {
@@ -55,7 +57,12 @@ function scheduleFor(site, contract) {
   const anchor = scheduleAnchor(site, contract)
   if (!anchor || !contract?.endDate) return []
 
-  const end   = new Date(contract.endDate)
+  /* Jamais plus de quelques années devant nous, quelle que soit l'échéance :
+     une date de fin erronée (« 7203 ») planifiait sinon des contrôles jusqu'en
+     2053. Les renouvellements prolongent le calendrier le moment venu. */
+  const horizon = new Date()
+  horizon.setFullYear(horizon.getFullYear() + MAX_HORIZON_YEARS)
+  const end   = new Date(Math.min(new Date(contract.endDate).getTime(), horizon.getTime()))
   const floor = new Date(contract.startDate || anchor)
   floor.setFullYear(floor.getFullYear() - BACKFILL_YEARS)
 
