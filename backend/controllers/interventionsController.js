@@ -16,6 +16,7 @@ const { applyBon } = require('../utils/bon')
 const { mergeDuplicateFiches, withInterventionLock } = require('../utils/ficheLock')
 const { linkFormation, unlinkFormation, createLinkedFormation, followVisitDate } = require('../utils/formationLink')
 const { completePose, cancelPose } = require('../utils/pose')
+const { putOnHold, reschedule, clearHold } = require('../utils/formationAttente')
 const { syncSiteControls } = require('../utils/controls')
 const { searchRegex: accentRegex } = require('../utils/textSearch')
 
@@ -448,7 +449,7 @@ async function formationsOf(intervention) {
   if (!query) return []
 
   return Formation.find(query)
-    .select('title date end status attestationDelivered participants participantsCount siteName clientName')
+    .select('title date end status attestationDelivered participants participantsCount siteName clientName enAttente attenteMotif relanceDate')
     .sort({ date: -1 })
     .limit(20)
     .lean()
@@ -1405,7 +1406,10 @@ async function saveDeaItems(req, res) {
     /* Posée pendant la visite → elle sort du stock ; simplement identifiée sur
        l'appareil (« déjà chez le client ») → le stock ne bouge pas. */
     const source = req.body.partsSource === 'client' ? 'client' : 'stock'
-    const warnings = await syncDeaConsumables(site, dea, kind, { source, userId: req.user._id })
+    const warnings = await syncDeaConsumables(site, dea, kind, {
+      source, userId: req.user._id,
+      retired: Array.isArray(req.body.retiredParts) ? req.body.retiredParts : [],
+    })
 
     const listed = dea[kind]
       .map(it => [it.productName, it.serialNumber || it.lotNumber].filter(Boolean).join(' · '))
@@ -1504,6 +1508,7 @@ async function saveFormation(req, res) {
       if (etat === 'effectuee') {
         // La séance a eu lieu : les attestations restent à préparer.
         formation.status = 'fait'
+        clearHold(formation)
         formation.date   = date || formation.date || visitDate
         formation.history.push({
           action: 'Formation confirmée effectuée',
@@ -1511,16 +1516,17 @@ async function saveFormation(req, res) {
           details: `Confirmée lors de la visite du ${new Date(visitDate).toLocaleDateString('fr-FR')}`,
         })
       } else if (etat === 'reportee') {
-        /* Reportée sans date : la séance reste à programmer et repasse en
-           « Programmé ». C'est à l'assistante de lui trouver un nouveau
-           créneau — le technicien constate, il ne prend pas le rendez-vous. */
-        formation.status = 'planifie'
-        formation.history.push({
-          action: 'Formation reportée',
-          by: req.user._id,
-          details: `Séance non tenue lors de la visite du `
-                 + `${new Date(visitDate).toLocaleDateString('fr-FR')} — à reprogrammer`,
-        })
+        /* Reportée : à la nouvelle date si le client l'a donnée, sinon « date
+           à définir ». Dans ce second cas la séance quitte le calendrier pour
+           la liste « En attente de planification » — avant, elle restait au
+           planning à sa date passée, et personne ne pensait à la reprendre. */
+        const tenue = `Séance non tenue lors de la visite du ${new Date(visitDate).toLocaleDateString('fr-FR')}`
+        if (!(date && reschedule(formation, { date }, req.user._id))) {
+          putOnHold(formation, {
+            motif: [String(req.body.motif || '').trim(), tenue].filter(Boolean).join(' — '),
+            relanceDate: req.body.relanceDate,
+          }, req.user._id)
+        }
       }
       if (etat === 'effectuee' || etat === 'reportee') await formation.save()
     }
@@ -1528,7 +1534,7 @@ async function saveFormation(req, res) {
     intervention.formation = {
       etat,
       // Seule la réalisation porte une date : celle de la visite.
-      date:      etat === 'effectuee' ? (date || visitDate) : undefined,
+      date:      etat === 'effectuee' ? (date || visitDate) : (etat === 'reportee' && date ? date : undefined),
       formation: formation?._id,
       titre:     formation?.title || '',
       note:      note || '',
@@ -1665,7 +1671,7 @@ async function linkedFormationOf(intervention) {
   const id = intervention.formation?.formation
   if (!id) return null
   const f = await Formation.findById(id)
-    .select('title date end status participantsCount participants formedCount attestationDelivered assignedTo siteName intervention')
+    .select('title date end status participantsCount participants formedCount attestationDelivered assignedTo siteName intervention enAttente attenteSince attenteMotif relanceDate')
     .populate('assignedTo', 'fullName username')
     .lean()
   if (!f) return null

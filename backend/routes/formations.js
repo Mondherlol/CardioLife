@@ -12,6 +12,11 @@ const { protect } = require('../middleware/auth')
 const { requireAnyPermission } = require('../middleware/permissions')
 
 router.use(protect)
+/* Report d'une séance et liste des séances en attente : ouverts à tous les
+   utilisateurs connectés (le technicien apprend souvent le report sur place).
+   Déclarés avant le contrôle de droit qui suit. */
+router.get('/attente',                   ctrl.listAttente)
+router.patch('/:id/attente',             ctrl.setAttente)
 // Accessible avec le droit dédié "Formations" OU l'ancien droit "Clients"
 // (pour ne pas retirer l'accès aux utilisateurs qui l'utilisaient déjà via la fiche client).
 router.use(requireAnyPermission(['canManageFormations', 'canManageClients']))

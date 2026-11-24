@@ -32,8 +32,8 @@ export const reopenIntervention = (id, motif) => patch(`/interventions/${id}/reo
 
 /* Batterie / électrodes montées sur le DAE, identifiées depuis la checklist :
    elles vont au parc du site, pas dans la fiche d'intervention. */
-export const saveDeaItems = (id, kind, dea, items, partsSource) =>
-  put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items, partsSource })
+export const saveDeaItems = (id, kind, dea, items, partsSource, retiredParts = []) =>
+  put(`/interventions/${id}/dea-items/${kind}`, { dea: dea || undefined, items, partsSource, retiredParts })
 
 /* Pièces réservées pour le client et remplacements ouverts du site. */
 export const getAPoser = (id) => get(`/interventions/${id}/a-poser`)

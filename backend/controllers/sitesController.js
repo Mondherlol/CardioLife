@@ -390,7 +390,11 @@ async function updateDea(req, res) {
   const opts     = { source, userId: req.user._id }
   const warnings = []
   for (const kind of ['batteries', 'electrodes']) {
-    if (req.body[kind] !== undefined) warnings.push(...await syncDeaConsumables(site, dea, kind, opts))
+    if (req.body[kind] !== undefined) {
+      // Pièces remplacées par celles qu'on vient de poser : elles partent hors service.
+      const retired = req.body.retiredParts?.[kind] || []
+      warnings.push(...await syncDeaConsumables(site, dea, kind, { ...opts, retired }))
+    }
   }
   if (req.body.armoire !== undefined) warnings.push(...await syncDeaArmoire(site, dea, opts))
 

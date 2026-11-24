@@ -146,3 +146,17 @@ export function pendingFormations(formations = []) {
   })
   return list.sort((a, b) => new Date(a.date) - new Date(b.date))
 }
+
+/* ── Report « date à définir » ─────────────────────────────────── */
+
+/** Reportée sans date : due, mais hors du calendrier. */
+export function isOnHold(f) {
+  return Boolean(f?.enAttente) && !['fait', 'annule'].includes(f?.status)
+}
+
+/** Le jour de relancer le client est arrivé (ou passé). */
+export function relanceDue(f, now = new Date()) {
+  if (!isOnHold(f) || !f.relanceDate) return false
+  const end = new Date(now); end.setHours(23, 59, 59, 999)
+  return new Date(f.relanceDate) <= end
+}

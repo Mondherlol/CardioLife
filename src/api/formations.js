@@ -24,3 +24,8 @@ export const uploadFormationBonPdf = (id, blob) => {
   form.append('file', blob, 'bon.pdf')
   return upload(`/formations/${id}/bon-pdf`, form)
 }
+
+/* Report : { enAttente: true, motif, relanceDate } (date à définir) ou
+   { enAttente: false, date, end } (nouvelle date). Ouvert à tous les profils. */
+export const setFormationAttente    = (id, data)        => patch(`/formations/${id}/attente`, data)
+export const getFormationsAttente   = ()                => get('/formations/attente')

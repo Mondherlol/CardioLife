@@ -27,6 +27,7 @@ import { useGoBack } from '../hooks/useGoBack'
 import ReplacementModal from '../components/ReplacementModal'
 import FicheDeaTabs, { deaLabel as deaLabelOf } from '../components/FicheDeaTabs'
 import DeaItemsModal from '../components/DeaItemsModal'
+import ReportFormationModal from '../components/ReportFormationModal'
 import { expiryHint, ARMOIRE_MODELS } from '../components/siteHelpers'
 import {
   getReplacements, replacementKind, replacementStatus, replacementReason,
@@ -773,6 +774,9 @@ export default function InterventionFichePage() {
   // Réservations et remplacements ouverts du site : { reserved, replacements }.
   const [aPoser,         setAPoser]         = useState(null)
   const [savingFormation, setSavingFormation] = useState(false)
+  /* « Reportée » demande d'abord si le client a donné une nouvelle date : sans
+     elle, la séance part en « En attente de planification ». */
+  const [reportingFormation, setReportingFormation] = useState(false)
   const [formationEtat,  setFormationEtat]  = useState('')
   const [closing,        setClosing]        = useState(false)
   const [archiving,      setArchiving]      = useState(false)
@@ -1272,14 +1276,16 @@ export default function InterventionFichePage() {
    * n'a pas à savoir laquelle.
    */
   async function setFormationState(etat) {
+    if (etat === 'reportee') { setReportingFormation(true); return }
     setFormationEtat(etat)
     await saveFormationState({ etat })
   }
 
-  async function saveFormationState(payload) {
+  async function saveFormationState(payload, { rethrow = false } = {}) {
     setSavingFormation(true)
     try {
       const updated = await saveFormationOutcome(id, payload)
+      setFormationEtat(updated.formation?.etat || payload.etat || '')
       setIv(prev => ({
         ...updated,
         siteDeas:      prev?.siteDeas      ?? updated.siteDeas,
@@ -1287,7 +1293,10 @@ export default function InterventionFichePage() {
       }))
       setSavedField('formation')
       setTimeout(() => setSavedField(f => (f === 'formation' ? null : f)), 2000)
+      return updated
     } catch (err) {
+      // La fenêtre de report affiche l'erreur elle-même.
+      if (rethrow) throw err
       toast.error(err.message || 'Enregistrement impossible.')
     } finally {
       setSavingFormation(false)
@@ -2563,6 +2572,21 @@ export default function InterventionFichePage() {
       {/* Identification de la pièce montée : la même modale que la fiche
           client, mais enregistrée par la route de l'intervention — le
           technicien n'a pas le droit de gestion des clients. */}
+      {reportingFormation && (
+        <ReportFormationModal
+          formation={iv.linkedFormation
+            || (iv.formations || []).find(f => String(f._id) === String(iv.formation?.formation)) || null}
+          onClose={() => setReportingFormation(false)}
+          onSubmit={payload => saveFormationState({
+            etat: 'reportee',
+            ...(payload.enAttente
+              ? { motif: payload.motif, relanceDate: payload.relanceDate }
+              : { date: payload.date }),
+          }, { rethrow: true })}
+          onDone={() => setReportingFormation(false)}
+        />
+      )}
+
       {itemsKind && siteRef && activeDea && (
         <DeaItemsModal
           site={siteRef}
@@ -2572,7 +2596,7 @@ export default function InterventionFichePage() {
              identifie surtout celles déjà en place. Modifiable dans la fenêtre. */
           defaultSource={['intervention', 'installation'].includes(iv.controlType) ? 'stock' : 'client'}
           onClose={() => setItemsKind(null)}
-          save={(items, source) => saveDeaItems(id, itemsKind, activeDea._id, items, source)}
+          save={(items, source, retired) => saveDeaItems(id, itemsKind, activeDea._id, items, source, retired)}
           onSaved={updated => handleItemsSaved(itemsKind, updated)}
         />
       )}

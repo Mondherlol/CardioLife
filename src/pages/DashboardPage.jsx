@@ -6,7 +6,7 @@ import {
   AlertTriangle, CalendarClock, Clock, User, MapPin,
   ArrowRight, ChevronRight,
   ChevronLeft, Plus, Activity, BatteryWarning, Zap,
-  CircleDot, TrendingUp, X, Check, Archive, PauseCircle,
+  CircleDot, TrendingUp, X, Check, Archive, PauseCircle, GraduationCap,
 } from 'lucide-react'
 import ArmoirePilesModal from '../components/ArmoirePilesModal'
 import { useAuth } from '../context/AuthContext'
@@ -16,6 +16,8 @@ import { useLoadingBar } from '../hooks/useLoadingBar'
 import { getDashboard } from '../api/dashboard'
 import { getInstallations } from '../api/installations'
 import { getInterventions } from '../api/interventions'
+import { getFormationsAttente } from '../api/formations'
+import { relanceDue } from '../lib/formations'
 import { getUsers } from '../api/users'
 import { getReplacements, replacementKind, replacementReason } from '../api/replacements'
 import EventModal from '../components/EventModal'
@@ -640,6 +642,17 @@ export default function DashboardPage() {
       .then(list => setAttenteCount((Array.isArray(list) ? list : []).filter(i => i.status !== 'termine').length))
       .catch(() => {})
   }, [])
+  /* Formations reportées « date à définir » : celles dont le jour de relance
+     est arrivé ressortent à part, c'est là qu'il faut appeler le client. */
+  const [fmnAttente, setFmnAttente] = useState({ total: 0, due: 0 })
+  useEffect(() => {
+    getFormationsAttente()
+      .then(list => {
+        const arr = Array.isArray(list) ? list : []
+        setFmnAttente({ total: arr.length, due: arr.filter(f => relanceDue(f)).length })
+      })
+      .catch(() => {})
+  }, [])
   const canContracts = canAccess(user, 'contracts')
 
   useLoadingBar(loading)
@@ -771,13 +784,19 @@ export default function DashboardPage() {
       { key: 'att',  count: attenteCount,
         label: attenteCount > 1 ? 'contrôles en attente de planification' : 'contrôle en attente de planification',
         icon: PauseCircle, tone: 'orange', to: '/planning?attente=1' },
+      { key: 'frel', count: fmnAttente.due,
+        label: fmnAttente.due > 1 ? 'formations à relancer pour fixer une date' : 'formation à relancer pour fixer une date',
+        icon: GraduationCap, tone: 'red', to: '/planning?attente=formations' },
+      { key: 'fatt', count: fmnAttente.total - fmnAttente.due,
+        label: (fmnAttente.total - fmnAttente.due) > 1 ? 'formations reportées en attente de date' : 'formation reportée en attente de date',
+        icon: GraduationCap, tone: 'orange', to: '/planning?attente=formations' },
       { key: 'batt', count: batteries,  label: 'batteries à remplacer', icon: BatteryWarning, tone: 'amber',  to: '/stock?tab=parc&type=batterie' },
       { key: 'elec', count: electrodes, label: 'électrodes expirées',   icon: Zap,            tone: 'orange', to: '/stock?tab=parc&type=electrode' },
       { key: 'arm',  count: armoires,
         label: armoires > 1 ? 'armoires nécessitent un remplacement de piles' : 'armoire nécessite un remplacement de piles',
         icon: Archive, tone: 'amber', onClick: () => setShowArmoires(true) },
     ].filter(a => a.count > 0)
-  }, [installations, attenteCount])
+  }, [installations, attenteCount, fmnAttente])
 
   /* Contrôles à venir : uniquement les contrôles (fiches de contrôle et
      rendez-vous de type contrôle), pas les rendez-vous en général. */

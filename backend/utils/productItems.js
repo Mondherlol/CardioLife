@@ -179,15 +179,18 @@ function pairPieces(lines, items) {
  * neuve : la remettre « disponible » ferait compter une batterie usée ou
  * périmée comme du stock. Elle passe hors service.
  */
-async function unmountItem(item, { action, hsAction = action, note } = {}) {
+async function unmountItem(item, { action, hsAction = action, note, retire = false } = {}) {
   const from = item.status
-  const to   = numbered(item) ? 'disponible' : 'hs'
+  /* `retire` : la pièce a été remplacée (périmée, usée). Numérotée ou non, elle
+     ne retourne pas au magasin — on ne la remonterait pas ailleurs. */
+  const to   = retire || !numbered(item) ? 'hs' : 'disponible'
   item.dea = undefined; item.site = undefined; item.client = undefined
   item.reservedFor = undefined
   item.activationDate = undefined
   item.status = to
   await logHistory(item, {
-    action: to === 'hs' ? `${hsAction} — pièce sans n°, mise hors service` : action,
+    action: retire ? `${hsAction} — mise hors service`
+      : to === 'hs' ? `${hsAction} — pièce sans n°, mise hors service` : action,
     from, to, note,
   })
   await syncProductStock(item.product)
@@ -327,11 +330,27 @@ const SOURCES = ['stock', 'client', 'match']
  * `kind` vaut 'batteries' ou 'electrodes' — c'est aussi le slug de la catégorie
  * du catalogue, qui distingue ces articles de l'appareil lui-même.
  */
-async function syncDeaConsumables(site, dea, kind, { source = 'match', userId } = {}) {
+async function syncDeaConsumables(site, dea, kind, { source = 'match', userId, retired = [] } = {}) {
   if (!SOURCES.includes(source)) source = 'match'
   const warnings = []
   const lines    = (dea[kind] || []).filter(l => l.product)
   const attached = await ProductItem.find({ dea: dea._id, category: kind })
+
+  /* Pièces que la fenêtre de saisie déclare remplacées. Elles sont écartées
+     avant l'appariement : une pièce neuve du même modèle, sans n°, se serait
+     sinon appariée à l'ancienne — l'ancienne restait montée et la neuve ne
+     sortait jamais du stock. */
+  const toRetire = []
+  for (const r of Array.isArray(retired) ? retired : []) {
+    if (!r?.product) continue
+    const idx = attached.findIndex(item => samePiece(r, item))
+    if (idx >= 0) toRetire.push(attached.splice(idx, 1)[0])
+  }
+  for (const item of toRetire) {
+    if (item.status !== 'installe') continue
+    await unmountItem(item, { hsAction: 'Remplacée sur le DAE', note: site.name, retire: true })
+  }
+
   const { pairs, free } = pairPieces(lines, attached)
 
   // 1. Ce qui n'est plus déclaré sur l'appareil quitte le parc.

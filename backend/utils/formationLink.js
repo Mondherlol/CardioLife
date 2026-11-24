@@ -103,7 +103,8 @@ async function followVisitDate(intervention, oldDate, user) {
   const id = intervention.formation?.formation
   if (!id || !oldDate || !intervention.scheduledDate) return
   const formation = await Formation.findById(id)
-  if (!formation || !['planifie', 'en_cours'].includes(formation.status)) return
+  // Reportée sans date : elle ne suit plus la visite, elle attend la sienne.
+  if (!formation || formation.enAttente || !['planifie', 'en_cours'].includes(formation.status)) return
   const sameDay = new Date(formation.date).toDateString() === new Date(oldDate).toDateString()
   if (!sameDay) return
   const delta = new Date(intervention.scheduledDate) - new Date(oldDate)

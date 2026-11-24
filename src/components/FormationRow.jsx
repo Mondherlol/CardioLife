@@ -1,9 +1,10 @@
 import {
   GraduationCap, CalendarDays, FileText, Users, User, Send, Mail,
-  Building2, AlertTriangle, Check,
+  Building2, AlertTriangle, Check, PauseCircle, Bell,
 } from 'lucide-react'
 import {
   stageOf, countParticipants, attestationRecipient, fmtFormationDate, pendingFormations,
+  isOnHold, relanceDue,
 } from '../lib/formations'
 
 /* Chips d'étape : le même jeu de couleurs que la fiche site (`sd-chip`). */
@@ -15,6 +16,12 @@ const TONE_CLS = {
 }
 
 export function StageChip({ formation }) {
+  // Reportée sans date : c'est ce qu'il faut lire en premier, pas « Programmé ».
+  if (isOnHold(formation)) {
+    return <span className={`sd-chip ${relanceDue(formation) ? 'sd-chip--red' : TONE_CLS.amber}`}>
+      <PauseCircle size={11} /> Date à définir
+    </span>
+  }
   const st = stageOf(formation)
   return <span className={`sd-chip ${TONE_CLS[st.tone]}`}>{st.label}</span>
 }
@@ -38,7 +45,9 @@ export function FormationRow({ formation: f, onClick, showClient = false, showSi
       <div className="sd-row-main">
         <div className="sd-row-title">{f.title}</div>
         <div className="sd-row-meta">
-          <span><CalendarDays size={11} /> {fmtFormationDate(f.date)}</span>
+          <span><CalendarDays size={11} /> {isOnHold(f)
+            ? <>Date à définir <em style={{ opacity: 0.7 }}>(prévue le {fmtFormationDate(f.date)})</em></>
+            : fmtFormationDate(f.date)}</span>
           {showClient && f.clientName && <span><Building2 size={11} /> {f.clientName}</span>}
           {showSite && site && <span><Building2 size={11} /> {site}</span>}
           {f.assignedTo?.length > 0 && (
@@ -55,7 +64,13 @@ export function FormationRow({ formation: f, onClick, showClient = false, showSi
               : <><AlertTriangle size={11} /> Attestations à envoyer — aucun destinataire renseigné</>}
           </div>
         )}
-        {stage.id === 'programme' && counts.a_former > 0 && (
+        {isOnHold(f) && (
+          <div className={`fm-row-todo${relanceDue(f) ? '' : ' fm-row-todo--soft'}`}>
+            <PauseCircle size={11} /> Reportée{f.attenteMotif ? ` — ${f.attenteMotif}` : ''}
+            {f.relanceDate && <> · <Bell size={11} /> {relanceDue(f) ? 'à relancer depuis le' : 'relance le'} {new Date(f.relanceDate).toLocaleDateString('fr-FR')}</>}
+          </div>
+        )}
+        {stage.id === 'programme' && !isOnHold(f) && counts.a_former > 0 && (
           <div className="fm-row-todo fm-row-todo--soft">
             <Users size={11} /> {counts.a_former} agent{counts.a_former > 1 ? 's' : ''} à former
           </div>
@@ -81,7 +96,8 @@ export function FormationRow({ formation: f, onClick, showClient = false, showSi
  */
 export function FormationsSummary({ formations = [], onPick }) {
   const pending   = pendingFormations(formations)
-  const scheduled = pending.filter(f => stageOf(f).id === 'programme')
+  const scheduled = pending.filter(f => stageOf(f).id === 'programme' && !isOnHold(f))
+  const onHold    = pending.filter(isOnHold)
   const toDeliver = pending.filter(f => stageOf(f).id === 'termine')
 
   if (formations.length === 0) return null
@@ -109,6 +125,12 @@ export function FormationsSummary({ formations = [], onPick }) {
           <span className="fm-summary-num">{toDeliver.length}</span>
           <span className="fm-summary-label"><Send size={11} /> attestation{toDeliver.length > 1 ? 's' : ''} à livrer</span>
         </button>
+        {onHold.length > 0 && (
+          <button type="button" className="fm-summary-stat fm-summary-stat--warn" onClick={() => onPick?.(onHold[0])}>
+            <span className="fm-summary-num">{onHold.length}</span>
+            <span className="fm-summary-label"><PauseCircle size={11} /> en attente de date</span>
+          </button>
+        )}
       </div>
 
       <div className="fm-summary-next">

@@ -5,6 +5,7 @@ import {
   GraduationCap, X, AlertTriangle, Trash2, Upload, FileText, Users,
   UserPlus, Check, Clock, History, User, Mail, Phone, Building2,
   CalendarDays, Copy, Send, CircleDashed, CheckCircle2, Ban, ClipboardList, Award,
+  PauseCircle, CalendarClock, Bell,
 } from 'lucide-react'
 import {
   createFormation, updateFormation, deleteFormation,
@@ -13,11 +14,12 @@ import {
 import { getSites } from '../api/sites'
 import { ClientSearchInput, AssignedToInput } from './PlanningInputs'
 import AttestationDialog from './AttestationDialog'
+import ReportFormationModal from './ReportFormationModal'
 import { CIVILITIES } from '../lib/attestationPdf'
 import { localDateStr, localTimeStr, durationOptionsWith } from '../lib/appointmentConstants'
 import {
   STAGE_LIST, stageOf, stagePayload, PARTICIPANT_LIST, participantState,
-  countParticipants, seatsUsed, attestationRecipient, deaModels,
+  countParticipants, seatsUsed, attestationRecipient, deaModels, isOnHold, relanceDue,
 } from '../lib/formations'
 
 const STAGE_ICONS = {
@@ -424,6 +426,10 @@ export default function FormationModal({
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState('')
   const [attOpen,   setAttOpen]   = useState(false)
+  // Report : 'attente' (date à définir) ou 'date' (nouvelle date), null fermé.
+  const [reportMode, setReportMode] = useState(null)
+  const onHold   = isEdit && isOnHold(fdata || raw)
+  const canDefer = isEdit && raw._id && !['fait', 'annule'].includes((fdata || raw).status)
 
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
@@ -637,6 +643,34 @@ export default function FormationModal({
         </div>
 
         <form onSubmit={handleSubmit} className="modal-body fm-body">
+          {/* Reportée sans date : on le dit d'emblée, avec de quoi la programmer. */}
+          {onHold && (() => {
+            const f   = fdata || raw
+            const due = relanceDue(f)
+            return (
+              <div className="fm-summary" style={{ borderColor: due ? '#fca5a5' : '#fcd34d', background: due ? '#fef2f2' : '#fffbeb' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <strong style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <PauseCircle size={14} /> En attente de date
+                    {f.attenteSince && <span style={{ fontWeight: 400 }}>depuis le {new Date(f.attenteSince).toLocaleDateString('fr-FR')}</span>}
+                  </strong>
+                  {f.attenteMotif && <span>{f.attenteMotif}</span>}
+                  <span style={{ fontSize: 12, opacity: 0.85 }}>
+                    {f.date && <>Initialement prévue le {new Date(f.date).toLocaleDateString('fr-FR')}</>}
+                    {f.relanceDate && <> · <Bell size={11} /> {due ? 'À relancer depuis le' : 'Relance le'} {new Date(f.relanceDate).toLocaleDateString('fr-FR')}</>}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setReportMode('attente')}>
+                    Modifier
+                  </button>
+                  <button type="button" className="btn btn--primary btn--sm" onClick={() => setReportMode('date')}>
+                    <CalendarClock size={13} /> Programmer
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Étape du cycle */}
           <div className="fm-stages">
@@ -817,6 +851,11 @@ export default function FormationModal({
                 <Trash2 size={14} /> Supprimer
               </button>
             )}
+            {canDefer && !onHold && (
+              <button type="button" className="btn btn--ghost" onClick={() => setReportMode('attente')}>
+                <CalendarClock size={14} /> Reporter
+              </button>
+            )}
             <div style={{ flex: 1 }} />
             <button type="button" className="btn btn--ghost" onClick={onClose}>Annuler</button>
             <button type="submit" className="btn btn--primary" disabled={loading}>
@@ -825,6 +864,20 @@ export default function FormationModal({
           </div>
         </form>
       </div>
+
+      {reportMode && (
+        <ReportFormationModal
+          formation={fdata || raw}
+          initialMode={reportMode}
+          onClose={() => setReportMode(null)}
+          onDone={updated => {
+            setReportMode(null)
+            setFdata(updated)
+            // La séance a changé de place (ou quitté le calendrier) : la fiche se referme.
+            onSaved?.(updated)
+          }}
+        />
+      )}
 
       {attOpen && (
         <AttestationDialog

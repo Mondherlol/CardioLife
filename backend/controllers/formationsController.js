@@ -8,6 +8,7 @@ const Formation = require('../models/Formation')
 const Site      = require('../models/Site')
 const { applyBon } = require('../utils/bon')
 const { archiveBon } = require('../utils/rapportArchive')
+const { putOnHold, reschedule, clearHold, isClosed, parseDate } = require('../utils/formationAttente')
 
 const UPLOAD_DIR = path.join(__dirname, '../uploads/formations')
 fs.mkdirSync(UPLOAD_DIR, { recursive: true })
@@ -99,6 +100,10 @@ async function getAll(req, res) {
     if (client) filter.client = client
     if (site)   filter.site   = site
     if (status) filter.status = status
+    /* Une séance en attente garde sa date d'origine, mais n'est plus au
+       calendrier : la fenêtre du planning l'ignore. */
+    if (req.query.enAttente === '1') filter.enAttente = true
+    else if (from || to)             filter.enAttente = { $ne: true }
 
     const formations = await Formation.find(filter)
       .populate(POPULATE_OPTS)
@@ -218,6 +223,17 @@ async function update(req, res) {
     const prevStatus = formation.status
 
     if (title       !== undefined) formation.title       = title
+    /* Une nouvelle date pour une séance en attente : elle est programmée, elle
+       sort de l'attente. Le formulaire renvoie la date à chaque modification —
+       seule une date réellement changée compte. */
+    if (date !== undefined && formation.enAttente) {
+      const next = parseDate(date)
+      if (next && next.getTime() !== new Date(formation.date).getTime()) {
+        clearHold(formation)
+        pushHistory(formation, 'Formation reprogrammée (sortie de l\'attente)', req.user._id,
+          next.toLocaleDateString('fr-FR'))
+      }
+    }
     if (date        !== undefined) formation.date        = date
     if (end         !== undefined) formation.end         = end || undefined
     if (status      !== undefined) formation.status      = status
@@ -270,6 +286,58 @@ async function update(req, res) {
       pushHistory(formation, 'Statut modifié', req.user._id, `${prevStatus} → ${status}`)
     } else {
       pushHistory(formation, 'Formation modifiée', req.user._id)
+    }
+
+    await formation.save()
+    await formation.populate(POPULATE_OPTS)
+    res.json(formation)
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
+/**
+ * GET /api/formations/attente
+ * Séances reportées sans date, à relancer d'abord : celles dont la date de
+ * relance est passée ou la plus proche en tête, puis les plus anciennes.
+ * Ouvert à tout utilisateur connecté, comme le report lui-même.
+ */
+async function listAttente(req, res) {
+  try {
+    const list = await Formation.find({ enAttente: true, status: { $nin: ['fait', 'annule'] } })
+      .select('title client clientName site siteName date end status participants participantsCount attenteSince attenteMotif relanceDate intervention')
+      .populate('site', 'name')
+      .lean()
+    const far = Number.MAX_SAFE_INTEGER
+    const t   = d => (d ? new Date(d).getTime() : far)
+    list.sort((a, b) => (t(a.relanceDate) - t(b.relanceDate)) || (t(a.attenteSince) - t(b.attenteSince)))
+    res.json(list.map(({ participants, ...f }) => ({
+      ...f,
+      // Agents attendus : la liste nominative quand elle existe.
+      agents: participants?.length
+        ? participants.filter(p => p.status !== 'absent').length
+        : (f.participantsCount || 0),
+    })))
+  } catch (err) { res.status(500).json({ message: err.message }) }
+}
+
+/**
+ * PATCH /api/formations/:id/attente
+ *  { enAttente: true, motif, relanceDate } → reportée, date à définir
+ *  { enAttente: false, date, end }         → reprogrammée à cette date
+ * Tout le monde peut reporter : c'est souvent le technicien, sur place, qui
+ * apprend que le client veut repousser.
+ */
+async function setAttente(req, res) {
+  try {
+    const formation = await Formation.findById(req.params.id)
+    if (!formation) return res.status(404).json({ message: 'Formation introuvable.' })
+    if (isClosed(formation)) {
+      return res.status(409).json({ message: 'Une formation terminée ou annulée ne se reporte plus.' })
+    }
+
+    if (req.body?.enAttente) {
+      putOnHold(formation, { motif: req.body.motif, relanceDate: req.body.relanceDate }, req.user._id)
+    } else if (!reschedule(formation, { date: req.body?.date, end: req.body?.end }, req.user._id)) {
+      return res.status(422).json({ message: 'Indiquez la nouvelle date de la formation.' })
     }
 
     await formation.save()
@@ -427,5 +495,6 @@ module.exports = {
   getOne,
   getBon, saveBon, saveBonPdf,
   getAll, getByClient, getBySite, create, update, toggleAttestation,
+  listAttente, setAttente,
   addDocuments, removeDocument, remove,
 }

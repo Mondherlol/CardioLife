@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Heart, User, Lock, AlertTriangle } from 'lucide-react'
+import { User, Lock, AlertTriangle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { login } from '../api/auth'
 
@@ -32,9 +32,7 @@ export default function LoginPage() {
     <div className="login-root">
       <div className="login-card">
         <div className="login-logo-wrap">
-          <div className="login-logo-icon">
-            <Heart size={20} strokeWidth={2.5} />
-          </div>
+          <img className="login-logo-icon" src="/logocarre.png" alt="CardioLife" />
           <div className="login-logo-text">
             <span className="login-logo-brand">Cardio</span>
             <span className="login-logo-track">Track</span>

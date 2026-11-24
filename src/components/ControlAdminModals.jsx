@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
-import { X, Trash2, PauseCircle, CalendarCheck, History, AlertTriangle, Repeat } from 'lucide-react'
+import { X, Trash2, PauseCircle, CalendarCheck, History, AlertTriangle, Repeat, GraduationCap, Bell } from 'lucide-react'
 import {
   deleteIntervention, setInterventionAttente, getInterventions, getDeletedInterventions, setControlType,
 } from '../api/interventions'
+import { getFormationsAttente } from '../api/formations'
+import { relanceDue } from '../lib/formations'
+import ReportFormationModal from './ReportFormationModal'
 import { CONTROL_LABELS, fmtDay } from '../lib/scheduledControls'
 
 const PERIODIC = ['semestriel', 'annuel']
@@ -211,8 +214,14 @@ export function AttenteModal({ iv, onClose, onDone }) {
  * Contrôles en attente de planification, du plus anciennement dû au plus
  * récent. « Programmer » ouvre la programmation sur ce contrôle précis.
  */
-export function AttenteListModal({ onClose, onOpen, onSchedule, refreshKey }) {
-  const [items,   setItems]   = useState(null)
+export function AttenteListModal({
+  onClose, onOpen, onSchedule, refreshKey, initialTab = 'controles', onOpenFormation, onFormationChanged,
+}) {
+  const [items,      setItems]      = useState(null)
+  const [formations, setFormations] = useState(null)
+  const [tab,        setTab]        = useState(initialTab)
+  const [reporting,  setReporting]  = useState(null)   // formation à programmer
+  const [fKey,       setFKey]       = useState(0)
 
   useEffect(() => {
     getInterventions({ enAttente: '1' })
@@ -222,17 +231,76 @@ export function AttenteListModal({ onClose, onOpen, onSchedule, refreshKey }) {
       .catch(() => setItems([]))
   }, [refreshKey])
 
+  /* Formations reportées sans date : déjà triées par le serveur, relance la
+     plus urgente d'abord. */
+  useEffect(() => {
+    getFormationsAttente()
+      .then(list => setFormations(Array.isArray(list) ? list : []))
+      .catch(() => setFormations([]))
+  }, [refreshKey, fKey])
+
+  const total = (items?.length || 0) + (formations?.length || 0)
+
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal--md">
         <div className="modal-header">
           <h2 className="modal-title">
-            <PauseCircle size={16} /> En attente de planification{items ? ` (${items.length})` : ''}
+            <PauseCircle size={16} /> En attente de planification{items && formations ? ` (${total})` : ''}
           </h2>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body">
-          {!items ? (
+          <div className="dea-chips" style={{ marginBottom: 12 }}>
+            <button type="button" className={`dea-chip${tab === 'controles' ? ' dea-chip--on' : ''}`}
+              onClick={() => setTab('controles')}>
+              Contrôles{items ? ` (${items.length})` : ''}
+            </button>
+            <button type="button" className={`dea-chip${tab === 'formations' ? ' dea-chip--on' : ''}`}
+              onClick={() => setTab('formations')}>
+              <GraduationCap size={12} /> Formations{formations ? ` (${formations.length})` : ''}
+            </button>
+          </div>
+
+          {tab === 'formations' ? (
+            !formations ? (
+              <div className="table-loading"><span className="spinner" /></div>
+            ) : formations.length === 0 ? (
+              <p className="plan-side-empty" style={{ padding: '24px 0', textAlign: 'center' }}>
+                Aucune formation en attente de date.
+              </p>
+            ) : (
+              <ul className="att-list">
+                {formations.map(f => {
+                  const due = relanceDue(f)
+                  return (
+                    <li key={f._id} className="att-item">
+                      <button type="button" className="att-main" onClick={() => onOpenFormation?.(f)}>
+                        <span className="att-title">{f.clientName || 'Client'}</span>
+                        <span className="att-sub">
+                          {f.title}{(f.site?.name || f.siteName) ? ` · ${f.site?.name || f.siteName}` : ''}
+                          {f.agents ? ` · ${f.agents} agent${f.agents > 1 ? 's' : ''}` : ''}
+                          {f.date ? ` · initialement prévue le ${fmtDay(f.date)}` : ''}
+                        </span>
+                        <span className="att-motif">
+                          En attente depuis le {fmtDay(f.attenteSince)}{f.attenteMotif ? ` — ${f.attenteMotif}` : ''}
+                        </span>
+                        {f.relanceDate && (
+                          <span className="att-motif" style={due ? { color: 'var(--danger, #dc2626)', fontWeight: 600 } : undefined}>
+                            {due ? <AlertTriangle size={11} /> : <Bell size={11} />}{' '}
+                            {due ? 'À relancer depuis le' : 'Relance prévue le'} {fmtDay(f.relanceDate)}
+                          </span>
+                        )}
+                      </button>
+                      <button type="button" className="btn btn--primary btn--sm" onClick={() => setReporting(f)}>
+                        <CalendarCheck size={13} /> Programmer
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )
+          ) : !items ? (
             <div className="table-loading"><span className="spinner" /></div>
           ) : items.length === 0 ? (
             <p className="plan-side-empty" style={{ padding: '24px 0', textAlign: 'center' }}>
@@ -266,6 +334,15 @@ export function AttenteListModal({ onClose, onOpen, onSchedule, refreshKey }) {
           <button className="btn btn--ghost" onClick={onClose}>Fermer</button>
         </div>
       </div>
+
+      {reporting && (
+        <ReportFormationModal
+          formation={reporting}
+          initialMode="date"
+          onClose={() => setReporting(null)}
+          onDone={updated => { setReporting(null); setFKey(k => k + 1); onFormationChanged?.(updated) }}
+        />
+      )}
     </div>
   )
 }

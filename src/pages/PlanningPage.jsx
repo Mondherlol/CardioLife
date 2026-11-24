@@ -9,7 +9,7 @@ import frLocale        from '@fullcalendar/core/locales/fr'
 import { Plus, Wrench, Zap, CalendarClock, X, GraduationCap, Hammer, Printer, PauseCircle } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { getAppointments, updateAppointment } from '../api/appointments'
-import { getFormations, updateFormation } from '../api/formations'
+import { getFormations, updateFormation, getFormationsAttente, getFormation } from '../api/formations'
 import { getInterventions, updateIntervention } from '../api/interventions'
 import { getInstallations } from '../api/installations'
 import { getUsers } from '../api/users'
@@ -238,8 +238,20 @@ export default function PlanningPage() {
   /* Contrôles en attente de RDV : hors calendrier, listés à part. `?attente=1`
      (alerte du tableau de bord) ouvre directement la liste. */
   const [params, setParams] = useSearchParams()
-  const [attenteOpen,  setAttenteOpen]  = useState(params.get('attente') === '1')
+  const [attenteOpen,  setAttenteOpen]  = useState(Boolean(params.get('attente')))
   const [attenteCount, setAttenteCount] = useState(side.attenteCount)
+  /* Formations reportées « date à définir » : même liste, onglet à part.
+     `?attente=formations` (alerte du tableau de bord) ouvre cet onglet. */
+  const [fmnAttenteCount, setFmnAttenteCount] = useState(side.fmnAttenteCount || 0)
+  const fetchFmnAttente = useCallback(() => {
+    getFormationsAttente()
+      .then(list => {
+        side.fmnAttenteCount = Array.isArray(list) ? list.length : 0
+        setFmnAttenteCount(side.fmnAttenteCount)
+      })
+      .catch(() => {})
+  }, [])
+  useEffect(() => { fetchFmnAttente() }, [fetchFmnAttente])
   const [attenteKey,   setAttenteKey]   = useState(0)
   const [viewing,     setViewing]     = useState(null)   // RDV consulté sans droit d'édition
   // Dernières valeurs connues d'abord : le retour sur la page est immédiat.
@@ -546,7 +558,7 @@ export default function PlanningPage() {
           <button type="button" className="btn btn--ghost plan-ctrl-btn" style={{ marginTop: 6 }}
             onClick={() => setAttenteOpen(true)}>
             <PauseCircle size={14} /> En attente de planification
-            <span className={`plan-ctrl-count${attenteCount ? ' plan-ctrl-count--wait' : ''}`}>{attenteCount}</span>
+            <span className={`plan-ctrl-count${attenteCount + fmnAttenteCount ? ' plan-ctrl-count--wait' : ''}`}>{attenteCount + fmnAttenteCount}</span>
           </button>
         </div>
 
@@ -698,6 +710,13 @@ export default function PlanningPage() {
           }}
           onOpen={id => navigate(`/interventions/${id}`)}
           onSchedule={readOnlyPlanning ? null : iv => setSchedModal({ date: null, control: iv })}
+          initialTab={params.get('attente') === 'formations' ? 'formations' : 'controles'}
+          onOpenFormation={f => {
+            getFormation(f._id)
+              .then(full => { setAttenteOpen(false); setFmnModal({ mode: 'edit', formation: full }) })
+              .catch(err => toast.error(err.message))
+          }}
+          onFormationChanged={() => { fetchFmnAttente(); refetch() }}
         />
       )}
 
@@ -740,9 +759,9 @@ export default function PlanningPage() {
           slot={fmnModal.slot}
           users={users}
           onClose={() => setFmnModal(null)}
-          onSaved={() => { setFmnModal(null); refetch() }}
-          onDeleted={() => { setFmnModal(null); refetch() }}
-          onChanged={() => refetch()}
+          onSaved={() => { setFmnModal(null); refetch(); fetchFmnAttente() }}
+          onDeleted={() => { setFmnModal(null); refetch(); fetchFmnAttente() }}
+          onChanged={() => { refetch(); fetchFmnAttente() }}
         />
       )}
 

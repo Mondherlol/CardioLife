@@ -54,6 +54,16 @@ const formationSchema = new mongoose.Schema({
   date:                   { type: Date, required: true },   // début de la formation
   end:                    { type: Date },                   // fin (date + durée) — pour le planning
   status:                 { type: String, enum: ['planifie', 'en_cours', 'fait', 'annule'], default: 'planifie' },
+  /* Reportée sans date : le client veut repousser la séance mais ne sait pas
+     encore quand. Elle reste due (et garde ses places sur le quota du site),
+     mais quitte le calendrier pour la liste « En attente de planification ».
+     `date` garde alors la date initialement prévue. Lui donner une nouvelle
+     date l'en fait sortir. */
+  enAttente:              { type: Boolean, default: false, index: true },
+  attenteSince:           { type: Date },
+  attenteMotif:           { type: String, trim: true },
+  // Quand rappeler le client pour fixer la date : passé ce jour, elle remonte en alerte.
+  relanceDate:            { type: Date },
   assignedTo:             [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   description:            { type: String, trim: true },
   documents:              [documentSchema],

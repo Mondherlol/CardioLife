@@ -33,6 +33,31 @@ const ELECTRODE_KINDS = [
   { value: '',       label: 'Non précisé' },
 ]
 
+/* Emplacement qu'occupe une pièce sur l'appareil. Une paire adulte remplace une
+   paire adulte, une pédiatrique une pédiatrique ; un DAE n'a qu'une batterie. */
+function slotOf(kind, row) {
+  if (!row) return ''
+  if (kind !== 'electrodes') return 'batterie'
+  if (row.kind) return row.kind
+  const name = String(row.product?.name || row.productName || '')
+  return /p[ée]diatr|enfant|child|infant/i.test(name) ? 'enfant' : 'adulte'
+}
+
+function formatDate(value) {
+  if (!value) return ''
+  const [y, m, d] = String(value).slice(0, 10).split('-')
+  return d ? `${d}/${m}/${y}` : ''
+}
+
+/** Libellé court d'une pièce en place, pour dire laquelle on remplace. */
+function savedLabel(row) {
+  return [
+    row.product?.name || row.productName || 'Pièce',
+    (row.serialNumber || row.lotNumber) && `n° ${row.serialNumber || row.lotNumber}`,
+    row.expiryDate && `pér. ${formatDate(row.expiryDate)}`,
+  ].filter(Boolean).join(' · ')
+}
+
 const CONFIG = {
   electrodes: {
     title:      'Électrodes',
@@ -119,7 +144,10 @@ export default function DeaItemsModal({
   /* Une ligne porte les champs saisis, plus le modèle et l'article retenus.
      Les lignes déjà enregistrées n'ont que des libellés : on les présente comme
      « déjà en place » le temps de les rattacher au référentiel. */
-  const newRow = () => ({ ...cfg.empty, product: null, stockItem: null, query: '' })
+  /* `replaces` dit quelle pièce en place la nouvelle ligne remplace :
+     undefined = pas encore décidé (choisi automatiquement dès que le modèle est
+     connu), null = simple ajout, sinon le `savedId` de la ligne remplacée. */
+  const newRow = () => ({ ...cfg.empty, product: null, stockItem: null, query: '', replaces: undefined })
 
   /* Ouvrir sur une liste vide obligerait à cliquer « Ajouter » avant de
      pouvoir saisir quoi que ce soit : on ouvre la ligne pour lui. */
@@ -131,11 +159,15 @@ export default function DeaItemsModal({
     expiryDate:  toDateInput(it.expirationDate),
     stockItem:   { ...it, reservedHere: true },
     query:       '',
+    replaces:    undefined,
   })
-  const [items, setItems] = useState(() => [
-    ...((dea[kind] || []).length || preset.length ? (dea[kind] || []) : [null]).map(it => (it === null ? newRow() : {
+  const [items, setItems] = useState(() => assignReplacements([
+    ...((dea[kind] || []).length || preset.length ? (dea[kind] || []) : [null]).map((it, n) => (it === null ? newRow() : {
       ...cfg.empty,
       ...it,
+      // Ligne déjà sur l'appareil : c'est elle qu'une nouvelle pièce peut remplacer.
+      saved:   true,
+      savedId: String(it._id || `saved-${n}`),
       expiryDate:     toDateInput(it.expiryDate),
       activationDate: toDateInput(it.activationDate),
       level:          it.level ?? '',
@@ -151,7 +183,7 @@ export default function DeaItemsModal({
       query: '',
     })),
     ...preset.map(presetRow),
-  ])
+  ]))
 
   // Confirmation en cours : { row, mode: 'product' | 'stock', label }
   const [confirm,     setConfirm]     = useState(null)
@@ -175,9 +207,52 @@ export default function DeaItemsModal({
     }))
   }, [products])
 
-  function patch(idx, changes) {
-    setItems(list => list.map((it, i) => (i === idx ? { ...it, ...changes } : it)))
+  /* Une pièce ajoutée à côté d'une pièce de même emplacement la remplace, sauf
+     si l'utilisateur dit le contraire. Avant ça, la pièce posée s'ajoutait à
+     la liste et l'ancienne (souvent périmée) restait sur la fiche du DAE, et
+     restait aussi « installée » au stock : il fallait penser à supprimer la
+     ligne à la main.
+     Une ligne nouvelle encore indécise prend la pièce en place du même
+     emplacement que personne ne remplace encore, la plus proche de sa
+     péremption en premier. */
+  function assignReplacements(list) {
+    const taken = new Set(list.filter(r => !r.saved && r.replaces).map(r => r.replaces))
+    return list.map(row => {
+      if (row.saved || row.replaces !== undefined || !(row.product || row.productName)) return row
+      const slot = slotOf(kind, row)
+      const target = list
+        .filter(r => r.saved && !taken.has(r.savedId) && slotOf(kind, r) === slot)
+        .sort((a, b) => String(a.expiryDate || '9999').localeCompare(String(b.expiryDate || '9999')))[0]
+      if (!target) return row
+      taken.add(target.savedId)
+      // La paire posée reprend la catégorie de celle qu'elle remplace.
+      return { ...row, replaces: target.savedId, ...(kind === 'electrodes' && !row.kind ? { kind: slot } : {}) }
+    })
   }
+
+  function patch(idx, changes) {
+    setItems(list => assignReplacements(list.map((it, i) => (i === idx ? { ...it, ...changes } : it))))
+  }
+
+  /* Choix explicite dans la liste « Remplace » : null pour un simple ajout. */
+  function setReplaces(idx, savedId) {
+    setItems(list => list.map((it, i) => {
+      if (i === idx) {
+        const target = list.find(r => r.saved && r.savedId === savedId)
+        return {
+          ...it, replaces: savedId,
+          ...(target && kind === 'electrodes' && !it.kind ? { kind: slotOf(kind, target) } : {}),
+        }
+      }
+      // Une pièce en place ne se remplace qu'une fois.
+      return !it.saved && savedId && it.replaces === savedId ? { ...it, replaces: null } : it
+    }))
+  }
+
+  // Pièces en place que remplace une ligne nouvelle → `savedId` → n° de cette ligne.
+  const replacedBy = new Map()
+  items.forEach((it, i) => { if (!it.saved && it.replaces) replacedBy.set(it.replaces, i) })
+  const isRetired = it => it.saved && replacedBy.has(it.savedId)
   function setItem(idx, key, value) { patch(idx, { [key]: value }) }
   function addItem()       { setItems(list => [...list, newRow()]) }
   function removeItem(idx) { setItems(list => list.filter((_, i) => i !== idx)) }
@@ -263,20 +338,29 @@ export default function DeaItemsModal({
     setError('')
 
     // Une ligne sans modèle ne dit pas ce qui est monté sur l'appareil.
-    const orphan = items.findIndex(it => !it.product)
+    // (Une pièce remplacée s'en va : son modèle importe peu.)
+    const orphan = items.findIndex(it => !isRetired(it) && !it.product)
     if (orphan !== -1) {
       setError(`Ligne #${orphan + 1} : choisissez un modèle au catalogue.`)
       return
     }
     // Une saisie laissée en plan serait perdue en silence.
-    const rows = declareOnly
+    const all = declareOnly
       ? items.map(it => (!it.stockItem && it.query?.trim() ? { ...it, stockItem: declared(it.query.trim()) } : it))
       : items
-    const pending = rows.findIndex(it => !it.stockItem && it.query?.trim())
+    const pending = all.findIndex(it => !isRetired(it) && !it.stockItem && it.query?.trim())
     if (pending !== -1) {
       ask(pending, 'stock', items[pending].query)
       return
     }
+
+    // Les pièces remplacées quittent l'appareil, et le serveur les met hors service.
+    const rows = all.filter(it => !isRetired(it))
+    const retired = items.filter(isRetired).map(it => ({
+      product:      it.savedProductId || it.product?._id || '',
+      serialNumber: it.serialNumber || '',
+      lotNumber:    it.lotNumber || '',
+    }))
 
     setLoading(true)
     try {
@@ -301,8 +385,8 @@ export default function DeaItemsModal({
       // Sans ligne ajoutée, rien n'a été posé : rien ne doit sortir du stock.
       const partsSource = items.some(it => !it.savedProductId) ? source : 'client'
       const updated = save
-        ? await save(payload, partsSource)
-        : await updateDea(site._id, dea._id, { [kind]: payload, partsSource })
+        ? await save(payload, partsSource, retired)
+        : await updateDea(site._id, dea._id, { [kind]: payload, partsSource, retiredParts: { [kind]: retired } })
       toast.success(`${cfg.title} mises à jour.`)
       toastWarnings(toast, updated)
       onSaved(updated)
@@ -330,14 +414,28 @@ export default function DeaItemsModal({
 
           {preset.length > 0 && (
             <p className="form-hint">
-              La pièce réservée pour ce client est ajoutée ci-dessous. Si elle en
-              remplace une, retirez l'ancienne ligne avant d'enregistrer.
+              La pièce réservée pour ce client est ajoutée ci-dessous. Elle remplace
+              automatiquement la pièce en place du même type ; changez-le dans
+              « Remplace » si c'est un simple ajout.
             </p>
           )}
 
           {items.length === 0 && <p className="cd-empty-hint">{cfg.emptyHint}</p>}
 
-          {items.map((it, i) => (
+          {items.map((it, i) => isRetired(it) ? (
+            /* Pièce remplacée : elle n'a plus rien à saisir, seulement à partir. */
+            <div key={i} className="dea-item-card" style={{ opacity: 0.6 }}>
+              <div className="dea-item-head">
+                <span className="dea-item-index" style={{ textDecoration: 'line-through' }}>
+                  {savedLabel(it)}
+                </span>
+              </div>
+              <p className="form-hint">
+                Remplacée par la ligne #{replacedBy.get(it.savedId) + 1} : elle sera retirée du DAE
+                et mise hors service à l'enregistrement.
+              </p>
+            </div>
+          ) : (
             <div key={i} className="dea-item-card">
               <div className="dea-item-head">
                 <span className="dea-item-index">
@@ -384,6 +482,21 @@ export default function DeaItemsModal({
                     onChange={e => setItem(i, 'expiryDate', e.target.value)} />
                   <ExpiryHint value={it.expiryDate} />
                 </div>
+
+                {/* Nouvelle pièce alors qu'il y en a déjà en place : remplace-t-elle
+                    l'une d'elles, ou s'ajoute-t-elle ? Proposé d'office, modifiable. */}
+                {!it.saved && items.some(r => r.saved) && (
+                  <div className="form-group dea-item-grid-wide">
+                    <label className="form-label">Remplace</label>
+                    <select className="form-input form-input--plain"
+                      value={it.replaces || ''}
+                      onChange={e => setReplaces(i, e.target.value || null)}>
+                      <option value="">Aucune — pièce ajoutée</option>
+                      {items.filter(r => r.saved && (!replacedBy.has(r.savedId) || replacedBy.get(r.savedId) === i))
+                        .map(r => <option key={r.savedId} value={r.savedId}>{savedLabel(r)}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 {kind === 'electrodes' ? (
                   <div className="form-group">
